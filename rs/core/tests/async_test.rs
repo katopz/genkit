@@ -23,6 +23,7 @@ use std::sync::Arc;
 use std::time::Duration;
 use tokio::time::sleep;
 
+#[cfg(test)]
 mod test {
     use crate::*;
 

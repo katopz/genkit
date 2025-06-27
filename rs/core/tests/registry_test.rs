@@ -67,6 +67,8 @@ impl Plugin for MockPlugin {
         Ok(())
     }
 }
+
+#[cfg(test)]
 mod test {
     use crate::*;
     #[tokio::test]

@@ -30,6 +30,7 @@ struct TestStreamChunk {
     count: i32,
 }
 
+#[cfg(test)]
 mod test {
     use crate::*;
 

@@ -33,6 +33,7 @@ struct ComplexStruct {
     date: String,
 }
 
+#[cfg(test)]
 mod test {
     use crate::*;
 

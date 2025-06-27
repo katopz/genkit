@@ -36,6 +36,7 @@ fn test_request(key: Option<&str>) -> RequestData {
     }
 }
 
+#[cfg(test)]
 mod test {
     use crate::*;
     #[tokio::test]

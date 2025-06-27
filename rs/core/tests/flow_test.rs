@@ -59,6 +59,8 @@ async fn run_test_flow(
     };
     flow.func.run(input, args).await
 }
+
+#[cfg(test)]
 mod test {
     use crate::*;
     #[tokio::test]
