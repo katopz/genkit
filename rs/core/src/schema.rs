@@ -20,13 +20,13 @@
 
 use crate::error::{Error, Result};
 use crate::registry::Registry;
-use schemars::{schema::RootSchema, JsonSchema};
+use jsonschema::Draft;
+use schemars::{JsonSchema, Schema};
 use serde::de::DeserializeOwned;
 use serde::Serialize;
 use serde_json::Value;
 use std::fmt::{self, Debug, Display};
 use thiserror::Error as ThisError;
-
 /// An error that occurs during schema validation.
 ///
 /// Contains detailed information about the validation failures, the data that
@@ -35,7 +35,7 @@ use thiserror::Error as ThisError;
 pub struct ValidationError {
     errors: Vec<ValidationErrorDetail>,
     data: Value,
-    schema: RootSchema,
+    schema: Schema,
 }
 
 impl Display for ValidationError {
@@ -58,7 +58,7 @@ impl Display for ValidationError {
 }
 
 impl ValidationError {
-    pub fn new(errors: Vec<ValidationErrorDetail>, data: Value, schema: RootSchema) -> Self {
+    pub fn new(errors: Vec<ValidationErrorDetail>, data: Value, schema: Schema) -> Self {
         Self {
             errors,
             data,
@@ -93,13 +93,13 @@ impl Display for ValidationErrorDetail {
 #[derive(Clone)]
 pub enum ProvidedSchema {
     /// A schema derived from a Rust type implementing `JsonSchema`.
-    FromType(RootSchema),
+    FromType(Schema),
     /// A raw JSON schema value.
     Raw(Value),
 }
 
 /// Generates a `RootSchema` for a given type that implements `JsonSchema`.
-pub fn schema_for<T: JsonSchema>() -> RootSchema {
+pub fn schema_for<T: JsonSchema>() -> Schema {
     schemars::schema_for!(T)
 }
 
@@ -124,11 +124,15 @@ pub fn parse_schema<T: DeserializeOwned>(data: Value, schema: ProvidedSchema) ->
         ProvidedSchema::Raw(value) => value.clone(),
     };
 
-    let compiled_schema = jsonschema::JSONSchema::compile(&schema_value)
-        .map_err(|e| Error::new_internal(format!("Failed to compile schema: {}", e)))?;
+    let validator = jsonschema::options()
+        .with_draft(Draft::Draft202012)
+        .build(&schema_value)
+        .map_err(|e| Error::new_internal(format!("Invalid schema: {}", e)))?;
 
-    if let Err(errors) = compiled_schema.validate(&data) {
+    let errors: Vec<_> = validator.iter_errors(&data).collect();
+    if !errors.is_empty() {
         let details = errors
+            .into_iter()
             .map(|e| ValidationErrorDetail {
                 path: e.instance_path.to_string(),
                 message: e.to_string(),
@@ -161,7 +165,7 @@ pub fn define_schema<T: JsonSchema + 'static>(_registry: &mut Registry, _name: &
 ///
 /// This is a placeholder for functionality that will be implemented within the `Registry`.
 #[doc(hidden)]
-pub fn define_json_schema(_registry: &mut Registry, _name: &str, _json_schema: RootSchema) {
+pub fn define_json_schema(_registry: &mut Registry, _name: &str, _json_schema: Schema) {
     unimplemented!("define_json_schema is not yet implemented");
 }
 

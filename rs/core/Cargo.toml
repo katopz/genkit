@@ -17,17 +17,17 @@ serde      = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
 
 # JSON Schema generation
-jsonschema = "0.17"
-schemars   = "0.8"
+jsonschema = "0.30"
+schemars   = "1.0"
 
 # Tracing and Telemetry
-opentelemetry      = { version = "0.22" }
-opentelemetry_sdk  = { version = "0.22", features = ["rt-tokio"] }
+opentelemetry      = { version = "0.30" }
+opentelemetry_sdk  = { version = "0.30", features = ["rt-tokio"] }
 tracing            = "0.1"
 tracing-subscriber = "0.3"
 
 # Error handling
-thiserror = "1.0"
+thiserror = "2.0"
 
 # Async traits
 async-trait = "0.1"

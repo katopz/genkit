@@ -17,10 +17,10 @@
 //! This module provides shared utilities for integration tests, such as
 //! mock telemetry exporters.
 
-use async_trait::async_trait;
-use futures::future::BoxFuture;
-use opentelemetry_sdk::export::trace::{ExportResult, SpanData, SpanExporter};
+use opentelemetry_sdk::error::OTelSdkError;
+use opentelemetry_sdk::trace::{SpanData, SpanExporter};
 use std::fmt::Debug;
+
 use std::sync::{Arc, Mutex};
 
 /// A simple `SpanExporter` that stores exported spans in memory for inspection.
@@ -56,21 +56,22 @@ impl TestSpanExporter {
     }
 }
 
-#[async_trait]
 impl SpanExporter for TestSpanExporter {
     /// Exports a batch of spans. This implementation stores them in a shared vector.
-    fn export(&mut self, batch: Vec<SpanData>) -> BoxFuture<'static, ExportResult> {
+    async fn export(&self, batch: Vec<SpanData>) -> Result<(), OTelSdkError> {
         if let Ok(mut spans) = self.exported_spans.lock() {
             spans.extend(batch);
         }
-        Box::pin(async { Ok(()) })
+        Ok(())
     }
 
     /// Shuts down the exporter. This is a no-op for the test exporter.
-    fn shutdown(&mut self) {}
+    fn shutdown(&mut self) -> Result<(), OTelSdkError> {
+        Ok(())
+    }
 
     /// Flushes any buffered spans. This is a no-op for the test exporter.
-    fn force_flush(&mut self) -> BoxFuture<'static, ExportResult> {
-        Box::pin(async { Ok(()) })
+    fn force_flush(&mut self) -> Result<(), OTelSdkError> {
+        Ok(())
     }
 }

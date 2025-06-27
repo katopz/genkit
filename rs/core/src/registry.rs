@@ -120,6 +120,7 @@ struct RegistryState {
     actions: HashMap<String, Arc<dyn ErasedAction>>,
     plugins: HashMap<String, Arc<dyn Plugin>>,
     schemas: HashMap<String, schema::ProvidedSchema>,
+    values: HashMap<String, HashMap<String, Arc<dyn Any + Send + Sync>>>,
     parent: Option<Registry>,
 }
 
@@ -130,6 +131,7 @@ impl Debug for Registry {
             .field("actions", &state.actions.keys())
             .field("plugins", &state.plugins.keys())
             .field("schemas", &state.schemas.keys())
+            .field("values", &state.values.keys())
             .field("parent", &state.parent)
             .finish()
     }
@@ -207,6 +209,40 @@ impl Registry {
 
         state.plugins.insert(name.to_string(), plugin);
         Ok(())
+    }
+
+    /// Registers a generic value with the registry, keyed by type and name.
+    pub fn register_value<T: Any + Send + Sync>(&mut self, value_type: &str, name: &str, value: T) {
+        let mut state = self.state.lock().unwrap();
+        state
+            .values
+            .entry(value_type.to_string())
+            .or_default()
+            .insert(name.to_string(), Arc::new(value));
+    }
+
+    /// Looks up a generic value from the registry.
+    pub async fn lookup_value<T: Any + Send + Sync>(
+        &self,
+        value_type: &str,
+        name: &str,
+    ) -> Option<Arc<T>> {
+        let parent = {
+            let state = self.state.lock().unwrap();
+            if let Some(values_of_type) = state.values.get(value_type) {
+                if let Some(value) = values_of_type.get(name) {
+                    // Attempt to downcast the `Arc<dyn Any>` to `Arc<T>`.
+                    return value.clone().downcast().ok();
+                }
+            }
+            state.parent.clone()
+        };
+
+        if let Some(parent) = parent {
+            return Box::pin(parent.lookup_value(value_type, name)).await;
+        }
+
+        None
     }
 }
 

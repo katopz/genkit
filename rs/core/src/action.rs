@@ -30,7 +30,7 @@ use crate::schema::schema_for;
 use crate::tracing::{self, TraceContext};
 use async_trait::async_trait;
 use futures::{Future, Stream, StreamExt};
-use schemars::{schema::RootSchema, JsonSchema};
+use schemars::{JsonSchema, Schema};
 use serde::{de::DeserializeOwned, Serialize};
 use serde_json::Value;
 use std::collections::HashMap;
@@ -45,9 +45,9 @@ pub struct ActionMetadata {
     pub action_type: ActionType,
     pub name: String,
     pub description: Option<String>,
-    pub input_schema: Option<RootSchema>,
-    pub output_schema: Option<RootSchema>,
-    pub stream_schema: Option<RootSchema>,
+    pub input_schema: Option<Schema>,
+    pub output_schema: Option<Schema>,
+    pub stream_schema: Option<Schema>,
     pub metadata: HashMap<String, Value>,
 }
 
