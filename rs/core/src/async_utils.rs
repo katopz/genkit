@@ -141,23 +141,22 @@ impl<T: Send> Stream for ChannelStream<T> {
     fn poll_next(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
         let mut state = self.state.lock().unwrap();
 
-        // If an error was sent, yield it immediately.
-        if let Some(err) = state.error.take() {
-            return Poll::Ready(Some(Err(err)));
-        }
-
-        // If there's an item in the buffer, yield it.
+        // Prioritize draining the buffer before propagating an error.
         if let Some(value) = state.buffer.pop_front() {
             return Poll::Ready(Some(Ok(value)));
         }
 
-        // If the buffer is empty and the channel is closed, the stream is finished.
+        // If the buffer is empty, check for an error.
+        if let Some(err) = state.error.take() {
+            return Poll::Ready(Some(Err(err)));
+        }
+
+        // If the buffer and error are empty, check if the stream is closed.
         if state.closed {
             return Poll::Ready(None);
         }
 
-        // Otherwise, the buffer is empty but the channel is still open.
-        // Store the waker so the `send`/`close`/`error` methods can wake this task.
+        // Otherwise, the stream is open but awaiting data.
         state.waker = Some(cx.waker().clone());
         Poll::Pending
     }

@@ -67,88 +67,92 @@ impl Plugin for MockPlugin {
         Ok(())
     }
 }
+mod test {
+    use crate::*;
+    #[tokio::test]
+    async fn test_plugin_initialization_on_lookup() {
+        let mut registry = Registry::new();
+        let plugin = Arc::new(MockPlugin::new("foo"));
+        let was_initialized = plugin.initialized.clone();
 
-#[tokio::test]
-async fn test_plugin_initialization_on_lookup() {
-    let mut registry = Registry::new();
-    let plugin = Arc::new(MockPlugin::new("foo"));
-    let was_initialized = plugin.initialized.clone();
+        registry.register_plugin(plugin.clone()).await.unwrap();
 
-    registry.register_plugin(plugin.clone()).await.unwrap();
+        assert!(
+            !was_initialized.load(Ordering::SeqCst),
+            "Plugin should not be initialized yet"
+        );
 
-    assert!(
-        !was_initialized.load(Ordering::SeqCst),
-        "Plugin should not be initialized yet"
-    );
+        // The Rust implementation initializes plugins as soon as they are registered,
+        // which differs from the lazy initialization in the TS version.
+        // Let's adapt the test to reflect this. We'll initialize explicitly for clarity.
+        plugin.initialize(&mut registry).await.unwrap();
+        assert!(
+            was_initialized.load(Ordering::SeqCst),
+            "Plugin should be initialized after explicit call"
+        );
 
-    // The Rust implementation initializes plugins as soon as they are registered,
-    // which differs from the lazy initialization in the TS version.
-    // Let's adapt the test to reflect this. We'll initialize explicitly for clarity.
-    plugin.initialize(&mut registry).await.unwrap();
-    assert!(
-        was_initialized.load(Ordering::SeqCst),
-        "Plugin should be initialized after explicit call"
-    );
+        // Now, lookup the action that the plugin should have registered.
+        let looked_up = registry.lookup_action("/model/foo/model").await;
+        assert!(
+            looked_up.is_some(),
+            "Action should be found after plugin initialization"
+        );
+    }
 
-    // Now, lookup the action that the plugin should have registered.
-    let looked_up = registry.lookup_action("/model/foo/model").await;
-    assert!(
-        looked_up.is_some(),
-        "Action should be found after plugin initialization"
-    );
-}
+    #[tokio::test]
+    async fn test_parent_child_registry_lookup() {
+        let mut parent_registry = Registry::new();
+        let parent_action =
+            ActionBuilder::<(), (), (), _>::new(ActionType::Util, "parentUtil", |_, _| async {
+                Ok(())
+            })
+            .build(&mut parent_registry);
+        parent_registry.register_action(parent_action).unwrap();
 
-#[tokio::test]
-async fn test_parent_child_registry_lookup() {
-    let mut parent_registry = Registry::new();
-    let parent_action =
-        ActionBuilder::<(), (), (), _>::new(ActionType::Util, "parentUtil", |_, _| async {
-            Ok(())
-        })
-        .build(&mut parent_registry);
-    parent_registry.register_action(parent_action).unwrap();
-
-    let mut child_registry = Registry::with_parent(&parent_registry);
-    let child_action =
-        ActionBuilder::<(), (), (), _>::new(ActionType::Util, "childUtil", |_, _| async { Ok(()) })
+        let mut child_registry = Registry::with_parent(&parent_registry);
+        let child_action =
+            ActionBuilder::<(), (), (), _>::new(ActionType::Util, "childUtil", |_, _| async {
+                Ok(())
+            })
             .build(&mut child_registry);
-    child_registry.register_action(child_action).unwrap();
+        child_registry.register_action(child_action).unwrap();
 
-    // Child can find its own action
-    assert!(child_registry
-        .lookup_action("/util/childutil")
-        .await
-        .is_some());
+        // Child can find its own action
+        assert!(child_registry
+            .lookup_action("/util/childutil")
+            .await
+            .is_some());
 
-    // Child can find parent's action by falling back
-    assert!(child_registry
-        .lookup_action("/util/parentutil")
-        .await
-        .is_some());
+        // Child can find parent's action by falling back
+        assert!(child_registry
+            .lookup_action("/util/parentutil")
+            .await
+            .is_some());
 
-    // Parent cannot find child's action
-    assert!(parent_registry
-        .lookup_action("/util/childutil")
-        .await
-        .is_none());
-}
+        // Parent cannot find child's action
+        assert!(parent_registry
+            .lookup_action("/util/childutil")
+            .await
+            .is_none());
+    }
 
-#[tokio::test]
-async fn test_register_and_lookup_action() {
-    let mut registry = Registry::new();
-    let test_action = ActionBuilder::<TestInput, TestOutput, (), _>::new(
-        ActionType::Flow,
-        "myFlow",
-        |_, _| async { Ok(TestOutput {}) },
-    )
-    .build(&mut registry);
+    #[tokio::test]
+    async fn test_register_and_lookup_action() {
+        let mut registry = Registry::new();
+        let test_action = ActionBuilder::<TestInput, TestOutput, (), _>::new(
+            ActionType::Flow,
+            "myFlow",
+            |_, _| async { Ok(TestOutput {}) },
+        )
+        .build(&mut registry);
 
-    registry.register_action(test_action).unwrap();
+        registry.register_action(test_action).unwrap();
 
-    let key = "/flow/myflow";
-    let looked_up = registry.lookup_action(key).await;
-    assert!(looked_up.is_some());
-    let looked_up_action = looked_up.unwrap();
-    assert_eq!(looked_up_action.metadata().name, "myFlow");
-    assert_eq!(looked_up_action.metadata().action_type, ActionType::Flow);
+        let key = "/flow/myflow";
+        let looked_up = registry.lookup_action(key).await;
+        assert!(looked_up.is_some());
+        let looked_up_action = looked_up.unwrap();
+        assert_eq!(looked_up_action.metadata().name, "myFlow");
+        assert_eq!(looked_up_action.metadata().action_type, ActionType::Flow);
+    }
 }
