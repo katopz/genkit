@@ -89,6 +89,7 @@ impl Display for ValidationErrorDetail {
 
 /// A wrapper for different ways a schema can be provided.
 /// In Rust, this is simplified as we primarily derive schemas from types.
+#[allow(clippy::large_enum_variant)]
 #[derive(Clone)]
 pub enum ProvidedSchema {
     /// A schema derived from a Rust type implementing `JsonSchema`.
