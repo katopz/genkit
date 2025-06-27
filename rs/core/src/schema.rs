@@ -98,7 +98,7 @@ pub enum ProvidedSchema {
     Raw(Value),
 }
 
-/// Generates a `RootSchema` for a given type that implements `JsonSchema`.
+/// Generates a `Schema` for a given type that implements `JsonSchema`.
 pub fn schema_for<T: JsonSchema>() -> Schema {
     schemars::schema_for!(T)
 }
