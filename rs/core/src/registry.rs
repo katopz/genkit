@@ -154,14 +154,19 @@ impl Registry {
 
     /// Looks up an action by its full key (e.g., "/flow/myflow").
     pub async fn lookup_action(&self, key: &str) -> Option<Arc<dyn ErasedAction>> {
-        let state = self.state.lock().unwrap();
-        if let Some(action) = state.actions.get(key) {
-            return Some(action.clone());
-        }
-        if let Some(parent) = &state.parent {
+        let parent = {
+            let state = self.state.lock().unwrap();
+            if let Some(action) = state.actions.get(key) {
+                return Some(action.clone());
+            }
+            state.parent.clone()
+        };
+
+        if let Some(parent) = parent {
             // Box the future to break the recursive type definition.
             return Box::pin(parent.lookup_action(key)).await;
         }
+
         None
     }
 

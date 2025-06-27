@@ -34,7 +34,7 @@ pub enum Error {
     /// An error that is safe to return to the end-user in an API response.
     /// This directly maps to `UserFacingError` from the TypeScript implementation.
     #[error("{0}")]
-    UserFacing(#[from] Status),
+    UserFacing(Status),
 
     /// An internal framework error. Details of this error should generally not
     /// be exposed to external users to avoid leaking implementation details.
@@ -53,7 +53,7 @@ pub enum Error {
 
     /// An error originating from schema validation failure.
     #[error(transparent)]
-    Validation(#[from] ValidationError),
+    Validation(Box<ValidationError>),
 }
 
 impl Error {

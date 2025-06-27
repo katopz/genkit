@@ -137,11 +137,11 @@ pub fn parse_schema<T: DeserializeOwned>(data: Value, schema: ProvidedSchema) ->
             ProvidedSchema::FromType(rs) => rs,
             ProvidedSchema::Raw(val) => serde_json::from_value(val).unwrap_or_default(),
         };
-        return Err(Error::Validation(ValidationError::new(
+        return Err(Error::Validation(Box::new(ValidationError::new(
             details,
             data.clone(),
             root_schema,
-        )));
+        ))));
     }
 
     serde_json::from_value(data)
