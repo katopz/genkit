@@ -20,6 +20,8 @@
 use crate::action::TelemetryInfo;
 use crate::error::Result;
 use crate::telemetry::TelemetryConfig;
+use serde_json::Value;
+use std::collections::HashMap;
 use std::future::Future;
 
 /// Represents the OpenTelemetry trace context passed to actions and flows.
@@ -37,8 +39,13 @@ pub struct TraceContext {
 ///
 /// # Arguments
 /// * `_name` - The name for the new span.
+/// * `_attrs` - Optional attributes for the span.
 /// * `f` - The asynchronous closure to execute within the span.
-pub async fn in_new_span<F, Fut, T>(_name: String, f: F) -> Result<(T, TelemetryInfo)>
+pub async fn in_new_span<F, Fut, T>(
+    _name: String,
+    _attrs: Option<HashMap<String, Value>>,
+    f: F,
+) -> Result<(T, TelemetryInfo)>
 where
     F: FnOnce(TraceContext) -> Fut,
     Fut: Future<Output = Result<T>> + Send,

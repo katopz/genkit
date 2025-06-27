@@ -1,0 +1,34 @@
+[package]
+authors     = ["Genkit Team <genkit-dev@google.com>"]
+description = "Genkit AI framework generative AI APIs."
+edition     = "2021"
+license     = "Apache-2.0"
+name        = "genkit-ai"
+repository  = "https://github.com/firebase/genkit"
+version     = "0.1.0"
+
+[dependencies]
+# Local Genkit dependencies
+genkit-core = { path = "../core" }
+
+# Async runtime
+async-trait = "0.1"
+futures     = "0.3"
+tokio       = { version = "1", features = ["full"] }
+
+# Serialization and Deserialization
+json5      = "0.4"                                      # For parsing lenient JSON, equivalent to json5 js lib
+schemars   = "1.0"                                      # For generating JSON schemas from structs
+serde      = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+
+# Error handling
+thiserror = "2.0"
+
+# Other utilities
+colored     = "3.0"                                           # For terminal colors, like colorette
+uritemplate = "0.1"                                           # For RFC 6570 URI Templates
+uuid        = { version = "1.17", features = ["v4", "serde"] } # For generating UUIDs
+
+[dev-dependencies]
+tokio-test = "0.4"

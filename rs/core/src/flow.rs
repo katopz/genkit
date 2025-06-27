@@ -80,7 +80,7 @@ where
     // defining instrumented steps. The `map` at the end unwraps the
     // (T, TelemetryInfo) tuple from `in_new_span`, as `run`'s public API
     // only exposes the business logic result `T`.
-    genkit_tracing::in_new_span(name.to_string(), |_trace_context| async {
+    genkit_tracing::in_new_span(name.to_string(), None, |_trace_context| async {
         // TODO: Add attributes to the span, e.g., genkit:type = "flowStep".
         // This would require access to the current OpenTelemetry span.
         let result = func().await;

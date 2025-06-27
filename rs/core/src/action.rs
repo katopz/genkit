@@ -156,7 +156,7 @@ where
         };
 
         let (result, telemetry) =
-            tracing::in_new_span(self.meta.name.clone(), |trace_context| async {
+            tracing::in_new_span(self.meta.name.clone(), None, |trace_context| async {
                 let (chunk_tx, _chunk_rx) = channel();
                 let args = ActionFnArg {
                     streaming_requested: false,
@@ -188,24 +188,25 @@ where
         let meta_name = self.meta.name.clone();
 
         let future = Box::pin(async move {
-            let (result, _telemetry) = tracing::in_new_span(meta_name, |trace_context| async {
-                let args = ActionFnArg {
-                    streaming_requested: true,
-                    chunk_sender: chunk_tx,
-                    context: context.clone(),
-                    trace: trace_context,
-                    abort_signal: CancellationToken::new(),
-                };
+            let (result, _telemetry) =
+                tracing::in_new_span(meta_name, None, |trace_context| async {
+                    let args = ActionFnArg {
+                        streaming_requested: true,
+                        chunk_sender: chunk_tx,
+                        context: context.clone(),
+                        trace: trace_context,
+                        abort_signal: CancellationToken::new(),
+                    };
 
-                let fut = func.run(input, args);
+                    let fut = func.run(input, args);
 
-                if let Some(ctx) = context {
-                    context::run_with_context(ctx, fut).await
-                } else {
-                    fut.await
-                }
-            })
-            .await?;
+                    if let Some(ctx) = context {
+                        context::run_with_context(ctx, fut).await
+                    } else {
+                        fut.await
+                    }
+                })
+                .await?;
 
             // TODO: Add output schema validation.
             Ok(result)
