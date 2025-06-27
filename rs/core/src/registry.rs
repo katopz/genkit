@@ -27,7 +27,8 @@ use crate::action::{Action, ActionMetadata};
 use crate::error::{Error, Result};
 use crate::schema;
 use async_trait::async_trait;
-use serde::{Deserialize, Serialize};
+use schemars::JsonSchema;
+use serde::{de::DeserializeOwned, Deserialize, Serialize};
 use serde_json::Value;
 use std::any::Any;
 use std::collections::HashMap;
@@ -79,6 +80,28 @@ pub trait Plugin: Send + Sync {
     fn name(&self) -> &'static str;
     /// Initializes the plugin, registering any actions or other components with the registry.
     async fn initialize(&self, registry: &mut Registry) -> Result<()>;
+}
+
+// A concrete implementation of `ErasedAction` is needed to store our test
+// actions in the registry.
+#[async_trait]
+impl<I, O, S> ErasedAction for Action<I, O, S>
+where
+    I: DeserializeOwned + JsonSchema + Send + Sync + 'static,
+    O: Serialize + Send + Sync + 'static,
+    S: Send + Sync + 'static,
+{
+    async fn run_http(&self, _input: Value) -> Result<Value> {
+        unimplemented!("run_http not implemented for tests");
+    }
+
+    fn metadata(&self) -> &ActionMetadata {
+        &self.meta
+    }
+
+    fn as_any(&self) -> &dyn Any {
+        self
+    }
 }
 
 /// The central registry for Genkit components.
@@ -191,9 +214,7 @@ impl Registry {
 mod tests {
     use super::*;
     use crate::action::ActionBuilder;
-    use crate::error::Result;
     use schemars::JsonSchema;
-    use serde::de::DeserializeOwned;
 
     #[derive(Serialize, Deserialize, JsonSchema, Debug, PartialEq)]
     struct TestInput {
@@ -202,26 +223,6 @@ mod tests {
     #[derive(Serialize, Deserialize, JsonSchema, Debug, PartialEq)]
     struct TestOutput {
         value: String,
-    }
-
-    #[async_trait]
-    impl<I, O, S> ErasedAction for Action<I, O, S>
-    where
-        I: DeserializeOwned + JsonSchema + Send + Sync + 'static,
-        O: Serialize + Send + Sync + 'static,
-        S: Send + Sync + 'static,
-    {
-        async fn run_http(&self, _input: Value) -> Result<Value> {
-            unimplemented!("run_http not implemented for tests");
-        }
-
-        fn metadata(&self) -> &ActionMetadata {
-            &self.meta
-        }
-
-        fn as_any(&self) -> &dyn Any {
-            self
-        }
     }
 
     #[tokio::test]
