@@ -17,7 +17,7 @@
 //! This crate provides the generative AI APIs for the Genkit framework in Rust.
 //! It includes definitions for models, embedders, retrievers, and other AI components.
 
-// Declare modules corresponding to the files we will create.
+// Declare all modules that make up the library.
 pub mod chat;
 pub mod check_operation;
 pub mod document;
@@ -38,13 +38,48 @@ pub mod testing;
 pub mod tool;
 pub mod types;
 
-// Re-export key components for easier access.
-pub use document::Document;
-pub use embedder::{embed, EmbedderAction as Embedder, EmbedderRef};
-pub use generate::{
-    generate, generate_stream, GenerateOptions, GenerateResponse, GenerateStreamResponse,
+// Re-export the public API, combining exports from the old lib.rs and index.rs.
+
+pub use self::check_operation::check_operation;
+pub use self::document::{Document, Media, Part, ToolRequest, ToolResponse};
+pub use self::embedder::{
+    define_embedder, embed, embedder_ref, EmbedParams, EmbedRequest, EmbedResponse, EmbedderAction,
+    EmbedderArgument, EmbedderInfo, EmbedderRef, Embedding, EmbeddingBatch,
 };
-pub use model::{Model, ModelRef};
-pub use prompt::{define_prompt, prompt, ExecutablePrompt};
-pub use retriever::{retrieve, RetrieverAction as Retriever, RetrieverRef};
-pub use tool::{define_tool, ToolAction as Tool};
+pub use self::evaluator::{
+    define_evaluator, evaluate, evaluator_ref, BaseDataPoint, BaseEvalDataPoint, Dataset,
+    EvalResponse, EvalResponses, EvalStatusEnum, EvaluatorAction, EvaluatorArgument, EvaluatorInfo,
+    EvaluatorParams, EvaluatorRef, Score,
+};
+pub use self::generate::{
+    generate, generate_stream, to_generate_request, GenerateOptions, GenerateResponse,
+    GenerateResponseChunk, GenerateStreamResponse, GenerationBlockedError, GenerationResponseError,
+    OutputOptions, ToolChoice,
+};
+pub use self::message::{Message, MessageData, Role};
+pub use self::model::{
+    define_model, model_ref, CandidateData, FinishReason, GenerateRequest,
+    GenerateResponseChunkData, GenerateResponseData, GenerationCommonConfig, GenerationUsage,
+    Model, ModelAction, ModelInfo, ModelRef,
+};
+pub use self::prompt::{
+    define_prompt, is_executable_prompt, prompt, ExecutablePrompt, PromptConfig,
+    PromptGenerateOptions,
+};
+pub use self::reranker::{
+    define_reranker, rerank, reranker_ref, RankedDocument, RerankerAction, RerankerArgument,
+    RerankerInfo, RerankerParams, RerankerRef,
+};
+pub use self::resource::{
+    define_resource, find_matching_resource, ResourceAction, ResourceInput, ResourceOptions,
+    ResourceOutput,
+};
+pub use self::retriever::{
+    define_indexer, define_retriever, index, indexer_ref, retrieve, retriever_ref, IndexerAction,
+    IndexerArgument, IndexerInfo, IndexerParams, IndexerRef, RetrieverAction, RetrieverArgument,
+    RetrieverInfo, RetrieverParams, RetrieverRef,
+};
+pub use self::tool::{
+    define_tool, to_tool_definition, ToolAction, ToolArgument, ToolConfig, ToolDefinition,
+};
+pub use self::types::{to_tool_wire_format, LlmResponse, LlmStats, Tool, ToolCall};
