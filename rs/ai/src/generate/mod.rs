@@ -27,20 +27,26 @@ pub mod response;
 pub use self::chunk::GenerateResponseChunk;
 pub use self::response::GenerateResponse;
 
-use crate::document::{Document, Part};
+use crate::document::{Document, Part, ToolRequestPart, ToolResponsePart};
 use crate::formats::FormatterConfig;
+use crate::generate::action::ModelMiddleware;
 use crate::message::{MessageData, Role};
-use crate::model::GenerateRequest; // Assuming Model is a struct/enum representing a model reference
+use crate::model::GenerateRequest;
 use crate::tool::{self, ToolArgument};
 use futures_util::stream::Stream;
+use genkit_core::context::ActionContext;
 use genkit_core::error::{Error, Result};
 use genkit_core::registry::Registry;
+use genkit_core::status::StatusCode;
 use schemars::JsonSchema;
 use serde::{de::DeserializeOwned, Deserialize, Serialize};
 use serde_json::Value;
 use std::fmt;
+use std::marker::PhantomData;
 use std::pin::Pin;
 use std::sync::Arc;
+use tokio::sync::mpsc;
+use tokio_stream::wrappers::ReceiverStream;
 
 /// Specifies how tools should be called by the model.
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, PartialEq, Eq)]
@@ -50,6 +56,9 @@ pub enum ToolChoice {
     Required,
     None,
 }
+
+/// A callback that receives streaming chunks of a specified type.
+pub type OnChunkCallback<O> = Arc<dyn Fn(GenerateResponseChunk<O>) -> Result<()> + Send + Sync>;
 
 /// Configuration for the desired output of a generation request.
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, PartialEq, Default)]
@@ -69,10 +78,25 @@ pub struct OutputOptions {
     pub constrained: Option<bool>,
 }
 
-/// Options for a `generate` call.
-#[derive(Debug, Clone, Default, Serialize, Deserialize, JsonSchema)]
+/// Configures how to resume generation after an interrupt.
+#[derive(Clone, Default, Debug, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "camelCase")]
-pub struct GenerateOptions {
+pub struct ResumeOptions {
+    /// A list of `toolResponse` parts corresponding to interrupt `toolRequest` parts.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub respond: Option<Vec<ToolResponsePart>>,
+    /// A list of `toolRequest` parts to re-run.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub restart: Option<Vec<ToolRequestPart>>,
+    /// Additional metadata to annotate the created tool message with.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub metadata: Option<Value>,
+}
+
+/// Options for a `generate` call. This struct is now generic to support typed `on_chunk` callbacks.
+#[derive(Clone, Deserialize, JsonSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct GenerateOptions<O = Value> {
     pub model: Option<crate::model::Model>,
     pub system: Option<Vec<Part>>,
     pub prompt: Option<Vec<Part>>,
@@ -82,8 +106,43 @@ pub struct GenerateOptions {
     pub tool_choice: Option<ToolChoice>,
     pub config: Option<Value>,
     pub output: Option<OutputOptions>,
+    pub resume: Option<ResumeOptions>,
     pub max_turns: Option<u32>,
     pub return_tool_requests: Option<bool>,
+    /// Middleware to be used with this model call.
+    #[serde(skip)]
+    pub r#use: Option<Vec<ModelMiddleware>>,
+    /// Additional context (data, like e.g. auth) to be passed down to tools, prompts and other sub actions.
+    #[serde(skip)]
+    pub context: Option<ActionContext>,
+    /// When provided, models supporting streaming will call this callback with chunks.
+    #[serde(skip)]
+    pub on_chunk: Option<OnChunkCallback<O>>,
+    #[serde(skip)]
+    pub _marker: PhantomData<O>,
+}
+
+impl<O> Default for GenerateOptions<O> {
+    fn default() -> Self {
+        Self {
+            model: Default::default(),
+            system: Default::default(),
+            prompt: Default::default(),
+            docs: Default::default(),
+            messages: Default::default(),
+            tools: Default::default(),
+            tool_choice: Default::default(),
+            config: Default::default(),
+            output: Default::default(),
+            resume: Default::default(),
+            max_turns: Default::default(),
+            return_tool_requests: Default::default(),
+            r#use: Default::default(),
+            context: Default::default(),
+            on_chunk: Default::default(),
+            _marker: PhantomData,
+        }
+    }
 }
 
 /// Base generate options used by `Chat`.
@@ -106,66 +165,134 @@ pub struct GenerateStreamResponse<O = serde_json::Value> {
     pub response: tokio::task::JoinHandle<Result<GenerateResponse<O>>>,
 }
 
-/// An error that occurs during generation.
+/// An error that occurs during generation, containing the full response for inspection.
 #[derive(Debug)]
-pub struct GenerationResponseError {
-    pub response: GenerateResponse,
-    pub source_error: Error,
+pub struct GenerationResponseError<O> {
+    pub response: GenerateResponse<O>,
+    pub message: String,
 }
 
-impl fmt::Display for GenerationResponseError {
+impl<O: fmt::Debug + Clone> fmt::Display for GenerationResponseError<O> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(
             f,
             "Generation failed: {}. Response: {:?}",
-            self.source_error, self.response
+            self.message, self.response
         )
     }
 }
 
-impl std::error::Error for GenerationResponseError {}
+impl<O: fmt::Debug + Clone + Send + Sync + 'static> std::error::Error
+    for GenerationResponseError<O>
+{
+}
 
-/// An error indicating the generation was blocked.
+impl<O: Serialize + Send + Sync + 'static> From<GenerationResponseError<O>> for Error {
+    fn from(err: GenerationResponseError<O>) -> Self {
+        let details = serde_json::to_value(&err.response).ok();
+        Error::new_user_facing(StatusCode::FailedPrecondition, err.message, details)
+    }
+}
+
+/// An error indicating the generation was blocked due to safety settings or other reasons.
 #[derive(Debug)]
-pub struct GenerationBlockedError(pub GenerationResponseError);
-impl fmt::Display for GenerationBlockedError {
+pub struct GenerationBlockedError<O>(pub GenerationResponseError<O>);
+
+impl<O: fmt::Debug + Clone> fmt::Display for GenerationBlockedError<O> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(f, "Generation blocked: {}", self.0)
     }
 }
-impl std::error::Error for GenerationBlockedError {}
+
+impl<O: fmt::Debug + Clone + Send + Sync + 'static> std::error::Error
+    for GenerationBlockedError<O>
+{
+}
+
+impl<O: Serialize + Send + Sync + 'static> From<GenerationBlockedError<O>> for Error {
+    fn from(err: GenerationBlockedError<O>) -> Self {
+        let details = serde_json::to_value(&err.0.response).ok();
+        Error::new_blocked_error(StatusCode::FailedPrecondition, err.0.message, details)
+    }
+}
 
 /// Generates content using a model.
 pub async fn generate<O>(
     registry: &Registry,
-    options: GenerateOptions,
+    mut options: GenerateOptions<O>,
 ) -> Result<GenerateResponse<O>>
 where
-    O: for<'de> DeserializeOwned + Send + Sync + 'static,
+    O: Clone
+        + Default
+        + for<'de> DeserializeOwned
+        + Serialize
+        + Send
+        + Sync
+        + 'static
+        + std::fmt::Debug,
 {
+    // The `on_chunk` callback is handled by `run_with_streaming_callback`, so we take it here.
+    let on_chunk_callback = options.on_chunk.take();
+    let registry_clone = registry.clone();
+
+    // The `run_with_streaming_callback` function from genkit-core would set the
+    // callback in a task-local context, which can then be retrieved by the model action.
+    // This is a placeholder for that logic.
     let helper_options = action::GenerateHelperOptions {
-        raw_request: options.clone(),
+        middleware: options.r#use.take().unwrap_or_default(),
+        raw_request: options,
         current_turn: 0,
         message_index: 0,
+        on_chunk: on_chunk_callback,
     };
-    action::generate_helper(Arc::new(registry.clone()), helper_options).await
+    action::generate_helper(Arc::new(registry_clone), helper_options).await
 }
 
 /// Generates content and streams the response.
 pub fn generate_stream<O>(
-    _registry: &Registry,
-    _options: GenerateOptions,
+    registry: &Registry,
+    options: GenerateOptions<O>,
 ) -> GenerateStreamResponse<O>
 where
-    O: for<'de> DeserializeOwned + Send + Sync + 'static,
+    O: Clone
+        + Default
+        + for<'de> DeserializeOwned
+        + Serialize
+        + Send
+        + Sync
+        + 'static
+        + std::fmt::Debug,
 {
-    unimplemented!();
+    let (tx, rx) = mpsc::channel(128);
+    let mut stream_options = options;
+
+    // Create a callback that sends chunks received from the generation logic
+    // into the sender part of our channel.
+    let on_chunk: OnChunkCallback<O> = Arc::new(move |chunk| {
+        // We use try_send to avoid blocking if the receiver is slow.
+        // If the receiver has been dropped, this will error, so we ignore it.
+        let _ = tx.try_send(Ok(chunk));
+        Ok(())
+    });
+
+    stream_options.on_chunk = Some(on_chunk);
+    let registry_clone = registry.clone();
+
+    let response_handle =
+        tokio::spawn(async move { generate(&registry_clone, stream_options).await });
+
+    let stream = ReceiverStream::new(rx);
+
+    GenerateStreamResponse {
+        stream: Box::pin(stream),
+        response: response_handle,
+    }
 }
 
 /// Converts `GenerateOptions` to a `GenerateRequest`.
-pub async fn to_generate_request(
+pub async fn to_generate_request<O>(
     registry: &Registry,
-    options: &GenerateOptions,
+    options: &GenerateOptions<O>,
 ) -> Result<GenerateRequest> {
     let mut messages: Vec<MessageData> = Vec::new();
     if let Some(system_parts) = &options.system {
@@ -197,27 +324,22 @@ pub async fn to_generate_request(
         Some(
             resolved_tools
                 .iter()
-                .map(|t| tool::to_tool_definition(t))
+                .map(|t| tool::to_tool_definition(t.as_ref()))
                 .collect::<Result<Vec<_>>>()?,
         )
     } else {
         None
     };
 
-    // This is a simplified version of the TS implementation that handles instruction injection.
     Ok(GenerateRequest {
         messages,
         config: options.config.clone(),
         tools: tool_definitions,
-        output: options.output.as_ref().map(|opts| FormatterConfig {
-            format: opts.format.clone(),
-            content_type: opts.content_type.clone(),
-            constrained: opts.constrained,
-            ..Default::default()
-        }),
+        output: options.output.clone(),
         docs: options.docs.clone(),
         tool_choice: options.tool_choice.clone(),
         max_turns: options.max_turns,
         return_tool_requests: options.return_tool_requests,
+        // The `resume` field is handled before this stage and is not part of the final model request.
     })
 }

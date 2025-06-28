@@ -19,7 +19,7 @@
 //! representing a single turn in a conversation with a generative model. It is
 //! the Rust equivalent of `message.ts`.
 
-use crate::document::{Part, ToolRequest, ToolResponse};
+use crate::document::{Media, Part, ToolRequest, ToolResponse};
 use crate::extract::extract_json;
 use genkit_core::error::{Error, Result};
 use schemars::JsonSchema;
@@ -145,6 +145,11 @@ where
             .iter()
             .filter_map(|part| part.reasoning.as_deref())
             .collect::<String>()
+    }
+
+    /// Returns the first `media` part found in the message, if any.
+    pub fn media(&self) -> Option<&Media> {
+        self.content.iter().find_map(|part| part.media.as_ref())
     }
 
     /// Extracts all `toolRequest` parts from the message.

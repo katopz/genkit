@@ -135,10 +135,40 @@ where
     O: Serialize + JsonSchema + Send + Sync + 'static,
     S: Serialize + JsonSchema + Send + 'static,
 {
-    /// Executes the action with a raw JSON value and returns the final result.
+    /// Executes the action with the given input and returns the final result.
     ///
     /// This is the primary method for non-streaming invocation. It handles
-    /// input parsing, context management, tracing, and output validation.
+    /// context management, tracing, and output validation.
+    pub async fn run(&self, input: I, context: Option<ActionContext>) -> Result<ActionResult<O>> {
+        let (result, telemetry) =
+            tracing::in_new_span(self.meta.name.clone(), None, |trace_context| async {
+                let (chunk_tx, _chunk_rx) = channel();
+                let args = ActionFnArg {
+                    streaming_requested: false,
+                    chunk_sender: chunk_tx,
+                    context: context.clone(),
+                    trace: trace_context,
+                    abort_signal: CancellationToken::new(),
+                };
+
+                let fut = self.func.run(input, args);
+
+                if let Some(ctx) = context {
+                    context::run_with_context(ctx, fut).await
+                } else {
+                    fut.await
+                }
+            })
+            .await?;
+
+        // TODO: Add output schema validation.
+
+        Ok(ActionResult { result, telemetry })
+    }
+
+    /// Executes the action with a raw JSON value, handling parsing.
+    ///
+    /// This is useful for invoking an action from a generic source, like an HTTP request.
     pub async fn run_http(
         &self,
         input: Value,
@@ -154,31 +184,7 @@ where
                 )
             })?,
         };
-
-        let (result, telemetry) =
-            tracing::in_new_span(self.meta.name.clone(), None, |trace_context| async {
-                let (chunk_tx, _chunk_rx) = channel();
-                let args = ActionFnArg {
-                    streaming_requested: false,
-                    chunk_sender: chunk_tx,
-                    context: context.clone(),
-                    trace: trace_context,
-                    abort_signal: CancellationToken::new(),
-                };
-
-                let fut = self.func.run(parsed_input, args);
-
-                if let Some(ctx) = context {
-                    context::run_with_context(ctx, fut).await
-                } else {
-                    fut.await
-                }
-            })
-            .await?;
-
-        // TODO: Add output schema validation.
-
-        Ok(ActionResult { result, telemetry })
+        self.run(parsed_input, context).await
     }
 
     /// Executes the action and provides a streaming response.

@@ -18,18 +18,22 @@
 //! models. It is the Rust equivalent of `model.ts` and `model-types.ts`.
 
 use crate::document::{Document, Part};
-use crate::generate::ToolChoice;
-use crate::message::MessageData;
+use crate::generate::{OutputOptions, ToolChoice};
+use crate::message::{MessageData, Role};
 use crate::tool::ToolDefinition;
+use async_trait::async_trait;
 use genkit_core::action::{Action, ActionBuilder};
 use genkit_core::background_action::Operation;
 use genkit_core::error::Result;
+use genkit_core::registry::ErasedAction;
 use genkit_core::registry::{ActionType, Registry};
 use schemars::{self, JsonSchema};
 use serde::{de::DeserializeOwned, Deserialize, Serialize};
 use serde_json::{self, Value};
+use std::any::Any;
 use std::collections::HashMap;
 use std::future::Future;
+use std::ops::Deref;
 use std::sync::Arc;
 
 //
@@ -96,7 +100,7 @@ pub struct GenerateRequest {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub tool_choice: Option<ToolChoice>,
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub output: Option<super::formats::FormatterConfig>,
+    pub output: Option<OutputOptions>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub docs: Option<Vec<Document>>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -163,6 +167,8 @@ pub struct GenerateResponseData {
 #[serde(rename_all = "camelCase")]
 pub struct GenerateResponseChunkData {
     pub index: u32,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub role: Option<Role>,
     pub content: Vec<Part>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub usage: Option<GenerationUsage>,
@@ -175,11 +181,77 @@ pub struct GenerateResponseChunkData {
 // (Ported from model.ts)
 //
 
-/// A type alias for a model `Action`.
-pub type ModelAction = Action<GenerateRequest, GenerateResponseData, GenerateResponseChunkData>;
+/// A wrapper for a model `Action`.
+#[derive(Clone)]
+pub struct ModelAction(
+    pub Action<GenerateRequest, GenerateResponseData, GenerateResponseChunkData>,
+);
 
-/// A type alias for a background model `Action`.
-pub type BackgroundModelAction = Action<GenerateRequest, Operation<GenerateResponseData>, ()>;
+impl Deref for ModelAction {
+    type Target = Action<GenerateRequest, GenerateResponseData, GenerateResponseChunkData>;
+
+    fn deref(&self) -> &Self::Target {
+        &self.0
+    }
+}
+
+#[async_trait]
+impl ErasedAction for ModelAction {
+    async fn run_http_json(
+        &self,
+        input: Value,
+        context: Option<genkit_core::context::ActionContext>,
+    ) -> Result<Value> {
+        self.0.run_http_json(input, context).await
+    }
+
+    fn name(&self) -> &str {
+        self.0.name()
+    }
+
+    fn metadata(&self) -> &genkit_core::action::ActionMetadata {
+        self.0.metadata()
+    }
+
+    fn as_any(&self) -> &dyn Any {
+        self
+    }
+}
+
+/// A wrapper for a background model `Action`.
+#[derive(Clone)]
+pub struct BackgroundModelAction(pub Action<GenerateRequest, Operation<GenerateResponseData>, ()>);
+
+impl Deref for BackgroundModelAction {
+    type Target = Action<GenerateRequest, Operation<GenerateResponseData>, ()>;
+
+    fn deref(&self) -> &Self::Target {
+        &self.0
+    }
+}
+
+#[async_trait]
+impl ErasedAction for BackgroundModelAction {
+    async fn run_http_json(
+        &self,
+        input: Value,
+        context: Option<genkit_core::context::ActionContext>,
+    ) -> Result<Value> {
+        self.0.run_http_json(input, context).await
+    }
+
+    fn name(&self) -> &str {
+        self.0.name()
+    }
+
+    fn metadata(&self) -> &genkit_core::action::ActionMetadata {
+        self.0.metadata()
+    }
+
+    fn as_any(&self) -> &dyn Any {
+        self
+    }
+}
 
 /// Options for defining a model.
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, PartialEq, Default)]
@@ -202,7 +274,10 @@ pub fn define_model<C, F, Fut>(
 ) -> ModelAction
 where
     C: JsonSchema + Serialize + DeserializeOwned + Send + Sync + 'static,
-    F: Fn(GenerateRequest) -> Fut + Send + Sync + 'static,
+    F: Fn(GenerateRequest, genkit_core::action::ActionFnArg<GenerateResponseChunkData>) -> Fut
+        + Send
+        + Sync
+        + 'static,
     Fut: Future<Output = Result<GenerateResponseData>> + Send,
 {
     // In a full implementation, middleware would be handled here.
@@ -219,10 +294,12 @@ where
         serde_json::to_value(model_info).unwrap(),
     );
 
-    ActionBuilder::new(ActionType::Model, options.name, move |req, _| runner(req))
-        .with_description(options.label)
-        .with_metadata(metadata)
-        .build(registry)
+    ModelAction(
+        ActionBuilder::new(ActionType::Model, options.name, runner)
+            .with_description(options.label)
+            .with_metadata(metadata)
+            .build(registry),
+    )
 }
 
 /// Defines a new background model and registers it with the framework.
@@ -270,7 +347,7 @@ where
     .with_metadata(metadata)
     .build(registry);
 
-    Arc::new(start_action)
+    Arc::new(BackgroundModelAction(start_action))
 }
 
 /// A serializable reference to a model, often used in plugin configurations.

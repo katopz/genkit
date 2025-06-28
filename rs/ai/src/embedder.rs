@@ -18,15 +18,18 @@
 //! into vector embeddings. It is the Rust equivalent of `embedder.ts`.
 
 use crate::document::Document;
+use async_trait::async_trait;
 use genkit_core::action::{Action, ActionBuilder};
 use genkit_core::error::{Error, Result};
-use genkit_core::registry::{ActionType, Registry};
+use genkit_core::registry::{ActionType, ErasedAction, Registry};
 use schemars::{self, JsonSchema};
 use serde::{de::DeserializeOwned, Deserialize, Serialize};
 use serde_json::Value;
+use std::any::Any;
 use std::collections::HashMap;
 use std::future::Future;
-use std::sync::{Arc, Mutex};
+use std::ops::Deref;
+use std::sync::Arc;
 
 //
 // Core Types & Structs
@@ -70,8 +73,43 @@ pub struct EmbedResponse {
 pub type EmbedderFn<I> =
     dyn Fn(EmbedRequest<I>) -> Box<dyn Future<Output = Result<EmbedResponse>> + Send> + Send + Sync;
 
-/// A type alias for an embedder `Action`.
-pub type EmbedderAction<I = Value> = Action<EmbedRequest<I>, EmbedResponse, ()>;
+/// A wrapper for an embedder `Action`.
+#[derive(Clone)]
+pub struct EmbedderAction<I = Value>(pub Action<EmbedRequest<I>, EmbedResponse, ()>);
+
+impl<I: 'static> Deref for EmbedderAction<I> {
+    type Target = Action<EmbedRequest<I>, EmbedResponse, ()>;
+
+    fn deref(&self) -> &Self::Target {
+        &self.0
+    }
+}
+
+#[async_trait]
+impl<I> ErasedAction for EmbedderAction<I>
+where
+    I: JsonSchema + DeserializeOwned + Send + Sync + 'static,
+{
+    async fn run_http_json(
+        &self,
+        input: Value,
+        context: Option<genkit_core::context::ActionContext>,
+    ) -> Result<Value> {
+        self.0.run_http_json(input, context).await
+    }
+
+    fn name(&self) -> &str {
+        self.0.name()
+    }
+
+    fn metadata(&self) -> &genkit_core::action::ActionMetadata {
+        self.0.metadata()
+    }
+
+    fn as_any(&self) -> &dyn Any {
+        self
+    }
+}
 
 /// Descriptive information about an embedder.
 #[derive(Debug, Serialize, Deserialize, JsonSchema, Default, Clone)]
@@ -90,32 +128,15 @@ pub fn define_embedder<I, F, Fut>(
     registry: &mut Registry,
     name: &str,
     runner: F,
-) -> Arc<EmbedderAction<I>>
+) -> EmbedderAction<I>
 where
     I: JsonSchema + DeserializeOwned + Send + Sync + 'static,
-    F: FnMut(EmbedRequest<I>) -> Fut + Send + Sync + 'static,
+    F: Fn(EmbedRequest<I>, genkit_core::action::ActionFnArg<()>) -> Fut + Send + Sync + 'static,
     Fut: Future<Output = Result<EmbedResponse>> + Send + 'static,
 {
-    let runner = Arc::new(Mutex::new(runner));
-    ActionBuilder::new(
-        ActionType::Embedder,
-        name.to_string(),
-        move |req: EmbedRequest<I>, _context| {
-            let runner_clone = runner.clone(); // Arc<Mutex<F>>
-
-            // Synchronously acquire the lock, call the inner runner, and release the lock.
-            // The `inner_fut` is a `Box<dyn Future + Send>`, which is safe to move.
-            let inner_fut = {
-                let mut runner_guard = runner_clone.lock().unwrap();
-                (runner_guard)(req)
-            }; // `runner_guard` is dropped here, releasing the mutex.
-
-            // This async block now only awaits the `inner_fut`, which is `Send`.
-            inner_fut
-        },
+    EmbedderAction(
+        ActionBuilder::new(ActionType::Embedder, name.to_string(), runner).build(registry),
     )
-    .build(registry)
-    .into()
 }
 
 //
@@ -124,26 +145,29 @@ where
 
 /// A reference to an embedder.
 #[derive(Clone)]
-pub enum EmbedderArgument {
+pub enum EmbedderArgument<I = Value> {
     Name(String),
-    Action(Arc<EmbedderAction>),
+    Action(EmbedderAction<I>),
 }
 
 /// Parameters for the `embed` function.
-pub struct EmbedParams {
-    pub embedder: EmbedderArgument,
+pub struct EmbedParams<I = Value> {
+    pub embedder: EmbedderArgument<I>,
     pub content: Vec<Document>,
-    pub options: Option<Value>,
+    pub options: Option<I>,
 }
 
 /// Generates embeddings for a given list of documents using a specified embedder.
-pub async fn embed(registry: &Registry, params: EmbedParams) -> Result<EmbeddingBatch> {
-    let embedder_action = match params.embedder {
+pub async fn embed<I>(registry: &Registry, params: EmbedParams<I>) -> Result<EmbeddingBatch>
+where
+    I: JsonSchema + DeserializeOwned + Serialize + Send + Sync + 'static,
+{
+    let embedder_action: Arc<dyn ErasedAction> = match params.embedder {
         EmbedderArgument::Name(name) => registry
             .lookup_action(&format!("/embedder/{}", name))
             .await
             .ok_or_else(|| Error::new_internal(format!("Embedder '{}' not found", name)))?,
-        EmbedderArgument::Action(action) => action,
+        EmbedderArgument::Action(action) => Arc::new(action),
     };
 
     let request = EmbedRequest {
@@ -153,7 +177,7 @@ pub async fn embed(registry: &Registry, params: EmbedParams) -> Result<Embedding
 
     let request_value = serde_json::to_value(request)
         .map_err(|e| Error::new_internal(format!("Failed to serialize embed request: {}", e)))?;
-    let response_value = embedder_action.run_http(request_value).await?;
+    let response_value = embedder_action.run_http_json(request_value, None).await?;
     let response: EmbedResponse = serde_json::from_value(response_value)
         .map_err(|e| Error::new_internal(format!("Failed to deserialize embed response: {}", e)))?;
     Ok(response.embeddings)
@@ -166,14 +190,16 @@ pub async fn embed(registry: &Registry, params: EmbedParams) -> Result<Embedding
 /// A serializable reference to an embedder, often used in plugin configurations.
 #[derive(Debug, Serialize, Deserialize, JsonSchema, Clone)]
 #[serde(rename_all = "camelCase")]
-pub struct EmbedderRef {
+pub struct EmbedderRef<C = Value> {
     pub name: String,
-    // config and info would be here in a full port
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub config: Option<C>,
 }
 
 /// Helper to create an `EmbedderRef`.
-pub fn embedder_ref(name: &str) -> EmbedderRef {
+pub fn embedder_ref<C>(name: &str) -> EmbedderRef<C> {
     EmbedderRef {
         name: name.to_string(),
+        config: None,
     }
 }

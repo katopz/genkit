@@ -389,6 +389,7 @@ dependencies = [
  "futures-util",
  "genkit-core",
  "json5",
+ "jsonschema",
  "schemars",
  "serde",
  "serde_json",

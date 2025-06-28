@@ -232,7 +232,7 @@ pub async fn evaluate(registry: &Registry, params: EvaluatorParams) -> Result<Ev
 
     let request_value = serde_json::to_value(request)
         .map_err(|e| Error::new_internal(format!("Failed to serialize eval request: {}", e)))?;
-    let response_value = evaluator_action.run_http(request_value).await?;
+    let response_value = evaluator_action.run_http_json(request_value, None).await?;
     let response: EvalResponses = serde_json::from_value(response_value)
         .map_err(|e| Error::new_internal(format!("Failed to deserialize eval response: {}", e)))?;
     Ok(response)

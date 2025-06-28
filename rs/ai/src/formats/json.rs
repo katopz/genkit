@@ -111,12 +111,13 @@ mod tests {
             }],
             usage: None,
             custom: None,
+            role: None,
         };
         let chunk1 = GenerateResponseChunk::new(
             chunk1_data.clone(),
             GenerateResponseChunkOptions {
-                index: 0,
-                role: crate::message::Role::Model,
+                index: Some(0u32),
+                role: Some(crate::message::Role::Model),
                 previous_chunks: chunks.clone(),
             },
         );
@@ -132,12 +133,13 @@ mod tests {
             }],
             usage: None,
             custom: None,
+            role: None,
         };
         let chunk2 = GenerateResponseChunk::new(
             chunk2_data.clone(),
             GenerateResponseChunkOptions {
-                index: 0,
-                role: crate::message::Role::Model,
+                index: Some(0u32),
+                role: Some(crate::message::Role::Model),
                 previous_chunks: chunks.clone(),
             },
         );

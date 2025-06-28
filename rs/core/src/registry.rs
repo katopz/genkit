@@ -62,8 +62,12 @@ pub enum ActionType {
 /// input and output types in a single collection.
 #[async_trait]
 pub trait ErasedAction: Send + Sync {
-    /// Executes the action with a raw JSON value.
-    async fn run_http(&self, input: Value) -> Result<Value>;
+    /// Executes the action with a raw JSON value and optional context.
+    async fn run_http_json(
+        &self,
+        input: Value,
+        context: Option<crate::context::ActionContext>,
+    ) -> Result<Value>;
     /// Returns the name of the action.
     fn name(&self) -> &str;
     /// Returns the metadata for the action.
@@ -93,8 +97,14 @@ where
     O: Serialize + Send + Sync + 'static,
     S: Send + Sync + 'static,
 {
-    async fn run_http(&self, _input: Value) -> Result<Value> {
-        unimplemented!("run_http not implemented for tests");
+    async fn run_http_json(
+        &self,
+        input: Value,
+        context: Option<crate::context::ActionContext>,
+    ) -> Result<Value> {
+        let result = self.run_http_json(input, context).await?;
+        serde_json::to_value(result)
+            .map_err(|e| Error::new_internal(format!("Failed to serialize action output: {}", e)))
     }
 
     fn name(&self) -> &str {

@@ -72,8 +72,8 @@ impl<O> fmt::Debug for GenerateResponseChunk<O> {
 #[derive(Default)]
 pub struct GenerateResponseChunkOptions {
     pub previous_chunks: Vec<GenerateResponseChunkData>,
-    pub role: Role,
-    pub index: u32,
+    pub role: Option<Role>,
+    pub index: Option<u32>,
 }
 
 impl<O> GenerateResponseChunk<O>
@@ -83,8 +83,10 @@ where
     /// Creates a new `GenerateResponseChunk`.
     pub fn new(data: GenerateResponseChunkData, options: GenerateResponseChunkOptions) -> Self {
         Self {
-            index: options.index,
-            role: options.role,
+            index: data.index,
+            role: data
+                .role
+                .unwrap_or_else(|| options.role.unwrap_or_default()),
             content: data.content,
             custom: data.custom,
             previous_chunks: options.previous_chunks,
@@ -149,6 +151,7 @@ where
             content: self.content.clone(),
             usage: None, // Usage is typically aggregated at the end.
             custom: self.custom.clone(),
+            role: None,
         }
     }
 }

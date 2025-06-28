@@ -18,14 +18,14 @@
 //! representing the outcome of operations within the Genkit framework. This is
 // a port of `statusTypes.ts`.
 
-use serde::{Deserialize, Serialize};
+use serde::{Deserialize, Deserializer, Serialize, Serializer};
 use std::fmt::{Display, Formatter, Result as FmtResult};
 use std::str::FromStr;
 use thiserror::Error;
 
 /// Enumeration of response status codes.
 /// This is a direct port of the `StatusCodes` enum in TypeScript.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[repr(u16)]
 pub enum StatusCode {
     /// Not an error; returned on success.
@@ -183,6 +183,47 @@ pub enum StatusCode {
     DataLoss = 15,
 }
 
+impl Serialize for StatusCode {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+    {
+        serializer.serialize_u16(*self as u16)
+    }
+}
+
+impl<'de> Deserialize<'de> for StatusCode {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        let value = u16::deserialize(deserializer)?;
+        match value {
+            0 => Ok(StatusCode::Ok),
+            1 => Ok(StatusCode::Cancelled),
+            2 => Ok(StatusCode::Unknown),
+            3 => Ok(StatusCode::InvalidArgument),
+            4 => Ok(StatusCode::DeadlineExceeded),
+            5 => Ok(StatusCode::NotFound),
+            6 => Ok(StatusCode::AlreadyExists),
+            7 => Ok(StatusCode::PermissionDenied),
+            8 => Ok(StatusCode::ResourceExhausted),
+            9 => Ok(StatusCode::FailedPrecondition),
+            10 => Ok(StatusCode::Aborted),
+            11 => Ok(StatusCode::OutOfRange),
+            12 => Ok(StatusCode::Unimplemented),
+            13 => Ok(StatusCode::Internal),
+            14 => Ok(StatusCode::Unavailable),
+            15 => Ok(StatusCode::DataLoss),
+            16 => Ok(StatusCode::Unauthenticated),
+            _ => Err(serde::de::Error::invalid_value(
+                serde::de::Unexpected::Unsigned(value as u64),
+                &"a valid StatusCode integer",
+            )),
+        }
+    }
+}
+
 /// Represents the status of an operation, often used in API responses.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct Status {
@@ -190,6 +231,9 @@ pub struct Status {
     pub code: StatusCode,
     /// A developer-facing error message.
     pub message: String,
+    /// Indicates that the request was blocked.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub is_blocked: bool,
     /// Additional details about the error.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub details: Option<serde_json::Value>,
@@ -317,6 +361,7 @@ mod tests {
             code: StatusCode::NotFound,
             message: "Entity not found".to_string(),
             details: Some(json!({"resource": "item/123"})),
+            is_blocked: false,
         };
         let json = serde_json::to_value(&status).unwrap();
         assert_eq!(
@@ -327,6 +372,22 @@ mod tests {
                 "details": {
                     "resource": "item/123"
                 }
+            })
+        );
+
+        let blocked_status = Status {
+            code: StatusCode::ResourceExhausted,
+            message: "Blocked".to_string(),
+            is_blocked: true,
+            details: None,
+        };
+        let blocked_json = serde_json::to_value(&blocked_status).unwrap();
+        assert_eq!(
+            blocked_json,
+            json!({
+                "code": 8,
+                "message": "Blocked",
+                "is_blocked": true,
             })
         );
     }
@@ -343,6 +404,7 @@ mod tests {
             Status {
                 code: StatusCode::PermissionDenied,
                 message: "Forbidden".to_string(),
+                is_blocked: false,
                 details: None,
             }
         );

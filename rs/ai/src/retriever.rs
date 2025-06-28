@@ -20,15 +20,18 @@
 // Re-export document types for convenience.
 pub use crate::document::{Document, Part};
 
+use async_trait::async_trait;
 use genkit_core::action::{Action, ActionBuilder};
 use genkit_core::error::{Error, Result};
-use genkit_core::registry::{ActionType, Registry};
+use genkit_core::registry::{ActionType, ErasedAction, Registry};
 use schemars::{self, JsonSchema};
 use serde::{de::DeserializeOwned, Deserialize, Serialize};
 use serde_json::Value;
+use std::any::Any;
 use std::future::Future;
+use std::ops::Deref;
 use std::pin::Pin;
-use std::sync::{Arc, Mutex};
+use std::sync::Arc;
 
 //
 // Core Function Signatures & Request/Response Structs
@@ -80,11 +83,81 @@ pub struct IndexerInfo {
     pub label: String,
 }
 
-/// A type alias for a retriever `Action`.
-pub type RetrieverAction<I = Value> = Action<RetrieverRequest<I>, RetrieverResponse, ()>;
+/// A wrapper for a retriever `Action`.
+#[derive(Clone)]
+pub struct RetrieverAction<I = Value>(pub Action<RetrieverRequest<I>, RetrieverResponse, ()>);
 
-/// A type alias for an indexer `Action`.
-pub type IndexerAction<I = Value> = Action<IndexerRequest<I>, (), ()>;
+impl<I: 'static> Deref for RetrieverAction<I> {
+    type Target = Action<RetrieverRequest<I>, RetrieverResponse, ()>;
+
+    fn deref(&self) -> &Self::Target {
+        &self.0
+    }
+}
+
+#[async_trait]
+impl<I> ErasedAction for RetrieverAction<I>
+where
+    I: JsonSchema + DeserializeOwned + Send + Sync + 'static,
+{
+    async fn run_http_json(
+        &self,
+        input: Value,
+        context: Option<genkit_core::context::ActionContext>,
+    ) -> Result<Value> {
+        self.0.run_http_json(input, context).await
+    }
+
+    fn name(&self) -> &str {
+        self.0.name()
+    }
+
+    fn metadata(&self) -> &genkit_core::action::ActionMetadata {
+        self.0.metadata()
+    }
+
+    fn as_any(&self) -> &dyn Any {
+        self
+    }
+}
+
+/// A wrapper for an indexer `Action`.
+#[derive(Clone)]
+pub struct IndexerAction<I = Value>(pub Action<IndexerRequest<I>, (), ()>);
+
+impl<I: 'static> Deref for IndexerAction<I> {
+    type Target = Action<IndexerRequest<I>, (), ()>;
+
+    fn deref(&self) -> &Self::Target {
+        &self.0
+    }
+}
+
+#[async_trait]
+impl<I> ErasedAction for IndexerAction<I>
+where
+    I: JsonSchema + DeserializeOwned + Send + Sync + 'static,
+{
+    async fn run_http_json(
+        &self,
+        input: Value,
+        context: Option<genkit_core::context::ActionContext>,
+    ) -> Result<Value> {
+        self.0.run_http_json(input, context).await
+    }
+
+    fn name(&self) -> &str {
+        self.0.name()
+    }
+
+    fn metadata(&self) -> &genkit_core::action::ActionMetadata {
+        self.0.metadata()
+    }
+
+    fn as_any(&self) -> &dyn Any {
+        self
+    }
+}
 
 //
 // Define Functions
@@ -95,59 +168,25 @@ pub fn define_retriever<I, F, Fut>(
     registry: &mut Registry,
     name: &str,
     runner: F,
-) -> Arc<RetrieverAction<I>>
+) -> RetrieverAction<I>
 where
     I: JsonSchema + DeserializeOwned + Send + Sync + 'static,
-    F: FnMut(RetrieverRequest<I>) -> Fut + Send + Sync + 'static,
+    F: Fn(RetrieverRequest<I>, genkit_core::action::ActionFnArg<()>) -> Fut + Send + Sync + 'static,
     Fut: Future<Output = Result<RetrieverResponse>> + Send + 'static,
 {
-    let runner_arc = Arc::new(Mutex::new(runner));
-    ActionBuilder::new(
-        ActionType::Retriever,
-        name.to_string(),
-        move |req: RetrieverRequest<I>, _context| {
-            let runner_clone = runner_arc.clone();
-            async move {
-                let fut = {
-                    let mut runner = runner_clone.lock().unwrap();
-                    runner(req)
-                };
-                fut.await
-            }
-        },
+    RetrieverAction(
+        ActionBuilder::new(ActionType::Retriever, name.to_string(), runner).build(registry),
     )
-    .build(registry)
-    .into()
 }
 
 /// Defines a new indexer and registers it.
-pub fn define_indexer<I, F, Fut>(
-    registry: &mut Registry,
-    name: &str,
-    runner: F,
-) -> Arc<IndexerAction<I>>
+pub fn define_indexer<I, F, Fut>(registry: &mut Registry, name: &str, runner: F) -> IndexerAction<I>
 where
     I: JsonSchema + DeserializeOwned + Send + Sync + 'static,
-    F: FnMut(IndexerRequest<I>) -> Fut + Send + Sync + 'static,
+    F: Fn(IndexerRequest<I>, genkit_core::action::ActionFnArg<()>) -> Fut + Send + Sync + 'static,
     Fut: Future<Output = Result<()>> + Send + 'static,
 {
-    let runner_arc = Arc::new(Mutex::new(runner));
-    ActionBuilder::new(
-        ActionType::Indexer,
-        name.to_string(),
-        move |req: IndexerRequest<I>, _context| {
-            let runner_clone = runner_arc.clone();
-            async move {
-                let future = {
-                    let mut runner = runner_clone.lock().unwrap();
-                    runner(req)
-                };
-                future.await
-            }
-        },
-    )
-    .build(registry)
-    .into()
+    IndexerAction(ActionBuilder::new(ActionType::Indexer, name.to_string(), runner).build(registry))
 }
 
 //
@@ -156,26 +195,29 @@ where
 
 /// A reference to a retriever.
 #[derive(Clone)]
-pub enum RetrieverArgument {
+pub enum RetrieverArgument<I = Value> {
     Name(String),
-    Action(Arc<RetrieverAction>),
+    Action(RetrieverAction<I>),
 }
 
 /// Parameters for the `retrieve` function.
-pub struct RetrieverParams {
-    pub retriever: RetrieverArgument,
+pub struct RetrieverParams<I = Value> {
+    pub retriever: RetrieverArgument<I>,
     pub query: Document,
-    pub options: Option<Value>,
+    pub options: Option<I>,
 }
 
 /// Retrieves documents using a specified retriever.
-pub async fn retrieve(registry: &Registry, params: RetrieverParams) -> Result<Vec<Document>> {
-    let retriever_action = match params.retriever {
+pub async fn retrieve<I>(registry: &Registry, params: RetrieverParams<I>) -> Result<Vec<Document>>
+where
+    I: JsonSchema + DeserializeOwned + Serialize + Send + Sync + 'static,
+{
+    let retriever_action: Arc<dyn ErasedAction> = match params.retriever {
         RetrieverArgument::Name(name) => registry
             .lookup_action(&format!("/retriever/{}", name))
             .await
             .ok_or_else(|| Error::new_internal(format!("Retriever '{}' not found", name)))?,
-        RetrieverArgument::Action(action) => action,
+        RetrieverArgument::Action(action) => Arc::new(action),
     };
 
     let request = RetrieverRequest {
@@ -185,7 +227,7 @@ pub async fn retrieve(registry: &Registry, params: RetrieverParams) -> Result<Ve
 
     let request_value = serde_json::to_value(request)
         .map_err(|e| Error::new_internal(format!("Failed to serialize request: {}", e)))?;
-    let response_value = retriever_action.run_http(request_value).await?;
+    let response_value = retriever_action.run_http_json(request_value, None).await?;
     let response: RetrieverResponse = serde_json::from_value(response_value)
         .map_err(|e| Error::new_internal(format!("Failed to deserialize response: {}", e)))?;
     Ok(response.documents)
@@ -193,26 +235,29 @@ pub async fn retrieve(registry: &Registry, params: RetrieverParams) -> Result<Ve
 
 /// A reference to an indexer.
 #[derive(Clone)]
-pub enum IndexerArgument {
+pub enum IndexerArgument<I = Value> {
     Name(String),
-    Action(Arc<IndexerAction>),
+    Action(IndexerAction<I>),
 }
 
 /// Parameters for the `index` function.
-pub struct IndexerParams {
-    pub indexer: IndexerArgument,
+pub struct IndexerParams<I = Value> {
+    pub indexer: IndexerArgument<I>,
     pub documents: Vec<Document>,
-    pub options: Option<Value>,
+    pub options: Option<I>,
 }
 
 /// Indexes documents using a specified indexer.
-pub async fn index(registry: &Registry, params: IndexerParams) -> Result<()> {
-    let indexer_action = match params.indexer {
+pub async fn index<I>(registry: &Registry, params: IndexerParams<I>) -> Result<()>
+where
+    I: JsonSchema + DeserializeOwned + Serialize + Send + Sync + 'static,
+{
+    let indexer_action: Arc<dyn ErasedAction> = match params.indexer {
         IndexerArgument::Name(name) => registry
             .lookup_action(&format!("/indexer/{}", name))
             .await
             .ok_or_else(|| Error::new_internal(format!("Indexer '{}' not found", name)))?,
-        IndexerArgument::Action(action) => action,
+        IndexerArgument::Action(action) => Arc::new(action),
     };
 
     let request = IndexerRequest {
@@ -222,7 +267,7 @@ pub async fn index(registry: &Registry, params: IndexerParams) -> Result<()> {
 
     let request_value = serde_json::to_value(request)
         .map_err(|e| Error::new_internal(format!("Failed to serialize request: {}", e)))?;
-    indexer_action.run_http(request_value).await?;
+    indexer_action.run_http_json(request_value, None).await?;
     Ok(())
 }
 
@@ -233,29 +278,33 @@ pub async fn index(registry: &Registry, params: IndexerParams) -> Result<()> {
 /// A serializable reference to a retriever, often used in plugin configurations.
 #[derive(Debug, Serialize, Deserialize, JsonSchema, Clone)]
 #[serde(rename_all = "camelCase")]
-pub struct RetrieverRef {
+pub struct RetrieverRef<C = Value> {
     pub name: String,
-    // config and info would be here in a full port
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub config: Option<C>,
 }
 
 /// A serializable reference to an indexer.
 #[derive(Debug, Serialize, Deserialize, JsonSchema, Clone)]
 #[serde(rename_all = "camelCase")]
-pub struct IndexerRef {
+pub struct IndexerRef<C = Value> {
     pub name: String,
-    // config and info would be here in a full port
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub config: Option<C>,
 }
 
 /// Helper to create a `RetrieverRef`.
-pub fn retriever_ref(name: &str) -> RetrieverRef {
+pub fn retriever_ref<C>(name: &str) -> RetrieverRef<C> {
     RetrieverRef {
         name: name.to_string(),
+        config: None,
     }
 }
 
 /// Helper to create an `IndexerRef`.
-pub fn indexer_ref(name: &str) -> IndexerRef {
+pub fn indexer_ref<C>(name: &str) -> IndexerRef<C> {
     IndexerRef {
         name: name.to_string(),
+        config: None,
     }
 }

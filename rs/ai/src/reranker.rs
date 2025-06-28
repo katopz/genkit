@@ -19,14 +19,17 @@
 //! pipelines. It is the Rust equivalent of `reranker.ts`.
 
 use crate::document::{Document, Part};
+use async_trait::async_trait;
 use genkit_core::action::{Action, ActionBuilder};
 use genkit_core::error::{Error, Result};
-use genkit_core::registry::{ActionType, Registry};
+use genkit_core::registry::{ActionType, ErasedAction, Registry};
 use schemars::{self, JsonSchema};
 use serde::{de::DeserializeOwned, Deserialize, Serialize};
 use serde_json::Value;
+use std::any::Any;
 use std::future::Future;
-use std::sync::{Arc, Mutex};
+use std::ops::Deref;
+use std::sync::Arc;
 
 //
 // Core Types & Structs
@@ -81,8 +84,43 @@ pub type RerankerFn<I> = dyn Fn(RerankerRequest<I>) -> Box<dyn Future<Output = R
     + Send
     + Sync;
 
-/// A type alias for a reranker `Action`.
-pub type RerankerAction<I = Value> = Action<RerankerRequest<I>, RerankerResponse, ()>;
+/// A wrapper for a reranker `Action`.
+#[derive(Clone)]
+pub struct RerankerAction<I = Value>(pub Action<RerankerRequest<I>, RerankerResponse, ()>);
+
+impl<I: 'static> Deref for RerankerAction<I> {
+    type Target = Action<RerankerRequest<I>, RerankerResponse, ()>;
+
+    fn deref(&self) -> &Self::Target {
+        &self.0
+    }
+}
+
+#[async_trait]
+impl<I> ErasedAction for RerankerAction<I>
+where
+    I: JsonSchema + DeserializeOwned + Send + Sync + 'static,
+{
+    async fn run_http_json(
+        &self,
+        input: Value,
+        context: Option<genkit_core::context::ActionContext>,
+    ) -> Result<Value> {
+        self.0.run_http_json(input, context).await
+    }
+
+    fn name(&self) -> &str {
+        self.0.name()
+    }
+
+    fn metadata(&self) -> &genkit_core::action::ActionMetadata {
+        self.0.metadata()
+    }
+
+    fn as_any(&self) -> &dyn Any {
+        self
+    }
+}
 
 /// Descriptive information about a reranker.
 #[derive(Debug, Serialize, Deserialize, JsonSchema, Default, Clone)]
@@ -100,26 +138,15 @@ pub fn define_reranker<I, F, Fut>(
     registry: &mut Registry,
     name: &str,
     runner: F,
-) -> Arc<RerankerAction<I>>
+) -> RerankerAction<I>
 where
     I: JsonSchema + DeserializeOwned + Send + Sync + 'static,
-    F: FnMut(RerankerRequest<I>) -> Fut + Send + Sync + 'static,
+    F: Fn(RerankerRequest<I>, genkit_core::action::ActionFnArg<()>) -> Fut + Send + Sync + 'static,
     Fut: Future<Output = Result<RerankerResponse>> + Send + 'static,
 {
-    let runner_arc = Arc::new(Mutex::new(runner));
-    ActionBuilder::new(
-        ActionType::Reranker,
-        name.to_string(),
-        move |req: RerankerRequest<I>, _context| {
-            let runner_clone = runner_arc.clone();
-            {
-                let mut runner = runner_clone.lock().unwrap();
-                runner(req)
-            }
-        },
+    RerankerAction(
+        ActionBuilder::new(ActionType::Reranker, name.to_string(), runner).build(registry),
     )
-    .build(registry)
-    .into()
 }
 
 //
@@ -128,27 +155,33 @@ where
 
 /// A reference to a reranker.
 #[derive(Clone)]
-pub enum RerankerArgument {
+pub enum RerankerArgument<I = Value> {
     Name(String),
-    Action(Arc<RerankerAction>),
+    Action(RerankerAction<I>),
 }
 
 /// Parameters for the `rerank` function.
-pub struct RerankerParams {
-    pub reranker: RerankerArgument,
+pub struct RerankerParams<I = Value> {
+    pub reranker: RerankerArgument<I>,
     pub query: Document,
     pub documents: Vec<Document>,
-    pub options: Option<Value>,
+    pub options: Option<I>,
 }
 
 /// Reranks a list of documents based on a query using a specified reranker.
-pub async fn rerank(registry: &Registry, params: RerankerParams) -> Result<Vec<RankedDocument>> {
-    let reranker_action = match params.reranker {
+pub async fn rerank<I>(
+    registry: &Registry,
+    params: RerankerParams<I>,
+) -> Result<Vec<RankedDocument>>
+where
+    I: JsonSchema + DeserializeOwned + Serialize + Send + Sync + 'static,
+{
+    let reranker_action: Arc<dyn ErasedAction> = match params.reranker {
         RerankerArgument::Name(name) => registry
             .lookup_action(&format!("/reranker/{}", name))
             .await
             .ok_or_else(|| Error::new_internal(format!("Reranker '{}' not found", name)))?,
-        RerankerArgument::Action(action) => action,
+        RerankerArgument::Action(action) => Arc::new(action),
     };
 
     let request = RerankerRequest {
@@ -159,7 +192,7 @@ pub async fn rerank(registry: &Registry, params: RerankerParams) -> Result<Vec<R
 
     let request_value = serde_json::to_value(request)
         .map_err(|e| Error::new_internal(format!("Failed to serialize request: {}", e)))?;
-    let response_value = reranker_action.run_http(request_value).await?;
+    let response_value = reranker_action.run_http_json(request_value, None).await?;
     let response: RerankerResponse = serde_json::from_value(response_value)
         .map_err(|e| Error::new_internal(format!("Failed to deserialize response: {}", e)))?;
     Ok(response.documents)
@@ -172,14 +205,16 @@ pub async fn rerank(registry: &Registry, params: RerankerParams) -> Result<Vec<R
 /// A serializable reference to a reranker, often used in plugin configurations.
 #[derive(Debug, Serialize, Deserialize, JsonSchema, Clone)]
 #[serde(rename_all = "camelCase")]
-pub struct RerankerRef {
+pub struct RerankerRef<C = Value> {
     pub name: String,
-    // config and info would be here in a full port
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub config: Option<C>,
 }
 
 /// Helper to create a `RerankerRef`.
-pub fn reranker_ref(name: &str) -> RerankerRef {
+pub fn reranker_ref<C>(name: &str) -> RerankerRef<C> {
     RerankerRef {
         name: name.to_string(),
+        config: None,
     }
 }

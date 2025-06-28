@@ -97,6 +97,10 @@ pub struct Part {
     pub metadata: Option<HashMap<String, Value>>,
 }
 
+/// A type alias for a `Part` that is known to contain a `tool_request`.
+pub type ToolRequestPart = Part;
+pub type ToolResponsePart = Part;
+
 /// Represents a document with content and metadata.
 ///
 /// Documents can be embedded, indexed, or retrieved, and are composed of one or more `Part`s.

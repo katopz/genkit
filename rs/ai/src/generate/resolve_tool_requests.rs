@@ -2,7 +2,7 @@
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
-// You may obtain a copy of the License at
+// You may not obtain a copy of the License at
 //
 //     http://www.apache.org/licenses/LICENSE-2.0
 //
@@ -18,10 +18,11 @@
 //! executing the corresponding tools, and handling interrupts. It is the Rust
 // equivalent of `generate/resolve-tool-requests.ts`.
 
-use crate::document::{Part, ToolResponse};
+use crate::document::{Part, ToolRequest, ToolRequestPart, ToolResponse};
 use crate::generate::GenerateOptions;
 use crate::message::{MessageData, Role};
-use crate::tool::{self, ToolAction};
+use crate::model::GenerateResponseData;
+use crate::tool::{self, is_tool_request, ToolAction};
 use genkit_core::error::{Error, Result};
 use genkit_core::registry::Registry;
 use serde_json::Value;
@@ -29,10 +30,35 @@ use std::collections::HashMap;
 use std::sync::Arc;
 
 /// The result of resolving a single tool request.
-pub struct ResolvedToolRequest {
+pub struct ResolvedToolRequest<O: 'static> {
     pub response: Option<Part>,
     pub interrupt: Option<Part>,
-    pub preamble: Option<GenerateOptions>,
+    pub preamble: Option<GenerateOptions<O>>,
+}
+
+impl<O: 'static> Default for ResolvedToolRequest<O> {
+    fn default() -> Self {
+        Self {
+            response: None,
+            interrupt: None,
+            preamble: None,
+        }
+    }
+}
+
+/// The result of resolving all tool requests in a message.
+pub struct ResolvedToolRequests<O: 'static> {
+    pub revised_model_message: Option<MessageData>,
+    pub tool_message: Option<MessageData>,
+    pub transfer_preamble: Option<GenerateOptions<O>>,
+}
+
+/// The result of applying `ResumeOptions` to a generation request.
+#[derive(Default)]
+pub struct ResolveResumeOptionResult<O: 'static> {
+    pub revised_request: Option<GenerateOptions<O>>,
+    pub interrupted_response: Option<GenerateResponseData>,
+    pub tool_message: Option<MessageData>,
 }
 
 /// Converts a slice of `ToolAction`s into a map of short names to actions.
@@ -76,19 +102,12 @@ pub fn to_pending_output(part: &Part, response: &Part) -> Part {
     new_part
 }
 
-/// The result of resolving all tool requests in a message.
-pub struct ResolvedToolRequests {
-    pub revised_model_message: Option<MessageData>,
-    pub tool_message: Option<MessageData>,
-    pub transfer_preamble: Option<GenerateOptions>,
-}
-
-/// Resolves a single tool request.
-pub async fn resolve_tool_request(
-    _raw_request: &GenerateOptions,
+/// Resolves a single tool request by executing it.
+pub async fn resolve_tool_request<O: 'static>(
+    _raw_request: &GenerateOptions<O>,
     part: &Part,
     tool_map: &HashMap<String, Arc<ToolAction>>,
-) -> Result<ResolvedToolRequest> {
+) -> Result<ResolvedToolRequest<O>> {
     let tool_request = part
         .tool_request
         .as_ref()
@@ -99,9 +118,8 @@ pub async fn resolve_tool_request(
         .ok_or_else(|| Error::new_internal(format!("Tool '{}' not found", &tool_request.name)))?;
 
     // TODO: Implement is_prompt_action and preamble logic.
-
-    // Execute the tool and handle interrupts.
     // TODO: A proper implementation would catch a specific ToolInterruptError.
+
     let request_value = serde_json::to_value(tool_request.input.clone().unwrap_or(Value::Null))
         .map_err(|e| Error::new_internal(format!("Failed to serialize request: {}", e)))?;
     let response = tool.run_http(request_value, None).await?;
@@ -117,30 +135,32 @@ pub async fn resolve_tool_request(
     };
     Ok(ResolvedToolRequest {
         response: Some(response_part),
-        interrupt: None,
-        preamble: None,
+        ..Default::default()
     })
 }
 
 /// Resolves all tool requests within a model-generated message.
-///
-/// This function iterates through `toolRequest` parts, executes the corresponding
-/// tools, and aggregates the responses. It also handles tool interrupts.
-pub async fn resolve_tool_requests(
+pub async fn resolve_tool_requests<O: 'static>(
     registry: &Registry,
-    raw_request: &GenerateOptions,
+    raw_request: &GenerateOptions<O>,
     generated_message: &MessageData,
-) -> Result<ResolvedToolRequests> {
+) -> Result<ResolvedToolRequests<O>> {
     let resolved_tools = tool::resolve_tools(registry, raw_request.tools.as_deref()).await?;
-    let tool_map = to_tool_map(&resolved_tools)?;
+    let tool_actions: Vec<Arc<ToolAction>> = resolved_tools
+        .into_iter()
+        .map(|action| {
+            any_downcast::downcast_arc::<ToolAction>(action)
+                .map_err(|_| Error::new_internal("Failed to downcast to ToolAction".to_string()))
+        })
+        .collect::<Result<_>>()?;
+    let tool_map = to_tool_map(&tool_actions)?;
 
     let mut response_parts: Vec<Part> = Vec::new();
     let mut has_interrupts = false;
-    let mut transfer_preamble: Option<GenerateOptions> = None;
+    let mut transfer_preamble: Option<GenerateOptions<O>> = None;
 
     let mut revised_model_message = generated_message.clone();
 
-    // The TS version uses `Promise.all`, so we can do something similar here.
     let futures = revised_model_message
         .content
         .iter()
@@ -169,20 +189,18 @@ pub async fn resolve_tool_requests(
                     }
                     transfer_preamble = Some(preamble);
                 }
-
                 if let Some(response) = resolved.response {
                     let original_part = &revised_model_message.content[index].clone();
                     revised_model_message.content[index] =
                         to_pending_output(original_part, &response);
                     response_parts.push(response);
                 }
-
                 if let Some(interrupt) = resolved.interrupt {
                     revised_model_message.content[index] = interrupt;
                     has_interrupts = true;
                 }
             }
-            Err(e) => return Err(e), // Propagate errors
+            Err(e) => return Err(e),
         }
     }
 
@@ -190,7 +208,7 @@ pub async fn resolve_tool_requests(
         Ok(ResolvedToolRequests {
             revised_model_message: Some(revised_model_message),
             tool_message: None,
-            transfer_preamble: None,
+            transfer_preamble,
         })
     } else {
         let tool_message = if !response_parts.is_empty() {
@@ -202,7 +220,6 @@ pub async fn resolve_tool_requests(
         } else {
             None
         };
-
         Ok(ResolvedToolRequests {
             revised_model_message: None,
             tool_message,
@@ -211,5 +228,216 @@ pub async fn resolve_tool_requests(
     }
 }
 
-// Note: `resolve_tool_request`, `resolve_resume_option`, and related helpers
-// are complex and would be added here in a more complete port.
+// Helper to find a matching ToolRequestPart in a slice of parts.
+fn find_corresponding_tool_request<'a>(
+    parts: &'a [ToolRequestPart],
+    part: &ToolRequest,
+) -> Option<&'a ToolRequestPart> {
+    parts.iter().find(|p| {
+        p.tool_request
+            .as_ref()
+            .map_or(false, |tr| tr.name == part.name && tr.ref_id == part.ref_id)
+    })
+}
+
+// Helper to find a matching ToolResponsePart in a slice of parts.
+fn find_corresponding_tool_response<'a>(parts: &'a [Part], part: &ToolRequest) -> Option<&'a Part> {
+    parts.iter().find(|p| {
+        p.tool_response
+            .as_ref()
+            .map_or(false, |tr| tr.name == part.name && tr.ref_id == part.ref_id)
+    })
+}
+
+struct ResumedToolRequestResult {
+    tool_request: ToolRequestPart,
+    tool_response: Part,
+}
+
+// Helper to resolve a single tool request that was interrupted.
+async fn resolve_resumed_tool_request<O: 'static>(
+    raw_request: &GenerateOptions<O>,
+    part: ToolRequestPart,
+    tool_map: &HashMap<String, Arc<ToolAction>>,
+) -> Result<ResumedToolRequestResult> {
+    let tool_request = part.tool_request.as_ref().unwrap(); // Safe due to checks before calling
+
+    let resume_opts = raw_request.resume.as_ref().unwrap();
+
+    // Handle provided responses.
+    if let Some(provided_responses) = &resume_opts.respond {
+        if let Some(provided_response) =
+            find_corresponding_tool_response(provided_responses, tool_request)
+        {
+            let mut metadata = part.metadata.clone().unwrap_or_default();
+            if let Some(interrupt_meta) = metadata.remove("interrupt") {
+                metadata.insert("resolvedInterrupt".to_string(), interrupt_meta);
+            }
+            return Ok(ResumedToolRequestResult {
+                tool_request: Part {
+                    metadata: Some(metadata),
+                    ..part
+                },
+                tool_response: provided_response.clone(),
+            });
+        }
+    }
+
+    // Handle restarts.
+    if let Some(restart_requests) = &resume_opts.restart {
+        if let Some(restart_request) =
+            find_corresponding_tool_request(restart_requests, tool_request)
+        {
+            let resolved = resolve_tool_request(raw_request, restart_request, tool_map).await?;
+            if resolved.interrupt.is_some() {
+                // A restarted tool cannot immediately interrupt again.
+                return Err(Error::new_internal(
+                    "A restarted tool triggered an interrupt, which is not allowed.",
+                ));
+            }
+            if let Some(response) = resolved.response {
+                let mut metadata = part.metadata.clone().unwrap_or_default();
+                if let Some(interrupt_meta) = metadata.remove("interrupt") {
+                    metadata.insert("resolvedInterrupt".to_string(), interrupt_meta);
+                }
+                return Ok(ResumedToolRequestResult {
+                    tool_request: Part {
+                        metadata: Some(metadata),
+                        ..part
+                    },
+                    tool_response: response,
+                });
+            }
+        }
+    }
+
+    Err(Error::new_internal(format!(
+        "Unresolved tool request '{}' was not handled by the 'resume' argument.",
+        tool_request.name
+    )))
+}
+
+/// Amends message history to handle `resume` arguments.
+pub async fn resolve_resume_option<O: Default + Send + Sync + 'static>(
+    registry: &Registry,
+    mut raw_request: GenerateOptions<O>,
+) -> Result<ResolveResumeOptionResult<O>> {
+    let resume_opts = match raw_request.resume.take() {
+        Some(opts) => opts,
+        None => {
+            return Ok(ResolveResumeOptionResult {
+                revised_request: Some(raw_request),
+                ..Default::default()
+            })
+        }
+    };
+
+    let resolved_tools = tool::resolve_tools(registry, raw_request.tools.as_deref()).await?;
+    let tool_actions: Vec<Arc<ToolAction>> = resolved_tools
+        .into_iter()
+        .map(|action| {
+            any_downcast::downcast_arc::<ToolAction>(action)
+                .map_err(|_| Error::new_internal("Failed to downcast to ToolAction".to_string()))
+        })
+        .collect::<Result<_>>()?;
+    let tool_map = to_tool_map(&tool_actions)?;
+
+    let mut messages = raw_request.messages.clone().unwrap_or_default();
+    let last_message = match messages.last_mut() {
+        Some(msg)
+            if msg.role == Role::Model && msg.content.iter().any(|p| p.tool_request.is_some()) =>
+        {
+            msg
+        }
+        _ => {
+            return Err(Error::new_internal(
+                "Cannot 'resume' generation unless the last message is a model message with tool requests.",
+            ))
+        }
+    };
+
+    let mut tool_responses: Vec<Part> = Vec::new();
+    let mut new_content: Vec<Part> = Vec::new();
+    let mut interrupted = false;
+
+    for part in std::mem::take(&mut last_message.content) {
+        if is_tool_request(&part) {
+            match resolve_resumed_tool_request(&raw_request, part.clone(), &tool_map).await {
+                Ok(resolved) => {
+                    new_content.push(resolved.tool_request);
+                    tool_responses.push(resolved.tool_response);
+                }
+                Err(_) => {
+                    // Assuming any error here means an interrupt.
+                    new_content.push(part);
+                    interrupted = true;
+                }
+            }
+        } else {
+            new_content.push(part);
+        }
+    }
+
+    last_message.content = new_content;
+
+    if interrupted {
+        // Create a response indicating that an interrupt occurred during resumption.
+        let interrupted_response = GenerateResponseData {
+            candidates: vec![crate::model::CandidateData {
+                index: 0,
+                message: last_message.clone(),
+                finish_reason: Some(crate::model::FinishReason::Interrupted),
+                finish_message: Some("One or more tools triggered interrupts while resuming generation. The model was not called.".to_string()),
+            }],
+            ..Default::default()
+        };
+        return Ok(ResolveResumeOptionResult {
+            interrupted_response: Some(interrupted_response),
+            ..Default::default()
+        });
+    }
+
+    let mut tool_message_metadata = HashMap::new();
+    if let Some(meta) = resume_opts.metadata {
+        tool_message_metadata.insert("resumed".to_string(), meta);
+    }
+
+    let tool_message = MessageData {
+        role: Role::Tool,
+        content: tool_responses,
+        metadata: if tool_message_metadata.is_empty() {
+            None
+        } else {
+            Some(tool_message_metadata)
+        },
+    };
+
+    messages.push(tool_message.clone());
+    raw_request.messages = Some(messages);
+
+    Ok(ResolveResumeOptionResult {
+        revised_request: Some(raw_request),
+        tool_message: Some(tool_message),
+        ..Default::default()
+    })
+}
+
+// `any_downcast` helper module
+mod any_downcast {
+    use genkit_core::registry::ErasedAction;
+    use std::sync::Arc;
+
+    pub fn downcast_arc<T: 'static>(
+        arc: Arc<dyn ErasedAction>,
+    ) -> std::result::Result<Arc<T>, Arc<dyn ErasedAction>> {
+        if arc.as_any().is::<T>() {
+            unsafe {
+                let raw = Arc::into_raw(arc);
+                let ptr = raw as *const T;
+                Ok(Arc::from_raw(ptr))
+            }
+        } else {
+            Err(arc)
+        }
+    }
+}

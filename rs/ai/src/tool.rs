@@ -17,15 +17,18 @@
 //! This module provides the structures and functions for defining and using
 //! tools with generative models. It is the Rust equivalent of `tool.ts`.
 
+use crate::document::Part;
+use async_trait::async_trait;
 use genkit_core::action::{Action, ActionBuilder};
 use genkit_core::context::ActionContext;
 use genkit_core::error::{Error, Result};
-use genkit_core::registry::ErasedAction;
-use genkit_core::registry::{ActionType, Registry};
+use genkit_core::registry::{ActionType, ErasedAction, Registry};
 use schemars::{self, JsonSchema};
 use serde::{de::DeserializeOwned, Deserialize, Serialize};
 use serde_json::{self, Value};
+use std::any::Any;
 use std::future::Future;
+use std::ops::Deref;
 use std::sync::Arc;
 
 /// A definition of a tool that can be provided to a model.
@@ -40,8 +43,46 @@ pub struct ToolDefinition {
     pub output_schema: Option<Value>,
 }
 
-/// The `Action` type for a tool.
-pub type ToolAction<I = Value, O = Value, S = ()> = Action<I, O, S>;
+/// A wrapper for a tool `Action` that provides tool-specific functionality.
+#[derive(Clone)]
+pub struct ToolAction<I = Value, O = Value, S = ()>(pub Action<I, O, S>);
+
+impl<I, O, S> Deref for ToolAction<I, O, S> {
+    type Target = Action<I, O, S>;
+    fn deref(&self) -> &Self::Target {
+        &self.0
+    }
+}
+
+#[async_trait]
+impl<I, O, S> ErasedAction for ToolAction<I, O, S>
+where
+    I: DeserializeOwned + JsonSchema + Send + Sync + 'static,
+    O: Serialize + JsonSchema + Send + Sync + 'static,
+    S: Send + Sync + 'static,
+{
+    async fn run_http_json(
+        &self,
+        input: Value,
+        context: Option<genkit_core::context::ActionContext>,
+    ) -> Result<Value> {
+        let result = self.0.run_http_json(input, context).await?;
+        serde_json::to_value(result)
+            .map_err(|e| Error::new_internal(format!("Failed to serialize tool output: {}", e)))
+    }
+
+    fn name(&self) -> &str {
+        self.0.name()
+    }
+
+    fn metadata(&self) -> &genkit_core::action::ActionMetadata {
+        self.0.metadata()
+    }
+
+    fn as_any(&self) -> &dyn Any {
+        self
+    }
+}
 
 /// A reference to a tool, which can be a name or a concrete action.
 #[derive(Clone, Serialize, Deserialize, JsonSchema)]
@@ -49,7 +90,7 @@ pub type ToolAction<I = Value, O = Value, S = ()> = Action<I, O, S>;
 pub enum ToolArgument {
     Name(String),
     #[serde(skip)]
-    Action(Arc<ToolAction>),
+    Action(Arc<dyn ErasedAction>),
 }
 
 impl Default for ToolArgument {
@@ -62,7 +103,7 @@ impl std::fmt::Debug for ToolArgument {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             Self::Name(s) => f.debug_tuple("Name").field(s).finish(),
-            Self::Action(a) => f.debug_tuple("Action").field(&a.meta.name).finish(),
+            Self::Action(a) => f.debug_tuple("Action").field(&a.name()).finish(),
         }
     }
 }
@@ -79,8 +120,8 @@ impl<'a> From<&'a str> for ToolArgument {
     }
 }
 
-impl From<Arc<ToolAction>> for ToolArgument {
-    fn from(action: Arc<ToolAction>) -> Self {
+impl From<Arc<dyn ErasedAction>> for ToolArgument {
+    fn from(action: Arc<dyn ErasedAction>) -> Self {
         ToolArgument::Action(action)
     }
 }
@@ -99,26 +140,27 @@ pub fn define_tool<I, O, F, Fut>(
     name: &str,
     description: &str,
     runner: F,
-) -> Arc<ToolAction<I, O>>
+) -> ToolAction<I, O, ()>
 where
     I: JsonSchema + Serialize + DeserializeOwned + Send + Sync + 'static,
     O: JsonSchema + Serialize + DeserializeOwned + Send + Sync + 'static,
     F: Fn(I, ActionContext) -> Fut + Send + Sync + 'static,
     Fut: Future<Output = Result<O>> + Send + 'static,
 {
-    let action = ActionBuilder::new(ActionType::Tool, name.to_string(), move |input, args| {
-        runner(input, args.context.unwrap_or_default())
-    })
-    .with_description(description.to_string())
-    .build(registry);
-    Arc::new(action)
+    ToolAction(
+        ActionBuilder::new(ActionType::Tool, name.to_string(), move |input, args| {
+            runner(input, args.context.unwrap_or_default())
+        })
+        .with_description(description.to_string())
+        .build(registry),
+    )
 }
 
 /// Resolves a slice of `ToolArgument`s into a `Vec` of `ToolAction`s.
 pub async fn resolve_tools(
     registry: &Registry,
     tools: Option<&[ToolArgument]>,
-) -> Result<Vec<Arc<ToolAction>>> {
+) -> Result<Vec<Arc<dyn ErasedAction>>> {
     let Some(tools) = tools else {
         return Ok(Vec::new());
     };
@@ -131,11 +173,7 @@ pub async fn resolve_tools(
                     .lookup_action(&format!("/tool/{}", name))
                     .await
                     .ok_or_else(|| Error::new_internal(format!("Tool '{}' not found", name)))?;
-                let tool_action =
-                    any_downcast::downcast_arc::<ToolAction>(action).map_err(|_| {
-                        Error::new_internal(format!("Tool '{}' is not a valid ToolAction", name))
-                    })?;
-                resolved_tools.push(tool_action);
+                resolved_tools.push(action);
             }
             ToolArgument::Action(action) => {
                 resolved_tools.push(action.clone());
@@ -166,8 +204,8 @@ mod any_downcast {
     }
 }
 
-/// Converts a `ToolAction` to the `ToolDefinition` wire format.
-pub fn to_tool_definition(tool: &ToolAction) -> Result<ToolDefinition> {
+/// Converts an `ErasedAction` to the `ToolDefinition` wire format.
+pub fn to_tool_definition(tool: &dyn ErasedAction) -> Result<ToolDefinition> {
     let metadata = tool.metadata();
     let name = &metadata.name;
     let short_name = name.split('/').next_back().unwrap_or(name);
@@ -192,4 +230,9 @@ pub fn to_tool_definition(tool: &ToolAction) -> Result<ToolDefinition> {
         input_schema,
         output_schema,
     })
+}
+
+/// Checks if a `Part` contains a tool request.
+pub fn is_tool_request(part: &Part) -> bool {
+    part.tool_request.is_some()
 }

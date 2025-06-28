@@ -67,6 +67,21 @@ impl Error {
             code: status_code,
             message: message.into(),
             details,
+            is_blocked: false,
+        })
+    }
+
+    /// Creates a new `UserFacing` error that represents a blocked request.
+    pub fn new_blocked_error(
+        status_code: StatusCode,
+        message: impl Into<String>,
+        details: Option<serde_json::Value>,
+    ) -> Self {
+        Error::UserFacing(Status {
+            code: status_code,
+            message: message.into(),
+            details,
+            is_blocked: true,
         })
     }
 
@@ -110,16 +125,19 @@ impl Error {
                 code: StatusCode::InvalidArgument,
                 message: "Schema validation failed".to_string(),
                 details: Some(serde_json::json!({ "errors": ve.errors() })),
+                is_blocked: false,
             },
             Error::UnstableApi(msg) => Status {
                 code: StatusCode::FailedPrecondition,
                 message: msg.clone(),
                 details: None,
+                is_blocked: false,
             },
             _ => Status {
                 code: StatusCode::Internal,
                 message: "Internal Server Error".to_string(),
                 details: None,
+                is_blocked: false,
             },
         }
     }

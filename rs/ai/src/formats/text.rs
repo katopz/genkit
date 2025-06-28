@@ -94,10 +94,11 @@ mod tests {
                 }],
                 custom: None,
                 usage: None,
+                role: None,
             },
             crate::generate::chunk::GenerateResponseChunkOptions {
-                index: 0,
-                role: crate::message::Role::Model,
+                index: Some(0u32),
+                role: Some(crate::message::Role::Model),
                 ..Default::default()
             },
         );

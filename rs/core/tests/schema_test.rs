@@ -56,7 +56,7 @@ mod test {
             let errors = e.errors();
             assert_eq!(errors.len(), 1);
             assert_eq!(errors[0].path, "/foo");
-            assert!(errors[0].message.contains("is not of type \"boolean\""));
+            assert!(errors[0].message.contains("is not a \"boolean\""));
         } else {
             panic!("Expected a ValidationError, but got {:?}", result);
         }
