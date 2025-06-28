@@ -22,6 +22,7 @@ use crate::generate::ToolChoice;
 use crate::message::MessageData;
 use crate::tool::ToolDefinition;
 use genkit_core::action::{Action, ActionBuilder};
+use genkit_core::background_action::Operation;
 use genkit_core::error::Result;
 use genkit_core::registry::{ActionType, Registry};
 use schemars::{self, JsonSchema};
@@ -29,6 +30,7 @@ use serde::{de::DeserializeOwned, Deserialize, Serialize};
 use serde_json::{self, Value};
 use std::collections::HashMap;
 use std::future::Future;
+use std::sync::Arc;
 
 //
 // SECTION: Model Request & Response Data Structures
@@ -51,6 +53,8 @@ pub struct ModelInfoSupports {
     pub output: Option<Vec<String>>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub context: Option<bool>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub long_running: Option<bool>,
 }
 
 /// Provides descriptive information about a model.
@@ -138,7 +142,7 @@ pub struct CandidateData {
 }
 
 /// The full response from a model action.
-#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, PartialEq, Default)]
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, Default)]
 #[serde(rename_all = "camelCase")]
 pub struct GenerateResponseData {
     pub candidates: Vec<CandidateData>,
@@ -146,6 +150,10 @@ pub struct GenerateResponseData {
     pub usage: Option<GenerationUsage>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub custom: Option<Value>,
+    /// The operation for a long-running job, if applicable.
+    /// Boxed to prevent recursive type error.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub operation: Option<Box<Operation<Self>>>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub aggregated: Option<bool>,
 }
@@ -169,6 +177,9 @@ pub struct GenerateResponseChunkData {
 
 /// A type alias for a model `Action`.
 pub type ModelAction = Action<GenerateRequest, GenerateResponseData, GenerateResponseChunkData>;
+
+/// A type alias for a background model `Action`.
+pub type BackgroundModelAction = Action<GenerateRequest, Operation<GenerateResponseData>, ()>;
 
 /// Options for defining a model.
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, PartialEq, Default)]
@@ -212,6 +223,54 @@ where
         .with_description(options.label)
         .with_metadata(metadata)
         .build(registry)
+}
+
+/// Defines a new background model and registers it with the framework.
+pub fn define_background_model<C, StartFut, CheckFut>(
+    registry: &mut Registry,
+    options: DefineModelOptions<C>,
+    start: impl Fn(GenerateRequest) -> StartFut + Send + Sync + 'static,
+    check: impl Fn(Operation<GenerateResponseData>) -> CheckFut + Send + Sync + 'static,
+) -> Arc<BackgroundModelAction>
+where
+    C: JsonSchema + Serialize + DeserializeOwned + Send + Sync + 'static,
+    StartFut: Future<Output = Result<Operation<GenerateResponseData>>> + Send,
+    CheckFut: Future<Output = Result<Operation<GenerateResponseData>>> + Send,
+{
+    let mut metadata: HashMap<String, Value> = HashMap::new();
+    let mut model_info = ModelInfo {
+        label: options.label.clone(),
+        versions: options.versions,
+        supports: options.supports,
+    };
+    model_info.supports.long_running = Some(true);
+    metadata.insert(
+        "model".to_string(),
+        serde_json::to_value(model_info).unwrap(),
+    );
+
+    // Register the 'start' action
+    let start_action = ActionBuilder::new(
+        ActionType::BackgroundModel,
+        options.name.clone(),
+        move |req, _: genkit_core::action::ActionFnArg<()>| start(req),
+    )
+    .with_description(options.label.clone())
+    .with_metadata(metadata.clone())
+    .build(registry);
+
+    // Register the 'check' action under a derived name
+    let check_action_name = format!("{}/check", options.name);
+    let _check_action = ActionBuilder::new(
+        ActionType::CheckOperation,
+        check_action_name,
+        move |op, _: genkit_core::action::ActionFnArg<()>| check(op),
+    )
+    .with_description(format!("Check status for {}", options.label))
+    .with_metadata(metadata)
+    .build(registry);
+
+    Arc::new(start_action)
 }
 
 /// A serializable reference to a model, often used in plugin configurations.
