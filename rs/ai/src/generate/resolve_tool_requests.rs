@@ -41,7 +41,7 @@ pub fn to_tool_map(tools: &[Arc<ToolAction>]) -> Result<HashMap<String, Arc<Tool
     let mut map = HashMap::new();
     for tool in tools {
         let name = &tool.meta.name;
-        let short_name = name.split('/').last().unwrap_or(name).to_string();
+        let short_name = name.split('/').next_back().unwrap_or(name).to_string();
         map.insert(short_name, tool.clone());
     }
     Ok(map)
@@ -52,7 +52,7 @@ pub fn assert_valid_tool_names(tools: &[Arc<ToolAction>]) -> Result<()> {
     let mut names = HashMap::new();
     for tool in tools {
         let name = &tool.meta.name;
-        let short_name = name.split('/').last().unwrap_or(name);
+        let short_name = name.split('/').next_back().unwrap_or(name);
         if let Some(existing_name) = names.insert(short_name.to_string(), name.clone()) {
             return Err(Error::new_internal(format!(
                 "Cannot provide two tools with the same short name ('{}'): '{}' and '{}'",

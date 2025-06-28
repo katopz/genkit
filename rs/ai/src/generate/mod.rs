@@ -70,7 +70,7 @@ pub struct OutputOptions {
 }
 
 /// Options for a `generate` call.
-#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct GenerateOptions {
     pub model: Option<crate::model::Model>,
@@ -84,24 +84,6 @@ pub struct GenerateOptions {
     pub output: Option<OutputOptions>,
     pub max_turns: Option<u32>,
     pub return_tool_requests: Option<bool>,
-}
-
-impl Default for GenerateOptions {
-    fn default() -> Self {
-        Self {
-            model: None,
-            system: None,
-            prompt: None,
-            docs: None,
-            messages: None,
-            tools: None,
-            tool_choice: None,
-            config: None,
-            output: None,
-            max_turns: None,
-            return_tool_requests: None,
-        }
-    }
 }
 
 /// Base generate options used by `Chat`.

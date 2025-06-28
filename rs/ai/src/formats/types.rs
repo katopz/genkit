@@ -68,6 +68,10 @@ pub trait Format {
     }
 }
 
+/// A type alias for the factory function that creates a `Format` trait object.
+pub type FormatHandler =
+    Box<dyn Fn(Option<&Schema>) -> Box<dyn Format + Send + Sync> + Send + Sync>;
+
 /// Represents a named output format handler.
 ///
 /// This struct ties together the formatter's name, its configuration, and the
@@ -77,7 +81,7 @@ pub struct Formatter {
     pub config: FormatterConfig,
     /// A factory function that, given an optional JSON schema, returns a
     /// boxed trait object that can handle the parsing for this format.
-    pub handler: Box<dyn Fn(Option<&Schema>) -> Box<dyn Format + Send + Sync> + Send + Sync>,
+    pub handler: FormatHandler,
 }
 
 impl std::fmt::Debug for Formatter {

@@ -61,7 +61,7 @@ pub struct Chat<S> {
 pub enum SendInput {
     Text(String),
     Parts(Vec<Part>),
-    Options(GenerateOptions),
+    Options(Box<GenerateOptions>),
 }
 
 // From implementations to make `send` more ergonomic.
@@ -82,7 +82,7 @@ impl From<Vec<Part>> for SendInput {
 }
 impl From<GenerateOptions> for SendInput {
     fn from(opts: GenerateOptions) -> Self {
-        SendInput::Options(opts)
+        SendInput::Options(Box::new(opts))
     }
 }
 
@@ -100,7 +100,7 @@ fn resolve_send_options(input: SendInput) -> GenerateOptions {
             prompt: Some(parts),
             ..Default::default()
         },
-        SendInput::Options(opts) => opts,
+        SendInput::Options(opts) => *opts,
     }
 }
 
