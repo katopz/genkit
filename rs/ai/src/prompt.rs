@@ -174,17 +174,19 @@ where
             });
         }
 
-        let mut gen_opts = GenerateOptions::<O>::default();
-        gen_opts.model = self.config.model.clone();
-        gen_opts.messages = Some(messages);
-        gen_opts.tools = self.config.tools.clone();
-        gen_opts.config = self
-            .config
-            .config
-            .as_ref()
-            .and_then(|c| serde_json::to_value(c).ok())
-            .or_else(|| opts.and_then(|o| o.config));
-        gen_opts.output = self.config.output.clone();
+        let gen_opts = GenerateOptions {
+            model: self.config.model.clone(),
+            messages: Some(messages),
+            tools: self.config.tools.clone(),
+            config: self
+                .config
+                .config
+                .as_ref()
+                .and_then(|c| serde_json::to_value(c).ok())
+                .or_else(|| opts.and_then(|o| o.config)),
+            output: self.config.output.clone(),
+            ..Default::default()
+        };
         Ok(gen_opts)
     }
 }

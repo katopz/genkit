@@ -28,7 +28,6 @@ pub use self::chunk::GenerateResponseChunk;
 pub use self::response::GenerateResponse;
 
 use crate::document::{Document, Part, ToolRequestPart, ToolResponsePart};
-use crate::formats::FormatterConfig;
 use crate::generate::action::ModelMiddleware;
 use crate::message::{MessageData, Role};
 use crate::model::GenerateRequest;

@@ -183,27 +183,6 @@ pub async fn resolve_tools(
     Ok(resolved_tools)
 }
 
-// A stub for the assumed downcasting library, to make the code snippet valid.
-// In a real scenario, this would be a dependency.
-mod any_downcast {
-    use super::ErasedAction;
-    use std::sync::Arc;
-
-    pub fn downcast_arc<T: 'static>(
-        arc: Arc<dyn ErasedAction>,
-    ) -> std::result::Result<Arc<T>, Arc<dyn ErasedAction>> {
-        if arc.as_any().is::<T>() {
-            unsafe {
-                let raw = Arc::into_raw(arc);
-                let ptr = raw as *const T;
-                Ok(Arc::from_raw(ptr))
-            }
-        } else {
-            Err(arc)
-        }
-    }
-}
-
 /// Converts an `ErasedAction` to the `ToolDefinition` wire format.
 pub fn to_tool_definition(tool: &dyn ErasedAction) -> Result<ToolDefinition> {
     let metadata = tool.metadata();

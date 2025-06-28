@@ -168,10 +168,9 @@ pub async fn resolve_tool_requests<O: 'static>(
         .filter(|(_, part)| part.tool_request.is_some())
         .map(|(i, part)| {
             let tool_map = tool_map.clone();
-            let raw_request = raw_request.clone();
             let part = part.clone();
             async move {
-                let result = resolve_tool_request(&raw_request, &part, &tool_map).await;
+                let result = resolve_tool_request(raw_request, &part, &tool_map).await;
                 (i, result)
             }
         });
@@ -236,16 +235,17 @@ fn find_corresponding_tool_request<'a>(
     parts.iter().find(|p| {
         p.tool_request
             .as_ref()
-            .map_or(false, |tr| tr.name == part.name && tr.ref_id == part.ref_id)
+            .is_some_and(|tr| tr.name == part.name && tr.ref_id == part.ref_id)
     })
 }
 
 // Helper to find a matching ToolResponsePart in a slice of parts.
 fn find_corresponding_tool_response<'a>(parts: &'a [Part], part: &ToolRequest) -> Option<&'a Part> {
     parts.iter().find(|p| {
-        p.tool_response
-            .as_ref()
-            .map_or(false, |tr| tr.name == part.name && tr.ref_id == part.ref_id)
+        p.tool_response.as_ref().map_or_else(
+            || false,
+            |tr| tr.name == part.name && tr.ref_id == part.ref_id,
+        )
     })
 }
 

@@ -137,7 +137,7 @@ where
                 ))
             })?;
 
-            jsonschema::validate(&schema, &output_value).map_err(|error_message| {
+            jsonschema::validate(schema, &output_value).map_err(|error_message| {
                 Error::new_internal(format!("Schema validation failed: {}", error_message))
             })?;
         }

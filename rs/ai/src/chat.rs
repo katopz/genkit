@@ -89,19 +89,17 @@ impl From<GenerateOptions> for SendInput {
 /// Normalizes a `SendInput` enum into a `GenerateOptions` struct.
 fn resolve_send_options(input: SendInput) -> GenerateOptions {
     match input {
-        SendInput::Text(text) => {
-            let mut opts = GenerateOptions::default();
-            opts.prompt = Some(vec![Part {
+        SendInput::Text(text) => GenerateOptions {
+            prompt: Some(vec![Part {
                 text: Some(text),
                 ..Default::default()
-            }]);
-            opts
-        }
-        SendInput::Parts(parts) => {
-            let mut opts = GenerateOptions::default();
-            opts.prompt = Some(parts);
-            opts
-        }
+            }]),
+            ..Default::default()
+        },
+        SendInput::Parts(parts) => GenerateOptions {
+            prompt: Some(parts),
+            ..Default::default()
+        },
         SendInput::Options(opts) => *opts,
     }
 }
@@ -195,14 +193,16 @@ impl<S: Serialize + DeserializeOwned + Clone + Send + Sync + 'static> Chat<S> {
                     }
 
                     // TODO: Wire up streaming callback from resolved_options.
-                    let mut generate_opts = GenerateOptions::default();
-                    generate_opts.model = generate_options_base.model;
-                    generate_opts.docs = generate_options_base.docs;
-                    generate_opts.messages = Some(generate_options_base.messages);
-                    generate_opts.tools = generate_options_base.tools;
-                    generate_opts.tool_choice = generate_options_base.tool_choice;
-                    generate_opts.config = generate_options_base.config;
-                    generate_opts.output = generate_options_base.output;
+                    let generate_opts = GenerateOptions {
+                        model: generate_options_base.model,
+                        docs: generate_options_base.docs,
+                        messages: Some(generate_options_base.messages),
+                        tools: generate_options_base.tools,
+                        tool_choice: generate_options_base.tool_choice,
+                        config: generate_options_base.config,
+                        output: generate_options_base.output,
+                        ..Default::default()
+                    };
 
                     let response = generate(&self.session.registry, generate_opts).await?;
 
@@ -248,14 +248,16 @@ impl<S: Serialize + DeserializeOwned + Clone + Send + Sync + 'static> Chat<S> {
         }
 
         // Convert BaseGenerateOptions to GenerateOptions
-        let mut generate_options = GenerateOptions::default();
-        generate_options.model = base_options.model;
-        generate_options.messages = Some(messages);
-        generate_options.tools = base_options.tools;
-        generate_options.tool_choice = base_options.tool_choice;
-        generate_options.config = base_options.config;
-        generate_options.output = base_options.output;
-        generate_options.docs = base_options.docs;
+        let generate_options = GenerateOptions {
+            model: base_options.model,
+            messages: Some(messages),
+            tools: base_options.tools,
+            tool_choice: base_options.tool_choice,
+            config: base_options.config,
+            output: base_options.output,
+            docs: base_options.docs,
+            ..Default::default()
+        };
 
         // NOTE: This doesn't yet handle state updates after the stream completes.
         // A more complete implementation would spawn a task to await the final
