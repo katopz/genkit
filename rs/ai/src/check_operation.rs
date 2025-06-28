@@ -40,15 +40,15 @@ pub async fn check_operation(
     // 2. Derive the check action's key from the original action key.
     // e.g., /background-model/myModel -> /checkoperation/myModel/check
     let parts: Vec<&str> = start_action_key.split('/').collect();
-    if parts.len() < 3 || parts[0] != "" {
+    if parts.len() < 3 || !parts[0].is_empty() {
         return Err(Error::new_internal(format!(
             "Invalid background action key format: {}",
             start_action_key
         )));
     }
-    // The action type is at index 1, name at index 2.
-    // e.g., ["", "background-model", "myModel"]
-    let action_name = parts[2];
+    // The action name is everything after the type part.
+    // e.g., /background-model/google/gemini-pro -> "google/gemini-pro"
+    let action_name = parts[2..].join("/");
 
     let check_action_key = format!("/checkoperation/{}/check", action_name);
 

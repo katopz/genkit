@@ -33,16 +33,18 @@ pub mod reranker;
 pub mod resource;
 pub mod retriever;
 pub mod session;
+#[cfg(test)]
+pub mod testing;
 pub mod tool;
 pub mod types;
 
 // Re-export key components for easier access.
 pub use document::Document;
-pub use embedder::{embed, Embedder, EmbedderRef};
+pub use embedder::{embed, EmbedderAction as Embedder, EmbedderRef};
 pub use generate::{
     generate, generate_stream, GenerateOptions, GenerateResponse, GenerateStreamResponse,
 };
 pub use model::{Model, ModelRef};
 pub use prompt::{define_prompt, prompt, ExecutablePrompt};
-pub use retriever::{retrieve, Retriever, RetrieverRef};
-pub use tool::{define_tool, Tool};
+pub use retriever::{retrieve, RetrieverAction as Retriever, RetrieverRef};
+pub use tool::{define_tool, ToolAction as Tool};

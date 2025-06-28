@@ -29,10 +29,11 @@ use std::collections::HashMap;
 use std::sync::Arc;
 
 /// Represents the role of the entity creating a message.
-#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, PartialEq, Eq)]
+#[derive(Default, Debug, Clone, Serialize, Deserialize, JsonSchema, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
 pub enum Role {
     System,
+    #[default]
     User,
     Model,
     Tool,
@@ -54,7 +55,7 @@ pub type MessageParser<T> = Arc<dyn Fn(&Message<T>) -> Result<T> + Send + Sync>;
 ///
 /// A `Message` consists of a `role` (who is speaking) and `content` (what is being said),
 /// which can be made up of multiple `Part`s (e.g., text and images).
-#[derive(Clone, Serialize, Deserialize)]
+#[derive(Clone, Serialize, Deserialize, JsonSchema)]
 pub struct Message<O = Value> {
     pub role: Role,
     pub content: Vec<Part>,

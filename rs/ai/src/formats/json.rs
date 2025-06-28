@@ -75,8 +75,7 @@ pub fn json_formatter() -> Formatter {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::document::Part;
-    use crate::generate::GenerateResponseChunkOptions;
+    use crate::{document::Part, generate::chunk::GenerateResponseChunkOptions};
     use serde_json::json;
 
     #[test]
@@ -119,7 +118,6 @@ mod tests {
                 index: 0,
                 role: crate::message::Role::Model,
                 previous_chunks: chunks.clone(),
-                ..Default::default()
             },
         );
         chunks.push(chunk1_data);
@@ -141,7 +139,6 @@ mod tests {
                 index: 0,
                 role: crate::message::Role::Model,
                 previous_chunks: chunks.clone(),
-                ..Default::default()
             },
         );
         let parsed2 = handler.parse_chunk(&chunk2);

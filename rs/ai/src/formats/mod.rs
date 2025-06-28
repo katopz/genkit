@@ -25,7 +25,14 @@ pub mod jsonl;
 pub mod text;
 pub mod types;
 
+use crate::document::Part;
+use crate::generate::OutputOptions;
+use crate::message::{MessageData, Role};
 use genkit_core::registry::Registry;
+use schemars::Schema;
+use serde_json::{json, Value};
+use std::collections::HashMap;
+use std::sync::Arc;
 use types::Formatter;
 
 // Re-export key public types for easier access.
@@ -53,4 +60,97 @@ pub fn configure_formats(registry: &mut Registry) {
         // This is a placeholder for that logic.
         registry.register_value("format", &name, Box::new(formatter));
     }
+}
+
+/// Resolves the formatter to use based on output options.
+pub async fn resolve_format(
+    registry: &Registry,
+    output_opts: Option<&OutputOptions>,
+) -> Option<Arc<Formatter>> {
+    let output_opts = output_opts?;
+    // If schema is set but no explicit format is set we default to json.
+    if output_opts.schema.is_some() && output_opts.format.is_none() {
+        return registry.lookup_value::<Formatter>("format", "json").await;
+    }
+    if let Some(format) = &output_opts.format {
+        return registry.lookup_value::<Formatter>("format", format).await;
+    }
+    None
+}
+
+/// Resolves the instructions to provide to the model.
+pub fn resolve_instructions(
+    format: Option<&Formatter>,
+    schema: Option<&Schema>,
+    instructions_option: Option<&Value>,
+) -> Option<String> {
+    if let Some(Value::String(s)) = instructions_option {
+        return Some(s.clone()); // user provided instructions
+    }
+    if let Some(Value::Bool(false)) = instructions_option {
+        return None; // user says no instructions
+    }
+    let format = format?;
+    let handler = (format.handler)(schema);
+    handler.instructions()
+}
+
+/// Injects formatting instructions into the message list.
+pub fn inject_instructions(
+    messages: &[MessageData],
+    instructions: Option<String>,
+) -> Vec<MessageData> {
+    let instructions = match instructions {
+        Some(i) => i,
+        None => return messages.to_vec(),
+    };
+
+    // bail out if a non-pending output part is already present
+    if messages.iter().any(|m| {
+        m.content.iter().any(|p| {
+            if let Some(meta) = p.metadata.as_ref() {
+                if meta.get("purpose") == Some(&Value::String("output".to_string())) {
+                    return meta.get("pending") != Some(&Value::Bool(true));
+                }
+            }
+            false
+        })
+    }) {
+        return messages.to_vec();
+    }
+
+    let mut new_part_metadata = HashMap::new();
+    new_part_metadata.insert("purpose".to_string(), json!("output"));
+
+    let new_part = Part {
+        text: Some(instructions),
+        metadata: Some(new_part_metadata),
+        ..Default::default()
+    };
+
+    // find the system message or the last user message
+    let target_index = messages
+        .iter()
+        .position(|m| m.role == Role::System)
+        .or_else(|| messages.iter().rposition(|m| m.role == Role::User));
+
+    if let Some(target_index) = target_index {
+        let mut out_messages = messages.to_vec();
+        let m = &mut out_messages[target_index];
+
+        if let Some(part_index) = m.content.iter().position(|p| {
+            if let Some(meta) = p.metadata.as_ref() {
+                return meta.get("purpose") == Some(&Value::String("output".to_string()))
+                    && meta.get("pending") == Some(&Value::Bool(true));
+            }
+            false
+        }) {
+            m.content[part_index] = new_part;
+        } else {
+            m.content.push(new_part);
+        }
+        return out_messages;
+    }
+
+    messages.to_vec()
 }

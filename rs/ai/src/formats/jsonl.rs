@@ -18,6 +18,7 @@
 //! line is a separate JSON object. It is the Rust equivalent of `formats/jsonl.ts`.
 
 use super::types::{Format, Formatter, FormatterConfig};
+use crate::extract::extract_json;
 use crate::generate::GenerateResponseChunk;
 use crate::message::Message;
 use schemars::Schema;
@@ -35,9 +36,7 @@ impl Format for JsonlFormat {
         let items: Vec<Value> = message
             .text()
             .lines()
-            .map(|line| line.trim())
-            .filter(|line| line.starts_with('{') && line.ends_with('}'))
-            .filter_map(|line| json5::from_str(line).ok())
+            .filter_map(|line| extract_json(line.trim()).ok().flatten())
             .collect();
         Value::Array(items)
     }
@@ -134,7 +133,7 @@ pub fn jsonl_formatter() -> Formatter {
 mod tests {
     use super::*;
     use crate::document::Part;
-    use crate::generate::GenerateResponseChunkOptions;
+    use crate::generate::chunk::GenerateResponseChunkOptions;
     use crate::message::Role;
     use serde_json::json;
 

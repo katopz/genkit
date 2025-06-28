@@ -77,7 +77,7 @@ pub fn array_formatter() -> Formatter {
                     .as_object()
                     .and_then(|obj| obj.get("type"))
                     .and_then(|t| t.as_str())
-                    .map_or(false, |t| t == "array");
+                    == Some("array");
 
                 if !is_array {
                     // TODO: Replace with proper logging.
@@ -100,7 +100,7 @@ pub fn array_formatter() -> Formatter {
 mod tests {
     use super::*;
     use crate::document::Part;
-    use crate::generate::GenerateResponseChunkOptions;
+    use crate::generate::chunk::GenerateResponseChunkOptions;
     use crate::message::Role;
     use serde_json::json;
 

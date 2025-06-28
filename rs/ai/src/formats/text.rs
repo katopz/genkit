@@ -18,7 +18,7 @@
 //! It is the Rust equivalent of `formats/text.ts`.
 
 use super::types::{Format, Formatter, FormatterConfig};
-use crate::generate::GenerateResponseChunk;
+use crate::generate::chunk::GenerateResponseChunk;
 use crate::message::Message;
 use schemars::Schema;
 use serde_json::Value;
@@ -95,7 +95,7 @@ mod tests {
                 custom: None,
                 usage: None,
             },
-            crate::generate::GenerateResponseChunkOptions {
+            crate::generate::chunk::GenerateResponseChunkOptions {
                 index: 0,
                 role: crate::message::Role::Model,
                 ..Default::default()

@@ -20,10 +20,11 @@
 use crate::chat::{Chat, MAIN_THREAD};
 use crate::generate::{BaseGenerateOptions, GenerateOptions};
 use crate::message::MessageData;
-use crate::prompt::{ExecutablePrompt, PromptGenerateOptions};
+use crate::prompt::ExecutablePrompt;
 use async_trait::async_trait;
 use genkit_core::error::{Error, Result};
 use genkit_core::registry::Registry;
+use schemars::JsonSchema;
 use serde::{de::DeserializeOwned, Deserialize, Serialize};
 use serde_json::Value;
 use std::collections::HashMap;
@@ -101,13 +102,24 @@ pub struct Session<S = Value> {
 }
 
 /// Options for creating a new chat session.
-#[derive(Default)]
 pub struct ChatOptions<'a, I, S> {
     pub thread_name: Option<String>,
     pub preamble: Option<&'a ExecutablePrompt<I>>,
     pub base_options: Option<BaseGenerateOptions>,
     pub prompt_render_input: Option<I>,
     _marker: std::marker::PhantomData<S>,
+}
+
+impl<'a, I, S> Default for ChatOptions<'a, I, S> {
+    fn default() -> Self {
+        Self {
+            thread_name: None,
+            preamble: None,
+            base_options: None,
+            prompt_render_input: None,
+            _marker: std::marker::PhantomData,
+        }
+    }
 }
 
 impl<S> Session<S>
@@ -154,24 +166,55 @@ where
     }
 
     /// Creates a new `Chat` instance for a specific conversation thread.
-    pub async fn chat<'a, I>(self: &Arc<Self>, options: ChatOptions<'a, I, S>) -> Result<Chat<S>>
+    pub async fn chat<'a, I>(
+        self: &Arc<Self>,
+        options: Option<ChatOptions<'a, I, S>>,
+    ) -> Result<Chat<S>>
     where
-        I: Serialize + Send + Sync + 'static,
+        I: Serialize + DeserializeOwned + JsonSchema + Default + Send + Sync + 'static,
     {
+        let options = options.unwrap_or_default();
         let thread_name = options
             .thread_name
             .unwrap_or_else(|| MAIN_THREAD.to_string());
 
         let base_options = if let Some(preamble) = options.preamble {
-            preamble.render(options.prompt_render_input, None).await?
+            preamble
+                .render(options.prompt_render_input.unwrap_or_default(), None)
+                .await?
         } else {
-            options.base_options.unwrap_or_default()
+            let base = options.base_options.unwrap_or_default();
+            GenerateOptions {
+                model: base.model,
+                messages: Some(base.messages),
+                docs: base.docs,
+                tools: base.tools,
+                tool_choice: base.tool_choice,
+                config: base.config,
+                output: base.output,
+                ..Default::default()
+            }
         };
 
         let data = self.data.lock().await;
         let history = data.threads.get(&thread_name).cloned().unwrap_or_default();
 
-        Ok(Chat::new(self.clone(), base_options, thread_name, history))
+        let chat_base_options = BaseGenerateOptions {
+            model: base_options.model,
+            docs: base_options.docs,
+            messages: base_options.messages.unwrap_or_default(),
+            tools: base_options.tools,
+            tool_choice: base_options.tool_choice,
+            config: base_options.config,
+            output: base_options.output,
+        };
+
+        Ok(Chat::new(
+            self.clone(),
+            chat_base_options,
+            thread_name,
+            history,
+        ))
     }
 
     /// Executes a future within the context of this session.

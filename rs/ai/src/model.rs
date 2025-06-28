@@ -18,6 +18,7 @@
 //! models. It is the Rust equivalent of `model.ts` and `model-types.ts`.
 
 use crate::document::{Document, Part};
+use crate::generate::ToolChoice;
 use crate::message::MessageData;
 use crate::tool::ToolDefinition;
 use genkit_core::action::{Action, ActionBuilder};
@@ -89,9 +90,15 @@ pub struct GenerateRequest {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub tools: Option<Vec<ToolDefinition>>,
     #[serde(skip_serializing_if = "Option::is_none")]
+    pub tool_choice: Option<ToolChoice>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub output: Option<super::formats::FormatterConfig>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub docs: Option<Vec<Document>>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub max_turns: Option<u32>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub return_tool_requests: Option<bool>,
 }
 
 /// The reason a model stopped generating tokens.
@@ -201,18 +208,16 @@ where
         serde_json::to_value(model_info).unwrap(),
     );
 
-    let model_action =
-        ActionBuilder::new(ActionType::Model, options.name, move |req, _| runner(req))
-            .with_description(options.label)
-            .with_metadata(metadata)
-            .build(registry);
-
-    model_action
+    ActionBuilder::new(ActionType::Model, options.name, move |req, _| runner(req))
+        .with_description(options.label)
+        .with_metadata(metadata)
+        .build(registry)
 }
 
-/// A reference to a model, which can include specific configuration.
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct ModelRef<C> {
+/// A serializable reference to a model, often used in plugin configurations.
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct ModelRef<C = Value> {
     pub name: String,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub config: Option<C>,
@@ -220,10 +225,18 @@ pub struct ModelRef<C> {
     pub version: Option<String>,
 }
 
+/// Represents a reference to a model.
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "camelCase")]
+pub enum Model {
+    Reference(ModelRef<Value>),
+    Name(String),
+}
+
 /// Helper function to create a `ModelRef`.
-pub fn model_ref<C>(name: impl Into<String>) -> ModelRef<C> {
+pub fn model_ref<C>(name: &str) -> ModelRef<C> {
     ModelRef {
-        name: name.into(),
+        name: name.to_string(),
         config: None,
         version: None,
     }

@@ -64,6 +64,8 @@ pub enum ActionType {
 pub trait ErasedAction: Send + Sync {
     /// Executes the action with a raw JSON value.
     async fn run_http(&self, input: Value) -> Result<Value>;
+    /// Returns the name of the action.
+    fn name(&self) -> &str;
     /// Returns the metadata for the action.
     fn metadata(&self) -> &ActionMetadata;
     /// Provides a way to downcast to the concrete `Any` type for inspection.
@@ -93,6 +95,10 @@ where
 {
     async fn run_http(&self, _input: Value) -> Result<Value> {
         unimplemented!("run_http not implemented for tests");
+    }
+
+    fn name(&self) -> &str {
+        &self.meta.name
     }
 
     fn metadata(&self) -> &ActionMetadata {
@@ -193,6 +199,26 @@ impl Registry {
         }
 
         None
+    }
+
+    /// Returns a map of all registered actions, including those from parent registries.
+    ///
+    /// Child actions take precedence over parent actions with the same key.
+    pub async fn list_actions(&self) -> HashMap<String, Arc<dyn ErasedAction>> {
+        let (mut actions, parent) = {
+            let state = self.state.lock().unwrap();
+            (state.actions.clone(), state.parent.clone())
+        };
+
+        if let Some(parent) = parent {
+            let parent_actions = Box::pin(parent.list_actions()).await;
+            for (key, action) in parent_actions {
+                // This ensures that child actions are not overwritten by parent actions.
+                actions.entry(key).or_insert(action);
+            }
+        }
+
+        actions
     }
 
     /// Registers a plugin with the registry.

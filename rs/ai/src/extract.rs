@@ -59,9 +59,7 @@ pub fn extract_json<T: DeserializeOwned>(text: &str) -> Result<Option<T>> {
         }
 
         if char == '"' {
-            if start_pos.is_some() {
-                in_string = !in_string;
-            }
+            in_string = !in_string;
             continue;
         }
 
@@ -276,7 +274,7 @@ mod tests {
         cursor = result2.cursor;
 
         // Third chunk, closing the array
-        text.push_str("]");
+        text.push(']');
         let result3 = extract_items(&text, cursor);
         assert_eq!(result3.items.len(), 0);
         cursor = result3.cursor;

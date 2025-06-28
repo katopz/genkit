@@ -23,7 +23,6 @@ use crate::generate::{
     GenerateStreamResponse,
 };
 use crate::message::{MessageData, Role};
-use crate::prompt::PromptGenerateOptions;
 use crate::session::{run_with_session, Session, SessionUpdater};
 use genkit_core::error::Result;
 use genkit_core::tracing;
@@ -165,7 +164,7 @@ impl<S: Serialize + DeserializeOwned + Clone + Send + Sync + 'static> Chat<S> {
     }
 
     /// Sends a message to the model and gets a response, maintaining history.
-    pub async fn send(&self, input: impl Into<SendInput>) -> Result<GenerateResponse> {
+    pub async fn send(&self, input: impl Into<SendInput> + Send) -> Result<GenerateResponse> {
         run_with_session(self.session.clone(), async {
             let mut attrs = HashMap::new();
             attrs.insert(
@@ -194,15 +193,32 @@ impl<S: Serialize + DeserializeOwned + Clone + Send + Sync + 'static> Chat<S> {
                     }
 
                     // TODO: Wire up streaming callback from resolved_options.
-                    let response = generate(generate_options).await?;
+                    let generate_opts = GenerateOptions {
+                        model: generate_options.model,
+                        system: None,
+                        prompt: None,
+                        docs: generate_options.docs,
+                        messages: Some(generate_options.messages),
+                        tools: generate_options.tools,
+                        tool_choice: generate_options.tool_choice,
+                        config: generate_options.config,
+                        output: generate_options.output,
+                        max_turns: None,
+                        return_tool_requests: None,
+                    };
+
+                    let response = generate(&self.session.registry, generate_opts).await?;
 
                     // Update state with any changes from the generation call.
                     if let Some(req) = &response.request {
-                        state.request_base.tools = req.tools.clone();
+                        if let Some(tools) = &req.tools {
+                            state.request_base.tools =
+                                Some(tools.iter().map(|t| t.name.clone().into()).collect());
+                        }
                         // In a full implementation, toolChoice and config would also be updated.
                     }
 
-                    let final_messages = response.messages();
+                    let final_messages = response.messages()?;
                     drop(state); // Unlock before calling async update_messages
 
                     self.update_messages(&final_messages).await?;
@@ -217,13 +233,42 @@ impl<S: Serialize + DeserializeOwned + Clone + Send + Sync + 'static> Chat<S> {
     }
 
     /// Sends a message and returns a stream of response chunks.
-    pub fn send_stream(
+    pub async fn send_stream(
         &self,
         input: impl Into<SendInput> + Send + 'static,
     ) -> GenerateStreamResponse {
-        let self_clone = self.clone();
-        let fut = async move { self_clone.send(input).await };
-        generate_stream(fut)
+        let resolved_options = resolve_send_options(input.into());
+        let state = self.state.lock().await;
+        let base_options = state.request_base.clone();
+
+        let mut messages = base_options.messages;
+        if let Some(prompt_parts) = resolved_options.prompt {
+            messages.push(MessageData {
+                role: Role::User,
+                content: prompt_parts,
+                metadata: None,
+            });
+        }
+
+        // Convert BaseGenerateOptions to GenerateOptions
+        let generate_options = GenerateOptions {
+            model: base_options.model,
+            messages: Some(messages),
+            tools: base_options.tools,
+            tool_choice: base_options.tool_choice,
+            config: base_options.config,
+            output: base_options.output,
+            docs: base_options.docs,
+            system: None,
+            prompt: None,
+            max_turns: None,
+            return_tool_requests: None,
+        };
+
+        // NOTE: This doesn't yet handle state updates after the stream completes.
+        // A more complete implementation would spawn a task to await the final
+        // response from the stream and then update the chat's message history.
+        generate_stream(&self.session.registry, generate_options)
     }
 
     /// Gets the current list of messages in the chat history.
