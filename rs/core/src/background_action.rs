@@ -24,7 +24,7 @@
 
 use crate::action::{Action, ActionBuilder, ActionFnArg};
 use crate::error::Result;
-use crate::registry::{ActionType, Registry};
+use crate::registry::ActionType;
 use schemars::JsonSchema;
 use serde::{de::DeserializeOwned, Deserialize, Serialize};
 use serde_json::Value;
@@ -107,23 +107,23 @@ where
     }
 
     /// Builds the `BackgroundAction` and registers its component actions.
-    pub fn build(self, registry: &mut Registry) -> BackgroundAction<I, O> {
+    pub fn build(self) -> BackgroundAction<I, O> {
         let name = self.name;
 
         // Define the start action
         let start_action =
-            ActionBuilder::new(ActionType::Custom, name.clone(), self.start_fn).build(registry);
+            ActionBuilder::new(ActionType::Custom, name.clone(), self.start_fn).build();
 
         // Define the check action
         let check_action_name = format!("{}/check", name);
         let check_action =
             ActionBuilder::new(ActionType::CheckOperation, check_action_name, self.check_fn)
-                .build(registry);
+                .build();
 
         // Define the cancel action, if provided
         let cancel_action = self.cancel_fn.map(|f| {
             let cancel_action_name = format!("{}/cancel", name);
-            ActionBuilder::new(ActionType::CancelOperation, cancel_action_name, f).build(registry)
+            ActionBuilder::new(ActionType::CancelOperation, cancel_action_name, f).build()
         });
 
         // TODO: Register the actions with the registry.

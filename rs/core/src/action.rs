@@ -40,7 +40,7 @@ use std::sync::Arc;
 use tokio_util::sync::CancellationToken;
 
 /// Metadata describing a Genkit `Action`.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize)]
 pub struct ActionMetadata {
     pub action_type: ActionType,
     pub name: String,
@@ -323,8 +323,8 @@ where
         self
     }
 
-    /// Finalizes the build and registers the action.
-    pub fn build(self, _registry: &mut Registry) -> Action<I, O, S> {
+    /// Finalizes the build and creates the `Action` struct.
+    pub fn build(self) -> Action<I, O, S> {
         let meta = Arc::new(ActionMetadata {
             action_type: self.action_type,
             name: self.name,
@@ -340,4 +340,49 @@ where
             func: Arc::new(self.func),
         }
     }
+}
+
+/// Creates a detached action.
+///
+/// A detached action is not registered with the framework automatically and
+/// can be used directly or registered manually later. This is the Rust
+/// equivalent of `detachedAction` in Genkit TS.
+pub fn detached_action<I, O, S, F, Fut>(
+    action_type: ActionType,
+    name: impl Into<String>,
+    func: F,
+) -> Action<I, O, S>
+where
+    I: DeserializeOwned + JsonSchema + Send + Sync + 'static,
+    O: Serialize + JsonSchema + Send + Sync + 'static,
+    S: Serialize + JsonSchema + Send + Sync + 'static,
+    F: Fn(I, ActionFnArg<S>) -> Fut + Send + Sync + 'static,
+    Fut: Future<Output = Result<O>> + Send,
+{
+    ActionBuilder::new(action_type, name, func).build()
+}
+
+/// Defines an action and registers it with the given registry.
+///
+/// This is the primary way to create and register actions that will be visible
+/// to the Genkit framework.
+pub fn define_action<I, O, S, F, Fut>(
+    registry: &mut Registry,
+    action_type: ActionType,
+    name: impl Into<String>,
+    func: F,
+) -> Action<I, O, S>
+where
+    I: DeserializeOwned + JsonSchema + Send + Sync + Clone + 'static,
+    O: Serialize + JsonSchema + Send + Sync + 'static,
+    S: Serialize + JsonSchema + Send + Sync + Clone + 'static,
+    F: Fn(I, ActionFnArg<S>) -> Fut + Send + Sync + 'static,
+    Fut: Future<Output = Result<O>> + Send,
+    Action<I, O, S>: crate::registry::ErasedAction + 'static,
+{
+    let action = ActionBuilder::new(action_type, name, func).build();
+    registry
+        .register_action(action.clone())
+        .expect("Failed to register action"); // Or handle error more gracefully
+    action
 }

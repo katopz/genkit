@@ -450,7 +450,7 @@ mod tests {
                 })
             },
         )
-        .build(&mut registry);
+        .build();
 
         registry.register_action(test_action).unwrap();
 
@@ -469,7 +469,7 @@ mod tests {
             ActionBuilder::<(), (), (), _>::new(ActionType::Util, "parentUtil", |_, _| async {
                 Ok(())
             })
-            .build(&mut parent_registry);
+            .build();
         parent_registry.register_action(parent_action).unwrap();
 
         let mut child_registry = Registry::with_parent(&parent_registry);
@@ -477,7 +477,7 @@ mod tests {
             ActionBuilder::<(), (), (), _>::new(ActionType::Util, "childUtil", |_, _| async {
                 Ok(())
             })
-            .build(&mut child_registry);
+            .build();
         child_registry.register_action(child_action).unwrap();
 
         // Child can find its own action

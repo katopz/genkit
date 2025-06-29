@@ -27,6 +27,7 @@ pub use self::instrumentation::in_new_span;
 
 use crate::error::Result;
 use crate::telemetry::TelemetryConfig;
+use crate::tracing::instrumentation::ATTR_PREFIX;
 use crate::utils::is_dev_env;
 use exporter::TraceServerExporter;
 use once_cell::sync::OnceCell;
@@ -151,5 +152,143 @@ pub fn flush_tracing() -> OTelSdkResult {
         provider.shutdown()
     } else {
         OTelSdkResult::Ok(())
+    }
+}
+
+/// A `SpanProcessor` wrapper that supports exporting to multiple `SpanProcessor`s.
+///
+/// This processor iterates through a list of other processors, calling the
+/// corresponding method on each.
+#[derive(Debug)]
+pub struct MultiSpanProcessor {
+    processors: Vec<Box<dyn SpanProcessor>>,
+}
+
+impl MultiSpanProcessor {
+    /// Creates a new `MultiSpanProcessor`.
+    pub fn new(processors: Vec<Box<dyn SpanProcessor>>) -> Self {
+        Self { processors }
+    }
+}
+
+impl SpanProcessor for MultiSpanProcessor {
+    fn on_start(&self, span: &mut Span, cx: &opentelemetry::Context) {
+        for p in &self.processors {
+            p.on_start(span, cx);
+        }
+    }
+
+    fn on_end(&self, span: SpanData) {
+        if let Some((last, others)) = self.processors.split_last() {
+            for p in others {
+                p.on_end(span.clone());
+            }
+            last.on_end(span);
+        }
+    }
+
+    fn force_flush(&self) -> OTelSdkResult {
+        for p in &self.processors {
+            p.force_flush()?;
+        }
+        Ok(())
+    }
+
+    fn shutdown(&self) -> OTelSdkResult {
+        for p in &self.processors {
+            p.shutdown()?;
+        }
+        Ok(())
+    }
+
+    fn set_resource(&mut self, resource: &Resource) {
+        for p in &mut self.processors {
+            p.set_resource(resource);
+        }
+    }
+
+    fn shutdown_with_timeout(
+        &self,
+        timeout: std::time::Duration,
+    ) -> opentelemetry_sdk::error::OTelSdkResult {
+        for p in &self.processors {
+            p.shutdown_with_timeout(timeout)?;
+        }
+        Ok(())
+    }
+}
+
+/// A `SpanProcessor` that wraps another processor and filters out Genkit-internal
+/// attributes before exporting.
+///
+/// This is useful for preventing Genkit-specific metadata from polluting external
+/// telemetry systems if the user has configured an additional exporter (e.g., OTLP).
+#[derive(Debug)]
+pub struct GenkitSpanProcessorWrapper {
+    processor: Box<dyn SpanProcessor>,
+}
+
+impl GenkitSpanProcessorWrapper {
+    pub fn new(processor: Box<dyn SpanProcessor>) -> Self {
+        Self { processor }
+    }
+}
+
+impl SpanProcessor for GenkitSpanProcessorWrapper {
+    fn on_start(&self, span: &mut Span, cx: &opentelemetry::Context) {
+        self.processor.on_start(span, cx)
+    }
+
+    fn on_end(&self, span: SpanData) {
+        if !span
+            .attributes
+            .iter()
+            .any(|kv| kv.key.as_str().starts_with(ATTR_PREFIX))
+        {
+            self.processor.on_end(span);
+            return;
+        }
+
+        let filtered_attributes = span
+            .attributes
+            .into_iter()
+            .filter(|kv| !kv.key.as_str().starts_with(ATTR_PREFIX))
+            .collect();
+
+        // Re-construct the SpanData with filtered attributes.
+        let filtered_span = SpanData {
+            attributes: filtered_attributes,
+            span_context: span.span_context,
+            parent_span_id: span.parent_span_id,
+            span_kind: span.span_kind,
+            name: span.name,
+            start_time: span.start_time,
+            end_time: span.end_time,
+            events: span.events,
+            links: span.links,
+            status: span.status,
+            dropped_attributes_count: span.dropped_attributes_count,
+            instrumentation_scope: span.instrumentation_scope,
+        };
+        self.processor.on_end(filtered_span);
+    }
+
+    fn force_flush(&self) -> OTelSdkResult {
+        self.processor.force_flush()
+    }
+
+    fn shutdown(&self) -> OTelSdkResult {
+        self.processor.shutdown()
+    }
+
+    fn set_resource(&mut self, resource: &Resource) {
+        self.processor.set_resource(resource);
+    }
+
+    fn shutdown_with_timeout(
+        &self,
+        timeout: std::time::Duration,
+    ) -> opentelemetry_sdk::error::OTelSdkResult {
+        self.processor.shutdown_with_timeout(timeout)
     }
 }

@@ -21,7 +21,6 @@ use genkit_core::async_utils::channel;
 use genkit_core::context::{run_with_context, ActionContext};
 use genkit_core::error::Result;
 use genkit_core::flow::{define_flow, run};
-use genkit_core::registry::Registry;
 use genkit_core::tracing::TraceContext;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
@@ -65,16 +64,11 @@ mod test {
     use crate::*;
     #[tokio::test]
     async fn test_run_simple_flow() {
-        let mut registry = Registry::new();
-        let test_flow = define_flow(
-            &mut registry,
-            "testFlow",
-            |input: TestInput, _| async move {
-                Ok(TestOutput {
-                    message: format!("bar {}", input.name),
-                })
-            },
-        );
+        let test_flow = define_flow("testFlow", |input: TestInput, _| async move {
+            Ok(TestOutput {
+                message: format!("bar {}", input.name),
+            })
+        });
 
         let result = run_test_flow(
             &test_flow,
@@ -90,19 +84,14 @@ mod test {
 
     #[tokio::test]
     async fn test_run_flow_with_steps() {
-        let mut registry = Registry::new();
-        let test_flow = define_flow(
-            &mut registry,
-            "flowWithSteps",
-            |input: TestInput, _| async move {
-                let step1_result = run("step1", || async { Ok(input.name.to_uppercase()) }).await?;
-                let step2_result =
-                    run("step2", || async { Ok(format!("Hello, {}", step1_result)) }).await?;
-                Ok(TestOutput {
-                    message: step2_result,
-                })
-            },
-        );
+        let test_flow = define_flow("flowWithSteps", |input: TestInput, _| async move {
+            let step1_result = run("step1", || async { Ok(input.name.to_uppercase()) }).await?;
+            let step2_result =
+                run("step2", || async { Ok(format!("Hello, {}", step1_result)) }).await?;
+            Ok(TestOutput {
+                message: step2_result,
+            })
+        });
 
         let result = run_test_flow(
             &test_flow,
@@ -118,10 +107,7 @@ mod test {
 
     #[tokio::test]
     async fn test_flow_context_inheritance() {
-        let mut registry = Registry::new();
-
         let child_flow = define_flow(
-            &mut registry,
             "childFlow",
             |input: TestInput, args: ActionFnArg<TestStreamChunk>| async move {
                 let auth_user = args
@@ -135,7 +121,7 @@ mod test {
             },
         );
 
-        let parent_flow = define_flow(&mut registry, "parentFlow", move |input: TestInput, _| {
+        let parent_flow = define_flow("parentFlow", move |input: TestInput, _| {
             let child_flow = child_flow.clone();
             async move {
                 // In a real scenario, we wouldn't manually construct the args.

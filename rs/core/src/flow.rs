@@ -21,7 +21,7 @@
 
 use crate::action::{Action, ActionBuilder, ActionFnArg};
 use crate::error::Result;
-use crate::registry::{ActionType, Registry};
+use crate::registry::ActionType;
 use crate::tracing as genkit_tracing;
 
 use schemars::JsonSchema;
@@ -45,11 +45,7 @@ pub type Flow<I, O, S> = Action<I, O, S>;
 /// # Returns
 ///
 /// An `Action` instance representing the defined flow.
-pub fn define_flow<I, O, S, F, Fut>(
-    registry: &mut Registry,
-    name: impl Into<String>,
-    func: F,
-) -> Flow<I, O, S>
+pub fn define_flow<I, O, S, F, Fut>(name: impl Into<String>, func: F) -> Flow<I, O, S>
 where
     I: DeserializeOwned + JsonSchema + Send + Sync + 'static,
     O: Serialize + JsonSchema + Send + Sync + 'static,
@@ -57,7 +53,7 @@ where
     F: Fn(I, ActionFnArg<S>) -> Fut + Send + Sync + 'static,
     Fut: Future<Output = Result<O>> + Send,
 {
-    ActionBuilder::new(ActionType::Flow, name, func).build(registry)
+    ActionBuilder::new(ActionType::Flow, name, func).build()
 }
 
 /// Executes a given function as a distinct step within a flow.
@@ -95,7 +91,6 @@ where
 mod tests {
     use super::*;
     use crate::async_utils::channel;
-    use crate::registry::Registry;
     use crate::tracing::TraceContext;
     use serde::Deserialize;
     use tokio_util::sync::CancellationToken;
@@ -115,11 +110,8 @@ mod tests {
 
     #[tokio::test]
     async fn test_define_and_run_flow() {
-        let mut registry = Registry::new();
-
         // Define a flow with two instrumented steps.
         let my_flow = define_flow(
-            &mut registry,
             "testFlow",
             |input: MyInput, _args: ActionFnArg<MyStreamChunk>| async move {
                 let upper_name = run("step1: uppercase", || async {

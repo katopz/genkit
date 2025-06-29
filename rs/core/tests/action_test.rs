@@ -8,7 +8,7 @@ use genkit_core::action::{ActionBuilder, ActionFnArg, ActionRunOptions};
 use genkit_core::async_utils::channel;
 use genkit_core::context::ActionContext;
 use genkit_core::error;
-use genkit_core::registry::{ActionType, Registry};
+use genkit_core::registry::ActionType;
 use genkit_core::tracing::TraceContext;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
@@ -36,8 +36,6 @@ mod test {
 
     #[tokio::test]
     async fn test_action_execution_with_context() {
-        let mut registry = Registry::new();
-
         // Define an action using the builder
         let test_action = ActionBuilder::new(
             ActionType::Util,
@@ -59,7 +57,7 @@ mod test {
                 })
             },
         )
-        .build(&mut registry);
+        .build();
 
         // Manually construct the arguments for invocation
         let (chunk_tx, _chunk_rx) = channel();
@@ -89,8 +87,6 @@ mod test {
 
     #[tokio::test]
     async fn test_action_streaming() {
-        let mut registry = Registry::new();
-
         // Define a streaming action
         let streaming_action = ActionBuilder::new(
             ActionType::Flow,
@@ -107,7 +103,7 @@ mod test {
                 })
             },
         )
-        .build(&mut registry);
+        .build();
 
         let input = TestInput {
             name: "Streamer".into(),
@@ -145,7 +141,6 @@ mod test {
 
     #[tokio::test]
     async fn test_action_aborts_via_signal() {
-        let mut registry = Registry::new();
         let long_running_action = ActionBuilder::new(
             ActionType::Util,
             "longRunning",
@@ -166,7 +161,7 @@ mod test {
                 }
             },
         )
-        .build(&mut registry);
+        .build();
 
         let cancel_token = CancellationToken::new();
 

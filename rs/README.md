@@ -62,7 +62,7 @@ You can run all tests for the workspace from the root of the `/rs` directory.
 This Rust implementation provides a solid foundation with many of the core features found in the Genkit JavaScript library.
 
 -   **Core Framework**:
-    -   **Actions**: Self-describing, callable units of work.
+    -   **Actions**: Self-describing, callable units of work, with support for detached definitions.
     -   **Flows**: Orchestration primitive for creating multi-step AI logic with built-in tracing.
     -   **Registry**: Centralized management for all Genkit components.
     -   **Context Management**: Securely pass authentication and other data through your flows.
@@ -80,17 +80,13 @@ This Rust implementation provides a solid foundation with many of the core featu
 -   **Output Formatting**:
     -   Built-in formatters to constrain model output to specific formats, including JSON, JSONL, Enum, Text, and Array.
 
--   **Observability**:
-    -   Basic integration with OpenTelemetry for tracing flow and action execution.
+-   **Observability & Development**:
+    -   **Telemetry**: Integration with OpenTelemetry for tracing flow and action execution, with support for custom and multi-span processors.
+    -   **Reflection Server**: A local server for inspecting actions, running flows, and viewing telemetry data during development.
 
 ## 📝 TODO (Missing Features)
 
 This section tracks features from the JavaScript implementation that are not yet available in the Rust version. Contributions are welcome!
-
--   **Core**
-    -   [ ] **Detached Actions**: Implement `detachedAction` for defining actions without immediate registration.
-    -   [ ] **Advanced Telemetry**: Implement `MultiSpanProcessor` and `GenkitSpanProcessorWrapper` for more complex tracing scenarios.
-    -   [ ] **Full Reflection Server**: Add missing endpoints to the reflection server (`/__quitquitquit`, `/api/envs`, `/api/notify`, trace/flow state endpoints).
 
 -   **AI**
     -   [ ] **Dotprompt Integration**:
