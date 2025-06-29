@@ -32,6 +32,7 @@ use crate::generate::action::ModelMiddleware;
 use crate::message::{MessageData, Role};
 use crate::model::GenerateRequest;
 use crate::tool::{self, ToolArgument};
+use crate::GenerateResponseData;
 use futures_util::stream::Stream;
 use genkit_core::context::ActionContext;
 use genkit_core::error::{Error, Result};
@@ -286,6 +287,46 @@ where
         stream: Box::pin(stream),
         response: response_handle,
     }
+}
+
+/// Starts a long-running generation operation.
+pub async fn generate_operation<O>(
+    registry: &Registry,
+    options: GenerateOptions<O>,
+) -> Result<genkit_core::background_action::Operation<GenerateResponseData>>
+where
+    O: Clone
+        + Default
+        + for<'de> DeserializeOwned
+        + Serialize
+        + Send
+        + Sync
+        + 'static
+        + std::fmt::Debug,
+{
+    let model_ref = options
+        .model
+        .as_ref()
+        .ok_or_else(|| Error::new_internal("Model not specified".to_string()))?;
+
+    let model_name = match model_ref {
+        crate::model::Model::Reference(r) => r.name.clone(),
+        crate::model::Model::Name(n) => n.clone(),
+    };
+    let action_key = format!("/background-model/{}", model_name);
+
+    let action = registry.lookup_action(&action_key).await.ok_or_else(|| {
+        Error::new_internal(format!("Background model '{}' not found", model_name))
+    })?;
+
+    let request = to_generate_request(registry, &options).await?;
+    let request_value =
+        serde_json::to_value(request).map_err(|e| Error::new_internal(e.to_string()))?;
+    let op_value = action.run_http_json(request_value, None).await?;
+    let operation: genkit_core::background_action::Operation<GenerateResponseData> =
+        serde_json::from_value(op_value).map_err(|e| Error::new_internal(e.to_string()))?;
+
+    Ok(operation)
 }
 
 /// Converts `GenerateOptions` to a `GenerateRequest`.

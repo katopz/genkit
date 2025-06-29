@@ -17,16 +17,18 @@
 //! This module defines the core traits and functions for working with generative
 //! models. It is the Rust equivalent of `model.ts` and `model-types.ts`.
 
+pub mod middleware;
+use self::middleware::{download_request_media, simulate_constrained_generation};
 use crate::document::{Document, Part};
 use crate::generate::{OutputOptions, ToolChoice};
 use crate::message::{MessageData, Role};
+
 use crate::tool::ToolDefinition;
 use async_trait::async_trait;
 use genkit_core::action::{Action, ActionBuilder};
 use genkit_core::background_action::Operation;
 use genkit_core::error::{Error, Result};
-use genkit_core::registry::ErasedAction;
-use genkit_core::registry::{ActionType, Registry};
+use genkit_core::registry::{ActionType, ErasedAction};
 use schemars::{self, JsonSchema};
 use serde::{de::DeserializeOwned, Deserialize, Serialize};
 use serde_json::{self, Value};
@@ -301,12 +303,28 @@ pub struct DefineModelOptions<C: JsonSchema + 'static> {
     pub config_schema: Option<C>,
 }
 
+fn get_model_middleware<C: JsonSchema + Send + Sync + 'static>(
+    options: &DefineModelOptions<C>,
+) -> Vec<ModelMiddleware> {
+    let mut middleware: Vec<ModelMiddleware> = Vec::new();
+
+    middleware.push(download_request_media(None, None));
+    middleware.push(validate_support(
+        options.name.clone(),
+        options.supports.clone(),
+    ));
+
+    if options.supports.context != Some(true) {
+        middleware.push(augment_with_context(None));
+    }
+
+    middleware.push(simulate_constrained_generation(None));
+
+    middleware
+}
+
 /// Defines a new model and registers it with the framework.
-pub fn define_model<C, F, Fut>(
-    registry: &mut Registry,
-    options: DefineModelOptions<C>,
-    runner: F,
-) -> ModelAction
+pub fn define_model<C, F, Fut>(options: DefineModelOptions<C>, runner: F) -> ModelAction
 where
     C: JsonSchema + Serialize + DeserializeOwned + Send + Sync + 'static,
     F: Fn(GenerateRequest, genkit_core::action::ActionFnArg<GenerateResponseChunkData>) -> Fut
@@ -315,14 +333,43 @@ where
         + 'static,
     Fut: Future<Output = Result<GenerateResponseData>> + Send,
 {
-    // In a full implementation, middleware would be handled here.
-    // For this port, we are directly calling the runner.
+    let middleware = get_model_middleware(&options);
+    let runner_arc = Arc::new(runner);
+
+    let wrapped_runner =
+        move |req: GenerateRequest,
+              args: genkit_core::action::ActionFnArg<GenerateResponseChunkData>| {
+            let runner_clone = runner_arc.clone();
+            let middleware_clone = middleware.clone();
+
+            async move {
+                let final_step: NextFn = Box::new(move |final_req| {
+                    // The middleware chain doesn't pass the ActionFnArg, so we have to capture it from the outer scope.
+                    let copied_args = genkit_core::action::ActionFnArg {
+                        streaming_requested: args.streaming_requested,
+                        chunk_sender: args.chunk_sender.clone(),
+                        context: args.context.clone(),
+                        trace: args.trace.clone(),
+                        abort_signal: args.abort_signal.clone(),
+                    };
+                    Box::pin(async move { (runner_clone)(final_req, copied_args).await })
+                });
+
+                let mut chain = final_step;
+                for mw in middleware_clone.into_iter().rev() {
+                    let next_fn = chain;
+                    chain = Box::new(move |req_inner| Box::pin(mw(req_inner, next_fn)));
+                }
+
+                chain(req).await
+            }
+        };
 
     let mut metadata: HashMap<String, Value> = HashMap::new();
     let model_info = ModelInfo {
         label: options.label.clone(),
         versions: options.versions,
-        supports: options.supports,
+        supports: options.supports.clone(),
     };
     metadata.insert(
         "model".to_string(),
@@ -330,24 +377,36 @@ where
     );
 
     ModelAction(
-        ActionBuilder::new(ActionType::Model, options.name, runner)
+        ActionBuilder::new(ActionType::Model, options.name, wrapped_runner)
             .with_description(options.label)
             .with_metadata(metadata)
-            .build(registry),
+            .build(),
     )
 }
 
+pub struct DefineBackgroundModelOptions<C, StartFn, CheckFn, CancelFn> {
+    pub name: String,
+    pub label: String,
+    pub versions: Option<Vec<String>>,
+    pub supports: ModelInfoSupports,
+    pub config_schema: Option<C>,
+    pub start: StartFn,
+    pub check: CheckFn,
+    pub cancel: Option<CancelFn>,
+}
+
 /// Defines a new background model and registers it with the framework.
-pub fn define_background_model<C, StartFut, CheckFut>(
-    registry: &mut Registry,
-    options: DefineModelOptions<C>,
-    start: impl Fn(GenerateRequest) -> StartFut + Send + Sync + 'static,
-    check: impl Fn(Operation<GenerateResponseData>) -> CheckFut + Send + Sync + 'static,
+pub fn define_background_model<C, StartFn, CheckFn, CancelFn, StartFut, CheckFut, CancelFut>(
+    options: DefineBackgroundModelOptions<C, StartFn, CheckFn, CancelFn>,
 ) -> Arc<BackgroundModelAction>
 where
     C: JsonSchema + Serialize + DeserializeOwned + Send + Sync + 'static,
+    StartFn: Fn(GenerateRequest) -> StartFut + Send + Sync + 'static,
     StartFut: Future<Output = Result<Operation<GenerateResponseData>>> + Send,
+    CheckFn: Fn(Operation<GenerateResponseData>) -> CheckFut + Send + Sync + 'static,
     CheckFut: Future<Output = Result<Operation<GenerateResponseData>>> + Send,
+    CancelFn: Fn(Operation<GenerateResponseData>) -> CancelFut + Send + Sync + 'static,
+    CancelFut: Future<Output = Result<Operation<GenerateResponseData>>> + Send,
 {
     let mut metadata: HashMap<String, Value> = HashMap::new();
     let mut model_info = ModelInfo {
@@ -361,26 +420,36 @@ where
         serde_json::to_value(model_info).unwrap(),
     );
 
-    // Register the 'start' action
     let start_action = ActionBuilder::new(
         ActionType::BackgroundModel,
         options.name.clone(),
-        move |req, _: genkit_core::action::ActionFnArg<()>| start(req),
+        move |req, _: genkit_core::action::ActionFnArg<()>| (options.start)(req),
     )
     .with_description(options.label.clone())
     .with_metadata(metadata.clone())
-    .build(registry);
+    .build();
 
-    // Register the 'check' action under a derived name
     let check_action_name = format!("{}/check", options.name);
     let _check_action = ActionBuilder::new(
         ActionType::CheckOperation,
         check_action_name,
-        move |op, _: genkit_core::action::ActionFnArg<()>| check(op),
+        move |op, _: genkit_core::action::ActionFnArg<()>| (options.check)(op),
     )
     .with_description(format!("Check status for {}", options.label))
-    .with_metadata(metadata)
-    .build(registry);
+    .with_metadata(metadata.clone())
+    .build();
+
+    if let Some(cancel_fn) = options.cancel {
+        let cancel_action_name = format!("{}/cancel", options.name);
+        let _cancel_action = ActionBuilder::new(
+            ActionType::CancelOperation,
+            cancel_action_name,
+            move |op, _: genkit_core::action::ActionFnArg<()>| cancel_fn(op),
+        )
+        .with_description(format!("Cancel operation for {}", options.label))
+        .with_metadata(metadata)
+        .build();
+    }
 
     Arc::new(BackgroundModelAction(start_action))
 }

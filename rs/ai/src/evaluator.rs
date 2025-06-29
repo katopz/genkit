@@ -137,11 +137,7 @@ pub struct EvaluatorInfo {
 //
 
 /// Defines a new evaluator and registers it.
-pub fn define_evaluator<I, F, Fut>(
-    registry: &mut Registry,
-    name: &str,
-    runner: F,
-) -> Arc<EvaluatorAction<I>>
+pub fn define_evaluator<I, F, Fut>(name: &str, runner: F) -> Arc<EvaluatorAction<I>>
 where
     I: JsonSchema + DeserializeOwned + Send + Sync + 'static,
     F: FnMut(BaseEvalDataPoint) -> Fut + Send + Sync + 'static,
@@ -189,7 +185,7 @@ where
             }
         },
     )
-    .build(registry)
+    .build()
     .into()
 }
 

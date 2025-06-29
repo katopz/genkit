@@ -65,7 +65,7 @@ pub trait Plugin: Send + Sync {
     //              ActionType::Model,
     //              "myModel",
     //              |_, _: ActionFnArg<()>| async { Ok(MyOutput {}) }
-    //          ).build(registry);
+    //          ).build();
     //          // registry.register_action(my_action)?;
     ///         Ok(())
     ///     }

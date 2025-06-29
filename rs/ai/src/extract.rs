@@ -96,7 +96,30 @@ pub fn extract_json<T: DeserializeOwned>(text: &str) -> Result<Option<T>> {
         }
     }
 
+    // If we exit the loop and found a start but no end, it's partial JSON.
+    if let Some(start) = start_pos {
+        if nesting_count > 0 {
+            let partial_str = &text[start..];
+            // Attempt to parse the partial string.
+            // In case of error, we treat it as if no JSON was found.
+            return parse_partial_json(partial_str).map(Some).or(Ok(None));
+        }
+    }
+
     Ok(None)
+}
+
+/// Parses a partially complete JSON string.
+///
+/// This function uses a lenient JSON5 parser. Note that unlike the JavaScript
+/// equivalent which uses the `partial-json` library, this implementation may
+/// not be able to recover objects from severely truncated or malformed JSON.
+/// It works best for JSON that is well-formed but simply incomplete (e.g.,
+/// missing a final closing brace if the parser supports it) or has extra syntax
+/// like trailing commas.
+pub fn parse_partial_json<T: DeserializeOwned>(json_string: &str) -> Result<T> {
+    json5::from_str(json_string)
+        .map_err(|e| Error::new_internal(format!("Partial JSON parsing error: {}", e)))
 }
 
 /// The result of an `extract_items` operation.

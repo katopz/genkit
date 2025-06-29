@@ -69,16 +69,20 @@ This Rust implementation provides a solid foundation with many of the core featu
     -   **Error Handling**: A standardized error system for robust applications.
 
 -   **AI Primitives**:
-    -   **`generate`**: The primary function for interacting with generative models.
+    -   **`generate`**: The primary function for interacting with generative models, including support for long-running background jobs (`generateOperation`).
     -   **`chat`**: High-level API for creating and managing stateful, multi-turn conversations.
     -   **`embed`**: Abstractions for converting documents into vector embeddings.
     -   **`retrieve`/`index`**: Standardized interfaces for document indexers and retrievers.
     -   **`rerank`**: Support for re-ranking retrieved documents for improved relevance.
-    -   **`tool`**: Define tools that models can use to interact with external systems.
+    -   **`tool`**: Define tools that models can use to interact with external systems, including support for resumable executions (`defineInterrupt`) and runtime tool definition (`dynamicTool`).
     -   **`prompt`**: A basic `define_prompt` function for creating executable prompts.
+
+-   **Model Middleware**:
+    -   Built-in middleware like `downloadRequestMedia` to automatically download and inline media from URLs.
 
 -   **Output Formatting**:
     -   Built-in formatters to constrain model output to specific formats, including JSON, JSONL, Enum, Text, and Array.
+    -   Utilities like `parsePartialJson` for extracting structured data from incomplete model output.
 
 -   **Observability & Development**:
     -   **Telemetry**: Integration with OpenTelemetry for tracing flow and action execution, with support for custom and multi-span processors.
@@ -93,11 +97,3 @@ This section tracks features from the JavaScript implementation that are not yet
         -   [ ] Load prompts from the filesystem (`loadPromptFolder`).
         -   [ ] Define partials (`definePartial`) and helpers (`defineHelper`).
         > **Note**: This is blocked by the completion of the [Rust implementation in `dotprompt` (Issue #310)](https://github.com/google/dotprompt/issues/310).
-    -   [ ] **Advanced Tooling**:
-        -   [ ] Implement `defineInterrupt` for resumable tool executions.
-        -   [ ] Implement `dynamicTool` for runtime tool definition.
-    -   [ ] **Long-Running Generations**: Implement `generateOperation` for background model jobs.
-    -   [ ] **Model Middleware**:
-        -   [ ] Implement `downloadRequestMedia` middleware.
-    -   [ ] **JSON Extraction**:
-        -   [ ] Implement `parsePartialJson` for handling incomplete JSON.

@@ -311,7 +311,7 @@ pub fn define_generate_action(registry: &mut Registry) -> Arc<GenerateAction> {
             }
         },
     )
-    .build(registry);
+    .build();
     Arc::new(generate_action)
 }
 

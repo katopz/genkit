@@ -40,8 +40,11 @@ pub mod types;
 
 // Re-export the public API, combining exports from the old lib.rs and index.rs.
 
+pub use self::chat::{Chat, MAIN_THREAD, SESSION_ID_ATTR, THREAD_NAME_ATTR};
 pub use self::check_operation::check_operation;
-pub use self::document::{Document, Media, Part, ToolRequest, ToolResponse};
+pub use self::document::{
+    Document, Media, Part, ToolRequest, ToolRequestPart, ToolResponse, ToolResponsePart,
+};
 pub use self::embedder::{
     define_embedder, embed, embedder_ref, EmbedParams, EmbedRequest, EmbedResponse, EmbedderAction,
     EmbedderArgument, EmbedderInfo, EmbedderRef, Embedding, EmbeddingBatch,
@@ -51,19 +54,20 @@ pub use self::evaluator::{
     EvalResponse, EvalResponses, EvalStatusEnum, EvaluatorAction, EvaluatorArgument, EvaluatorInfo,
     EvaluatorParams, EvaluatorRef, Score,
 };
+pub use self::extract::{extract_items, extract_json, parse_partial_json};
 pub use self::generate::{
-    generate, generate_stream, to_generate_request, GenerateOptions, GenerateResponse,
-    GenerateResponseChunk, GenerateStreamResponse, GenerationBlockedError, GenerationResponseError,
-    OutputOptions, ToolChoice,
+    generate, generate_operation, generate_stream, to_generate_request, GenerateOptions,
+    GenerateResponse, GenerateResponseChunk, GenerateStreamResponse, GenerationBlockedError,
+    GenerationResponseError, OutputOptions, ToolChoice,
 };
-pub use self::message::{Message, MessageData, Role};
+pub use self::message::{Message, MessageData, MessageParser, Role};
 pub use self::model::{
-    define_model, model_ref, CandidateData, FinishReason, GenerateRequest,
+    define_background_model, define_model, model_ref, CandidateData, FinishReason, GenerateRequest,
     GenerateResponseChunkData, GenerateResponseData, GenerationCommonConfig, GenerationUsage,
     Model, ModelAction, ModelInfo, ModelRef,
 };
 pub use self::prompt::{
-    define_prompt, is_executable_prompt, prompt, ExecutablePrompt, PromptConfig,
+    define_prompt, is_executable_prompt, prompt, ExecutablePrompt, PromptAction, PromptConfig,
     PromptGenerateOptions,
 };
 pub use self::reranker::{
@@ -79,7 +83,9 @@ pub use self::retriever::{
     IndexerArgument, IndexerInfo, IndexerParams, IndexerRef, RetrieverAction, RetrieverArgument,
     RetrieverInfo, RetrieverParams, RetrieverRef,
 };
+pub use self::session::{get_current_session, run_with_session, Session, SessionStore};
 pub use self::tool::{
-    define_tool, to_tool_definition, ToolAction, ToolArgument, ToolConfig, ToolDefinition,
+    define_interrupt, define_tool, dynamic_tool, to_tool_definition, ToolAction, ToolArgument,
+    ToolConfig, ToolDefinition,
 };
 pub use self::types::{to_tool_wire_format, LlmResponse, LlmStats, Tool, ToolCall};

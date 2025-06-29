@@ -70,11 +70,7 @@ pub type ResourceAction = Action<ResourceInput, ResourceOutput, ()>;
 //
 
 /// Defines a resource.
-pub fn define_resource<F, Fut>(
-    registry: &mut Registry,
-    opts: ResourceOptions,
-    runner: F,
-) -> Result<Arc<ResourceAction>>
+pub fn define_resource<F, Fut>(opts: ResourceOptions, runner: F) -> Result<Arc<ResourceAction>>
 where
     F: Fn(ResourceInput, ActionContext) -> Fut + Send + Sync + 'static,
     Fut: Future<Output = Result<ResourceOutput>> + Send + 'static,
@@ -105,7 +101,7 @@ where
         },
     )
     .with_metadata(metadata)
-    .build(registry);
+    .build();
 
     Ok(Arc::new(action))
 }

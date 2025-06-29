@@ -17,11 +17,9 @@
 //! This module provides the functionality to check the status of a long-running
 //! background operation. It is the Rust equivalent of `check-operation.ts`.
 
-use genkit_core::action::Action;
 use genkit_core::background_action::Operation;
 use genkit_core::error::{Error, Result};
 use genkit_core::registry::Registry;
-use genkit_core::status::StatusCode;
 use serde_json::Value;
 
 /// Checks the status of a long-running operation.
@@ -30,61 +28,31 @@ use serde_json::Value;
 /// from the registry and calls it to get the latest status.
 pub async fn check_operation(
     registry: &Registry,
-    operation: Operation<Value>,
+    operation: &Operation<Value>,
 ) -> Result<Operation<Value>> {
-    // 1. Extract the base action key from the operation.
-    let start_action_key = operation.action.as_ref().ok_or_else(|| {
-        Error::new_internal("Operation is missing original action key".to_string())
-    })?;
+    let start_action_key = operation
+        .action
+        .as_ref()
+        .ok_or_else(|| Error::new_internal("Operation is missing original action key"))?;
 
-    // 2. Derive the check action's key from the original action key.
-    // e.g., /background-model/myModel -> /checkoperation/myModel/check
-    let parts: Vec<&str> = start_action_key.split('/').collect();
-    if parts.len() < 3 || !parts[0].is_empty() {
-        return Err(Error::new_internal(format!(
-            "Invalid background action key format: {}",
-            start_action_key
-        )));
-    }
-    // The action name is everything after the type part.
-    // e.g., /background-model/google/gemini-pro -> "google/gemini-pro"
-    let action_name = parts[2..].join("/");
+    let check_action_key =
+        start_action_key.replace("/background-model/", "/checkoperation/") + "/check";
 
-    let check_action_key = format!("/checkoperation/{}/check", action_name);
-
-    // 3. Look up the check action in the registry.
-    let check_action_erased = registry
-        .lookup_action(&check_action_key.to_lowercase())
+    let check_action = registry
+        .lookup_action(&check_action_key)
         .await
         .ok_or_else(|| {
-            Error::new_user_facing(
-                StatusCode::NotFound,
-                format!(
-                    "Check action '{}' not found for '{}'",
-                    check_action_key, start_action_key
-                ),
-                None,
-            )
-        })?;
-
-    // 4. Downcast the `ErasedAction` to its concrete type.
-    // The check action is expected to have the signature `Action<Operation<Value>, Operation<Value>, ()>`.
-    let concrete_action = check_action_erased
-        .as_any()
-        .downcast_ref::<Action<Operation<Value>, Operation<Value>, ()>>()
-        .ok_or_else(|| {
             Error::new_internal(format!(
-                "Mismatched type for check action '{}'.",
-                check_action_key
+                "Check action '{}' not found for '{}'",
+                check_action_key, start_action_key
             ))
         })?;
 
-    // 5. Execute the action.
-    let input_value = serde_json::to_value(&operation).map_err(|e| {
-        Error::new_internal(format!("Failed to serialize operation to JSON: {}", e))
-    })?;
-    let action_result = concrete_action.run_http(input_value, None).await?;
+    let input_value = serde_json::to_value(operation)
+        .map_err(|e| Error::new_internal(format!("Failed to serialize operation: {}", e)))?;
+    let result_value = check_action.run_http_json(input_value, None).await?;
+    let checked_op: Operation<Value> = serde_json::from_value(result_value)
+        .map_err(|e| Error::new_internal(format!("Failed to deserialize operation: {}", e)))?;
 
-    // 6. The result is already the correct type, so we can just return it.
-    Ok(action_result.result)
+    Ok(checked_op)
 }

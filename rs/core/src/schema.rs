@@ -19,7 +19,6 @@
 //! JSON schemas from Rust types and `jsonschema` for validation.
 
 use crate::error::{Error, Result};
-use crate::registry::Registry;
 use jsonschema::Draft;
 use schemars::{JsonSchema, Schema};
 use serde::de::DeserializeOwned;
@@ -157,7 +156,7 @@ pub fn parse_schema<T: DeserializeOwned>(data: Value, schema: ProvidedSchema) ->
 ///
 /// This is a placeholder for functionality that will be implemented within the `Registry`.
 #[doc(hidden)]
-pub fn define_schema<T: JsonSchema + 'static>(_registry: &mut Registry, _name: &str) {
+pub fn define_schema<T: JsonSchema + 'static>(_name: &str) {
     unimplemented!("define_schema is not yet implemented");
 }
 
@@ -165,7 +164,7 @@ pub fn define_schema<T: JsonSchema + 'static>(_registry: &mut Registry, _name: &
 ///
 /// This is a placeholder for functionality that will be implemented within the `Registry`.
 #[doc(hidden)]
-pub fn define_json_schema(_registry: &mut Registry, _name: &str, _json_schema: Schema) {
+pub fn define_json_schema(_name: &str, _json_schema: Schema) {
     unimplemented!("define_json_schema is not yet implemented");
 }
 

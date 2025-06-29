@@ -179,29 +179,23 @@ where
 //
 
 /// Defines a new retriever and registers it.
-pub fn define_retriever<I, F, Fut>(
-    registry: &mut Registry,
-    name: &str,
-    runner: F,
-) -> RetrieverAction<I>
+pub fn define_retriever<I, F, Fut>(name: &str, runner: F) -> RetrieverAction<I>
 where
     I: JsonSchema + DeserializeOwned + Send + Sync + Clone + 'static,
     F: Fn(RetrieverRequest<I>, genkit_core::action::ActionFnArg<()>) -> Fut + Send + Sync + 'static,
     Fut: Future<Output = Result<RetrieverResponse>> + Send + 'static,
 {
-    RetrieverAction(
-        ActionBuilder::new(ActionType::Retriever, name.to_string(), runner).build(registry),
-    )
+    RetrieverAction(ActionBuilder::new(ActionType::Retriever, name.to_string(), runner).build())
 }
 
 /// Defines a new indexer and registers it.
-pub fn define_indexer<I, F, Fut>(registry: &mut Registry, name: &str, runner: F) -> IndexerAction<I>
+pub fn define_indexer<I, F, Fut>(name: &str, runner: F) -> IndexerAction<I>
 where
     I: JsonSchema + DeserializeOwned + Send + Sync + Clone + 'static,
     F: Fn(IndexerRequest<I>, genkit_core::action::ActionFnArg<()>) -> Fut + Send + Sync + 'static,
     Fut: Future<Output = Result<()>> + Send + 'static,
 {
-    IndexerAction(ActionBuilder::new(ActionType::Indexer, name.to_string(), runner).build(registry))
+    IndexerAction(ActionBuilder::new(ActionType::Indexer, name.to_string(), runner).build())
 }
 
 //

@@ -231,7 +231,7 @@ where
                 }
             },
         )
-        .build(registry)
+        .build()
     };
 
     let _ = prompt_action;
@@ -249,14 +249,13 @@ pub fn is_executable_prompt<I, O, C>(_: &ExecutablePrompt<I, O, C>) -> bool {
 
 // /// Defines a partial template for use in other Dotprompt templates.
 // #[cfg(feature = "dotprompt-private")]
-// pub fn define_partial(registry: &mut Registry, name: &str, source: &str) {
+// pub fn define_partial(name: &str, source: &str) {
 //     registry.dotprompt.define_partial(name, source);
 // }
 
 // /// Defines a custom Handlebars helper for use in prompt templates.
 // #[cfg(feature = "dotprompt-private")]
 // pub fn define_helper(
-//     registry: &mut Registry,
 //     name: &str,
 //     helper: Box<dyn HandlebarsHelper + Send + Sync>,
 // ) {
@@ -268,7 +267,7 @@ pub fn is_executable_prompt<I, O, C>(_: &ExecutablePrompt<I, O, C>) -> bool {
 // /// This function recursively searches the specified directory.
 // /// Files starting with `_` are treated as partials.
 // #[cfg(feature = "dotprompt-private")]
-// pub async fn load_prompt_folder(registry: &mut Registry, dir: &str, ns: &str) -> Result<()> {
+// pub async fn load_prompt_folder(dir: &str, ns: &str) -> Result<()> {
 //     let prompts_path = PathBuf::from(dir);
 //     if prompts_path.exists() {
 //         load_prompt_folder_recursively(registry, &prompts_path, ns, &PathBuf::new()).await?;
@@ -278,7 +277,6 @@ pub fn is_executable_prompt<I, O, C>(_: &ExecutablePrompt<I, O, C>) -> bool {
 
 // #[cfg(feature = "dotprompt-private")]
 // async fn load_prompt_folder_recursively(
-//     registry: &mut Registry,
 //     base_path: &Path,
 //     ns: &str,
 //     sub_dir: &Path,
@@ -320,7 +318,6 @@ pub fn is_executable_prompt<I, O, C>(_: &ExecutablePrompt<I, O, C>) -> bool {
 
 // #[cfg(feature = "dotprompt-private")]
 // async fn load_prompt(
-//     registry: &mut Registry,
 //     source: String,
 //     prefix: String,
 //     filename: String,
