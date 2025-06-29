@@ -46,19 +46,19 @@ pub type RetrieverFn<I> = dyn Fn(RetrieverRequest<I>) -> Box<dyn Future<Output =
 pub type IndexerFn<I> =
     dyn Fn(IndexerRequest<I>) -> Pin<Box<dyn Future<Output = Result<()>> + Send>> + Send + Sync;
 
-#[derive(Debug, Serialize, Deserialize, JsonSchema)]
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
 pub struct RetrieverRequest<O = Value> {
     pub query: Document,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub options: Option<O>,
 }
 
-#[derive(Debug, Serialize, Deserialize, JsonSchema)]
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
 pub struct RetrieverResponse {
     pub documents: Vec<Document>,
 }
 
-#[derive(Debug, Serialize, Deserialize, JsonSchema)]
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
 pub struct IndexerRequest<O = Value> {
     pub documents: Vec<Document>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -98,7 +98,7 @@ impl<I: 'static> Deref for RetrieverAction<I> {
 #[async_trait]
 impl<I> ErasedAction for RetrieverAction<I>
 where
-    I: JsonSchema + DeserializeOwned + Send + Sync + 'static,
+    I: JsonSchema + DeserializeOwned + Send + Sync + Clone + 'static,
 {
     async fn run_http_json(
         &self,
@@ -106,6 +106,14 @@ where
         context: Option<genkit_core::context::ActionContext>,
     ) -> Result<Value> {
         self.0.run_http_json(input, context).await
+    }
+
+    fn stream_http_json(
+        &self,
+        input: Value,
+        context: Option<genkit_core::context::ActionContext>,
+    ) -> Result<genkit_core::action::StreamingResponse<Value, Value>> {
+        self.0.stream_http_json(input, context)
     }
 
     fn name(&self) -> &str {
@@ -120,7 +128,6 @@ where
         self
     }
 }
-
 /// A wrapper for an indexer `Action`.
 #[derive(Clone)]
 pub struct IndexerAction<I = Value>(pub Action<IndexerRequest<I>, (), ()>);
@@ -136,7 +143,7 @@ impl<I: 'static> Deref for IndexerAction<I> {
 #[async_trait]
 impl<I> ErasedAction for IndexerAction<I>
 where
-    I: JsonSchema + DeserializeOwned + Send + Sync + 'static,
+    I: JsonSchema + DeserializeOwned + Send + Sync + Clone + 'static,
 {
     async fn run_http_json(
         &self,
@@ -144,6 +151,14 @@ where
         context: Option<genkit_core::context::ActionContext>,
     ) -> Result<Value> {
         self.0.run_http_json(input, context).await
+    }
+
+    fn stream_http_json(
+        &self,
+        input: Value,
+        context: Option<genkit_core::context::ActionContext>,
+    ) -> Result<genkit_core::action::StreamingResponse<Value, Value>> {
+        self.0.stream_http_json(input, context)
     }
 
     fn name(&self) -> &str {
@@ -170,7 +185,7 @@ pub fn define_retriever<I, F, Fut>(
     runner: F,
 ) -> RetrieverAction<I>
 where
-    I: JsonSchema + DeserializeOwned + Send + Sync + 'static,
+    I: JsonSchema + DeserializeOwned + Send + Sync + Clone + 'static,
     F: Fn(RetrieverRequest<I>, genkit_core::action::ActionFnArg<()>) -> Fut + Send + Sync + 'static,
     Fut: Future<Output = Result<RetrieverResponse>> + Send + 'static,
 {
@@ -182,7 +197,7 @@ where
 /// Defines a new indexer and registers it.
 pub fn define_indexer<I, F, Fut>(registry: &mut Registry, name: &str, runner: F) -> IndexerAction<I>
 where
-    I: JsonSchema + DeserializeOwned + Send + Sync + 'static,
+    I: JsonSchema + DeserializeOwned + Send + Sync + Clone + 'static,
     F: Fn(IndexerRequest<I>, genkit_core::action::ActionFnArg<()>) -> Fut + Send + Sync + 'static,
     Fut: Future<Output = Result<()>> + Send + 'static,
 {
@@ -210,7 +225,7 @@ pub struct RetrieverParams<I = Value> {
 /// Retrieves documents using a specified retriever.
 pub async fn retrieve<I>(registry: &Registry, params: RetrieverParams<I>) -> Result<Vec<Document>>
 where
-    I: JsonSchema + DeserializeOwned + Serialize + Send + Sync + 'static,
+    I: JsonSchema + DeserializeOwned + Serialize + Send + Sync + Clone + 'static,
 {
     let retriever_action: Arc<dyn ErasedAction> = match params.retriever {
         RetrieverArgument::Name(name) => registry
@@ -250,7 +265,7 @@ pub struct IndexerParams<I = Value> {
 /// Indexes documents using a specified indexer.
 pub async fn index<I>(registry: &Registry, params: IndexerParams<I>) -> Result<()>
 where
-    I: JsonSchema + DeserializeOwned + Serialize + Send + Sync + 'static,
+    I: JsonSchema + DeserializeOwned + Serialize + Send + Sync + Clone + 'static,
 {
     let indexer_action: Arc<dyn ErasedAction> = match params.indexer {
         IndexerArgument::Name(name) => registry

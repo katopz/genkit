@@ -4,7 +4,7 @@
 // integration test for the action system.
 
 use futures::StreamExt;
-use genkit_core::action::{ActionBuilder, ActionFnArg};
+use genkit_core::action::{ActionBuilder, ActionFnArg, ActionRunOptions};
 use genkit_core::async_utils::channel;
 use genkit_core::context::ActionContext;
 use genkit_core::error;
@@ -15,12 +15,12 @@ use serde::{Deserialize, Serialize};
 use serde_json::json;
 use tokio_util::sync::CancellationToken;
 
-#[derive(Serialize, Deserialize, JsonSchema, Debug, PartialEq)]
+#[derive(Serialize, Deserialize, JsonSchema, Debug, PartialEq, Clone)]
 struct TestInput {
     name: String,
 }
 
-#[derive(Serialize, Deserialize, JsonSchema, Debug, PartialEq)]
+#[derive(Serialize, Deserialize, JsonSchema, Debug, PartialEq, Clone)]
 struct TestOutput {
     greeting: String,
 }
@@ -112,18 +112,21 @@ mod test {
         let input = TestInput {
             name: "Streamer".into(),
         };
-        let context = Some(ActionContext {
-            auth: Some(json!({"user": "stream-user"})),
+        let options = Some(ActionRunOptions {
+            context: Some(ActionContext {
+                auth: Some(json!({"user": "stream-user"})),
+                ..Default::default()
+            }),
             ..Default::default()
         });
 
         // Use the .stream() helper method
-        let mut response = streaming_action.stream(input, context);
+        let mut response = streaming_action.stream(input, options);
 
         // Collect chunks from the stream
         let mut chunks = Vec::new();
         while let Some(chunk) = response.stream.next().await {
-            chunks.push(chunk);
+            chunks.push(chunk.unwrap());
         }
 
         // Await the final output

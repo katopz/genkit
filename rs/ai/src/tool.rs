@@ -57,18 +57,24 @@ impl<I, O, S> Deref for ToolAction<I, O, S> {
 #[async_trait]
 impl<I, O, S> ErasedAction for ToolAction<I, O, S>
 where
-    I: DeserializeOwned + JsonSchema + Send + Sync + 'static,
+    I: DeserializeOwned + JsonSchema + Send + Sync + Clone + 'static,
     O: Serialize + JsonSchema + Send + Sync + 'static,
-    S: Send + Sync + 'static,
+    S: Serialize + JsonSchema + Send + Sync + Clone + 'static,
 {
     async fn run_http_json(
         &self,
         input: Value,
         context: Option<genkit_core::context::ActionContext>,
     ) -> Result<Value> {
-        let result = self.0.run_http_json(input, context).await?;
-        serde_json::to_value(result)
-            .map_err(|e| Error::new_internal(format!("Failed to serialize tool output: {}", e)))
+        self.0.run_http_json(input, context).await
+    }
+
+    fn stream_http_json(
+        &self,
+        input: Value,
+        context: Option<genkit_core::context::ActionContext>,
+    ) -> Result<genkit_core::action::StreamingResponse<Value, Value>> {
+        self.0.stream_http_json(input, context)
     }
 
     fn name(&self) -> &str {

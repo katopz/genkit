@@ -24,7 +24,7 @@ use crate::tool::ToolDefinition;
 use async_trait::async_trait;
 use genkit_core::action::{Action, ActionBuilder};
 use genkit_core::background_action::Operation;
-use genkit_core::error::Result;
+use genkit_core::error::{Error, Result};
 use genkit_core::registry::ErasedAction;
 use genkit_core::registry::{ActionType, Registry};
 use schemars::{self, JsonSchema};
@@ -34,6 +34,7 @@ use std::any::Any;
 use std::collections::HashMap;
 use std::future::Future;
 use std::ops::Deref;
+use std::pin::Pin;
 use std::sync::Arc;
 
 //
@@ -181,6 +182,24 @@ pub struct GenerateResponseChunkData {
 // (Ported from model.ts)
 //
 
+/// A function that represents the next step in a middleware chain.
+pub type NextFn = Box<
+    dyn FnOnce(
+            GenerateRequest,
+        ) -> Pin<Box<dyn Future<Output = Result<GenerateResponseData>> + Send>>
+        + Send,
+>;
+
+/// A middleware for model actions.
+pub type ModelMiddleware = Arc<
+    dyn Fn(
+            GenerateRequest,
+            NextFn,
+        ) -> Pin<Box<dyn Future<Output = Result<GenerateResponseData>> + Send>>
+        + Send
+        + Sync,
+>;
+
 /// A wrapper for a model `Action`.
 #[derive(Clone)]
 pub struct ModelAction(
@@ -203,6 +222,14 @@ impl ErasedAction for ModelAction {
         context: Option<genkit_core::context::ActionContext>,
     ) -> Result<Value> {
         self.0.run_http_json(input, context).await
+    }
+
+    fn stream_http_json(
+        &self,
+        input: Value,
+        context: Option<genkit_core::context::ActionContext>,
+    ) -> Result<genkit_core::action::StreamingResponse<Value, Value>> {
+        self.0.stream_http_json(input, context)
     }
 
     fn name(&self) -> &str {
@@ -238,6 +265,14 @@ impl ErasedAction for BackgroundModelAction {
         context: Option<genkit_core::context::ActionContext>,
     ) -> Result<Value> {
         self.0.run_http_json(input, context).await
+    }
+
+    fn stream_http_json(
+        &self,
+        input: Value,
+        context: Option<genkit_core::context::ActionContext>,
+    ) -> Result<genkit_core::action::StreamingResponse<Value, Value>> {
+        self.0.stream_http_json(input, context)
     }
 
     fn name(&self) -> &str {
@@ -348,6 +383,199 @@ where
     .build(registry);
 
     Arc::new(BackgroundModelAction(start_action))
+}
+
+/// Validates that a `GenerateRequest` does not include unsupported features.
+pub fn validate_support(name: String, supports: ModelInfoSupports) -> ModelMiddleware {
+    Arc::new(move |req, next| {
+        let name = name.clone();
+        let supports = supports.clone();
+        Box::pin(async move {
+            let invalid = |message: &str| -> Error {
+                Error::new_internal(format!(
+                    "Model '{}' does not support {}. Request: {}",
+                    name,
+                    message,
+                    serde_json::to_string_pretty(&req)
+                        .unwrap_or_else(|_| "Unserializable request".to_string())
+                ))
+            };
+
+            if supports.media == Some(false)
+                && req
+                    .messages
+                    .iter()
+                    .any(|m| m.content.iter().any(|p| p.media.is_some()))
+            {
+                return Err(invalid("media, but media was provided"));
+            }
+
+            if supports.tools == Some(false) && req.tools.as_ref().is_some_and(|t| !t.is_empty()) {
+                return Err(invalid("tool use, but tools were provided"));
+            }
+
+            if supports.multiturn == Some(false) && req.messages.len() > 1 {
+                let len = req.messages.len();
+                return Err(invalid(&format!(
+                    "multiple messages, but {} were provided",
+                    len
+                )));
+            }
+
+            next(req).await
+        })
+    })
+}
+
+#[derive(Default, Clone)]
+pub struct SimulateSystemPromptOptions {
+    pub preface: Option<String>,
+    pub acknowledgement: Option<String>,
+}
+
+/// Provide a simulated system prompt for models that don't support it natively.
+pub fn simulate_system_prompt(options: Option<SimulateSystemPromptOptions>) -> ModelMiddleware {
+    let opts = options.unwrap_or_default();
+    let preface = opts
+        .preface
+        .unwrap_or_else(|| "SYSTEM INSTRUCTIONS:\n".to_string());
+    let acknowledgement = opts
+        .acknowledgement
+        .unwrap_or_else(|| "Understood.".to_string());
+
+    Arc::new(move |mut req, next| {
+        let preface = preface.clone();
+        let acknowledgement = acknowledgement.clone();
+        Box::pin(async move {
+            if let Some(pos) = req.messages.iter().position(|m| m.role == Role::System) {
+                let system_message = req.messages.remove(pos);
+                let mut user_content = vec![Part {
+                    text: Some(preface),
+                    ..Default::default()
+                }];
+                user_content.extend(system_message.content);
+
+                let user_message = MessageData {
+                    role: Role::User,
+                    content: user_content,
+                    metadata: None,
+                };
+                let model_message = MessageData {
+                    role: Role::Model,
+                    content: vec![Part {
+                        text: Some(acknowledgement),
+                        ..Default::default()
+                    }],
+                    metadata: None,
+                };
+
+                req.messages
+                    .splice(pos..pos, vec![user_message, model_message]);
+            }
+
+            next(req).await
+        })
+    })
+}
+
+#[derive(Default, Clone)]
+pub struct AugmentWithContextOptions {
+    pub preface: Option<String>,
+    pub citation_key: Option<String>,
+}
+
+pub const CONTEXT_PREFACE: &str = "\n\nUse the following information to complete your task:\n\n";
+
+fn default_item_template(
+    d: &Document,
+    index: usize,
+    options: &AugmentWithContextOptions,
+) -> String {
+    let mut out = "- ".to_string();
+    let citation = if let Some(key) = &options.citation_key {
+        d.metadata
+            .as_ref()
+            .and_then(|m| m.get(key))
+            .and_then(|v| v.as_str())
+            .map(|s| s.to_string())
+    } else {
+        d.metadata.as_ref().and_then(|m| {
+            m.get("ref")
+                .or_else(|| m.get("id"))
+                .and_then(|v| v.as_str())
+                .map(|s| s.to_string())
+        })
+    }
+    .unwrap_or_else(|| index.to_string());
+
+    out.push_str(&format!("[{}]: ", citation));
+    out.push_str(&d.text());
+    out.push('\n');
+    out
+}
+
+/// Injects retrieved documents as context into the last user message.
+pub fn augment_with_context(options: Option<AugmentWithContextOptions>) -> ModelMiddleware {
+    let opts = options.unwrap_or_default();
+    Arc::new(move |mut req, next| {
+        let opts = opts.clone();
+        Box::pin(async move {
+            let docs = match req.docs.as_ref() {
+                Some(d) if !d.is_empty() => d,
+                _ => return next(req).await,
+            };
+
+            if let Some(user_message) = req.messages.iter_mut().rfind(|m| m.role == Role::User) {
+                // Check if context part already exists and is not pending
+                let context_part_index = user_message.content.iter().position(|p| {
+                    p.metadata
+                        .as_ref()
+                        .map_or_else(|| false, |m| m.get("purpose") == Some(&"context".into()))
+                });
+
+                if let Some(idx) = context_part_index {
+                    let is_pending = user_message.content[idx]
+                        .metadata
+                        .as_ref()
+                        .and_then(|m| m.get("pending"))
+                        .and_then(|v| v.as_bool())
+                        .unwrap_or(false);
+                    if !is_pending {
+                        return next(req).await;
+                    }
+                }
+
+                let preface = opts
+                    .preface
+                    .clone()
+                    .unwrap_or_else(|| CONTEXT_PREFACE.to_string());
+                let mut context_text = preface;
+                for (i, doc_data) in docs.iter().enumerate() {
+                    context_text.push_str(&default_item_template(doc_data, i, &opts));
+                }
+                context_text.push('\n');
+
+                let mut context_metadata = HashMap::new();
+                context_metadata
+                    .insert("purpose".to_string(), Value::String("context".to_string()));
+                let new_part = Part {
+                    text: Some(context_text),
+                    metadata: Some(context_metadata),
+                    ..Default::default()
+                };
+
+                if let Some(idx) = context_part_index {
+                    // Replace pending part
+                    user_message.content[idx] = new_part;
+                } else {
+                    // Append new part
+                    user_message.content.push(new_part);
+                }
+            }
+
+            next(req).await
+        })
+    })
 }
 
 /// A serializable reference to a model, often used in plugin configurations.

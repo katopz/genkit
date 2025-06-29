@@ -29,6 +29,8 @@ use crate::tool::ToolArgument;
 use genkit_core::action::{Action, ActionBuilder};
 use genkit_core::error::{Error, Result};
 use genkit_core::registry::{ActionType, Registry};
+// #[cfg(feature = "dotprompt-private")]
+// use handlebars::HandlebarsHelper;
 use schemars::{self, JsonSchema};
 use serde::{de::DeserializeOwned, Deserialize, Serialize};
 use serde_json::Value;
@@ -244,6 +246,130 @@ where
 pub fn is_executable_prompt<I, O, C>(_: &ExecutablePrompt<I, O, C>) -> bool {
     true
 }
+
+// /// Defines a partial template for use in other Dotprompt templates.
+// #[cfg(feature = "dotprompt-private")]
+// pub fn define_partial(registry: &mut Registry, name: &str, source: &str) {
+//     registry.dotprompt.define_partial(name, source);
+// }
+
+// /// Defines a custom Handlebars helper for use in prompt templates.
+// #[cfg(feature = "dotprompt-private")]
+// pub fn define_helper(
+//     registry: &mut Registry,
+//     name: &str,
+//     helper: Box<dyn HandlebarsHelper + Send + Sync>,
+// ) {
+//     registry.dotprompt.define_helper(name, helper);
+// }
+
+// /// Loads all `.prompt` files from a given directory and registers them as prompts.
+// ///
+// /// This function recursively searches the specified directory.
+// /// Files starting with `_` are treated as partials.
+// #[cfg(feature = "dotprompt-private")]
+// pub async fn load_prompt_folder(registry: &mut Registry, dir: &str, ns: &str) -> Result<()> {
+//     let prompts_path = PathBuf::from(dir);
+//     if prompts_path.exists() {
+//         load_prompt_folder_recursively(registry, &prompts_path, ns, &PathBuf::new()).await?;
+//     }
+//     Ok(())
+// }
+
+// #[cfg(feature = "dotprompt-private")]
+// async fn load_prompt_folder_recursively(
+//     registry: &mut Registry,
+//     base_path: &Path,
+//     ns: &str,
+//     sub_dir: &Path,
+// ) -> Result<()> {
+//     let current_path = base_path.join(sub_dir);
+//     let mut entries = tokio::fs::read_dir(current_path).await?;
+
+//     while let Some(entry) = entries.next_entry().await? {
+//         let path = entry.path();
+//         if path.is_dir() {
+//             let relative_path = path.strip_prefix(base_path).unwrap().to_path_buf();
+//             load_prompt_folder_recursively(registry, base_path, ns, &relative_path).await?;
+//         } else if let Some(file_name) = path.file_name().and_then(|s| s.to_str()) {
+//             if file_name.ends_with(".prompt") {
+//                 let source = tokio::fs::read_to_string(&path).await?;
+//                 if file_name.starts_with('_') {
+//                     if let Some(partial_name) = file_name
+//                         .strip_prefix('_')
+//                         .and_then(|s| s.strip_suffix(".prompt"))
+//                     {
+//                         define_partial(registry, partial_name, &source);
+//                     }
+//                 } else {
+//                     let prefix = sub_dir.to_str().unwrap_or("").replace('\\', "/");
+//                     load_prompt(
+//                         registry,
+//                         source,
+//                         prefix,
+//                         file_name.to_string(),
+//                         ns.to_string(),
+//                     )
+//                     .await?;
+//                 }
+//             }
+//         }
+//     }
+//     Ok(())
+// }
+
+// #[cfg(feature = "dotprompt-private")]
+// async fn load_prompt(
+//     registry: &mut Registry,
+//     source: String,
+//     prefix: String,
+//     filename: String,
+//     ns: String,
+// ) -> Result<()> {
+//     let mut name = filename.strip_suffix(".prompt").unwrap().to_string();
+//     let mut variant: Option<String> = None;
+//     if let Some(dot_index) = name.rfind('.') {
+//         variant = Some(name[dot_index + 1..].to_string());
+//         name = name[..dot_index].to_string();
+//     }
+
+//     let parsed_prompt = registry.dotprompt.parse(&source)?;
+//     let mut prompt_metadata = registry.dotprompt.render_metadata(&parsed_prompt).await?;
+//     if let Some(v) = variant.clone() {
+//         prompt_metadata.variant = Some(v);
+//     }
+
+//     let full_name = format!(
+//         "{}/{}{}",
+//         ns,
+//         if !prefix.is_empty() {
+//             format!("{}/", prefix)
+//         } else {
+//             "".to_string()
+//         },
+//         name
+//     );
+
+//     let config = PromptConfig {
+//         name: full_name,
+//         variant,
+//         model: prompt_metadata.model,
+//         config: prompt_metadata.config,
+//         description: prompt_metadata.description,
+//         input_schema: prompt_metadata.input.and_then(|i| i.schema),
+//         output: prompt_metadata.output.map(|o| OutputOptions {
+//             format: o.format,
+//             schema: o.schema,
+//             ..Default::default()
+//         }),
+//         messages: Some(parsed_prompt.messages),
+//         tools: prompt_metadata.tools,
+//         ..Default::default()
+//     };
+
+//     define_prompt::<Value, Value, Value>(registry, config);
+//     Ok(())
+// }
 
 /// A placeholder function for `prompt()`, which would look up a defined prompt.
 pub async fn prompt<I, O, C>(registry: &Registry, name: &str) -> Result<ExecutablePrompt<I, O, C>>

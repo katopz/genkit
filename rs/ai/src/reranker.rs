@@ -61,7 +61,7 @@ impl RankedDocument {
 }
 
 /// Represents the request sent to a reranker action.
-#[derive(Debug, Serialize, Deserialize, JsonSchema)]
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
 pub struct RerankerRequest<O = Value> {
     pub query: Document,
     pub documents: Vec<Document>,
@@ -70,7 +70,7 @@ pub struct RerankerRequest<O = Value> {
 }
 
 /// Represents the response received from a reranker action.
-#[derive(Debug, Serialize, Deserialize, JsonSchema)]
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
 pub struct RerankerResponse {
     pub documents: Vec<RankedDocument>,
 }
@@ -99,7 +99,7 @@ impl<I: 'static> Deref for RerankerAction<I> {
 #[async_trait]
 impl<I> ErasedAction for RerankerAction<I>
 where
-    I: JsonSchema + DeserializeOwned + Send + Sync + 'static,
+    I: JsonSchema + DeserializeOwned + Send + Sync + Clone + 'static,
 {
     async fn run_http_json(
         &self,
@@ -107,6 +107,14 @@ where
         context: Option<genkit_core::context::ActionContext>,
     ) -> Result<Value> {
         self.0.run_http_json(input, context).await
+    }
+
+    fn stream_http_json(
+        &self,
+        input: Value,
+        context: Option<genkit_core::context::ActionContext>,
+    ) -> Result<genkit_core::action::StreamingResponse<Value, Value>> {
+        self.0.stream_http_json(input, context)
     }
 
     fn name(&self) -> &str {
@@ -174,7 +182,7 @@ pub async fn rerank<I>(
     params: RerankerParams<I>,
 ) -> Result<Vec<RankedDocument>>
 where
-    I: JsonSchema + DeserializeOwned + Serialize + Send + Sync + 'static,
+    I: JsonSchema + DeserializeOwned + Serialize + Send + Sync + Clone + 'static,
 {
     let reranker_action: Arc<dyn ErasedAction> = match params.reranker {
         RerankerArgument::Name(name) => registry

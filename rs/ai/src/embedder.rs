@@ -52,7 +52,7 @@ pub struct Embedding {
 pub type EmbeddingBatch = Vec<Embedding>;
 
 /// Represents the request sent to an embedder action.
-#[derive(Debug, Serialize, Deserialize, JsonSchema)]
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
 pub struct EmbedRequest<O = Value> {
     pub input: Vec<Document>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -60,7 +60,7 @@ pub struct EmbedRequest<O = Value> {
 }
 
 /// Represents the response received from an embedder action.
-#[derive(Debug, Serialize, Deserialize, JsonSchema)]
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
 pub struct EmbedResponse {
     pub embeddings: EmbeddingBatch,
 }
@@ -88,7 +88,7 @@ impl<I: 'static> Deref for EmbedderAction<I> {
 #[async_trait]
 impl<I> ErasedAction for EmbedderAction<I>
 where
-    I: JsonSchema + DeserializeOwned + Send + Sync + 'static,
+    I: JsonSchema + DeserializeOwned + Send + Sync + Clone + 'static,
 {
     async fn run_http_json(
         &self,
@@ -96,6 +96,14 @@ where
         context: Option<genkit_core::context::ActionContext>,
     ) -> Result<Value> {
         self.0.run_http_json(input, context).await
+    }
+
+    fn stream_http_json(
+        &self,
+        input: Value,
+        context: Option<genkit_core::context::ActionContext>,
+    ) -> Result<genkit_core::action::StreamingResponse<Value, Value>> {
+        self.0.stream_http_json(input, context)
     }
 
     fn name(&self) -> &str {
@@ -130,7 +138,7 @@ pub fn define_embedder<I, F, Fut>(
     runner: F,
 ) -> EmbedderAction<I>
 where
-    I: JsonSchema + DeserializeOwned + Send + Sync + 'static,
+    I: JsonSchema + DeserializeOwned + Send + Sync + Clone + 'static,
     F: Fn(EmbedRequest<I>, genkit_core::action::ActionFnArg<()>) -> Fut + Send + Sync + 'static,
     Fut: Future<Output = Result<EmbedResponse>> + Send + 'static,
 {
@@ -160,7 +168,7 @@ pub struct EmbedParams<I = Value> {
 /// Generates embeddings for a given list of documents using a specified embedder.
 pub async fn embed<I>(registry: &Registry, params: EmbedParams<I>) -> Result<EmbeddingBatch>
 where
-    I: JsonSchema + DeserializeOwned + Serialize + Send + Sync + 'static,
+    I: JsonSchema + DeserializeOwned + Serialize + Send + Sync + Clone + 'static,
 {
     let embedder_action: Arc<dyn ErasedAction> = match params.embedder {
         EmbedderArgument::Name(name) => registry

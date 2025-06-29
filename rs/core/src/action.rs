@@ -67,10 +67,36 @@ pub struct TelemetryInfo {
 
 /// The response from a streaming action.
 pub struct StreamingResponse<O, S> {
-    /// A stream that yields chunks of type `S`.
-    pub stream: Pin<Box<dyn Stream<Item = S> + Send>>,
+    /// A stream that yields chunks of type `S` or an `Error`.
+    pub stream: Pin<Box<dyn Stream<Item = Result<S>> + Send>>,
     /// A future that resolves to the final output of type `O` when the stream is complete.
     pub output: Pin<Box<dyn Future<Output = Result<O>> + Send>>,
+}
+
+/// A callback for receiving streaming chunks.
+pub type StreamingCallback<S> = Arc<dyn Fn(Result<S, Error>) + Send + Sync>;
+
+/// Options for running an `Action`.
+pub struct ActionRunOptions<S: Send + 'static> {
+    /// A callback to receive streaming chunks.
+    pub on_chunk: Option<StreamingCallback<S>>,
+    /// Additional runtime context data.
+    pub context: Option<ActionContext>,
+    /// Additional attributes for telemetry spans.
+    pub telemetry_labels: Option<HashMap<String, String>>,
+    /// A token to signal cancellation.
+    pub abort_signal: Option<CancellationToken>,
+}
+
+impl<S: Send + 'static> Default for ActionRunOptions<S> {
+    fn default() -> Self {
+        Self {
+            on_chunk: None,
+            context: None,
+            telemetry_labels: None,
+            abort_signal: None,
+        }
+    }
 }
 
 /// Arguments passed to the function that implements an action's logic.
@@ -131,39 +157,109 @@ impl<I, O, S> Clone for Action<I, O, S> {
 
 impl<I, O, S> Action<I, O, S>
 where
-    I: DeserializeOwned + JsonSchema + Send + Sync + 'static,
+    I: DeserializeOwned + JsonSchema + Send + Sync + Clone + 'static,
     O: Serialize + JsonSchema + Send + Sync + 'static,
-    S: Serialize + JsonSchema + Send + 'static,
+    S: Serialize + JsonSchema + Send + Sync + Clone + 'static,
 {
     /// Executes the action with the given input and returns the final result.
     ///
-    /// This is the primary method for non-streaming invocation. It handles
-    /// context management, tracing, and output validation.
-    pub async fn run(&self, input: I, context: Option<ActionContext>) -> Result<ActionResult<O>> {
-        let (result, telemetry) =
-            tracing::in_new_span(self.meta.name.clone(), None, |trace_context| async {
-                let (chunk_tx, _chunk_rx) = channel();
+    /// This method can handle streaming via the `on_chunk` callback in `ActionRunOptions`.
+    pub async fn run(
+        &self,
+        input: I,
+        options: Option<ActionRunOptions<S>>,
+    ) -> Result<ActionResult<O>> {
+        let mut opts = options.unwrap_or_else(|| ActionRunOptions {
+            on_chunk: None,
+            context: None,
+            telemetry_labels: None,
+            abort_signal: None,
+        });
+
+        let telemetry_labels = opts.telemetry_labels.map(|labels| {
+            labels
+                .into_iter()
+                .map(|(k, v)| (k, Value::String(v)))
+                .collect()
+        });
+
+        let (result, telemetry) = tracing::in_new_span(
+            self.meta.name.clone(),
+            telemetry_labels,
+            |trace_context| async {
+                let (chunk_tx, mut chunk_rx) = channel();
+
+                let on_chunk_task = if let Some(on_chunk) = opts.on_chunk {
+                    let task = tokio::spawn(async move {
+                        while let Some(chunk_result) = chunk_rx.next().await {
+                            on_chunk(chunk_result.map_err(|e| Error::new_internal(e.to_string())));
+                        }
+                    });
+                    Some(task)
+                } else {
+                    None
+                };
+
                 let args = ActionFnArg {
-                    streaming_requested: false,
-                    chunk_sender: chunk_tx,
-                    context: context.clone(),
+                    streaming_requested: on_chunk_task.is_some(),
+                    chunk_sender: chunk_tx.clone(),
+                    context: opts.context.clone(),
                     trace: trace_context,
-                    abort_signal: CancellationToken::new(),
+                    abort_signal: opts.abort_signal.take().unwrap_or_default(),
                 };
 
                 let fut = self.func.run(input, args);
 
-                if let Some(ctx) = context {
+                let run_result = if let Some(ctx) = opts.context {
                     context::run_with_context(ctx, fut).await
                 } else {
                     fut.await
+                };
+
+                chunk_tx.close();
+                if let Some(task) = on_chunk_task {
+                    task.await.unwrap();
                 }
-            })
-            .await?;
+
+                run_result
+            },
+        )
+        .await?;
 
         // TODO: Add output schema validation.
 
         Ok(ActionResult { result, telemetry })
+    }
+
+    /// Executes the action and provides a streaming response.
+    pub fn stream(
+        &self,
+        input: I,
+        options: Option<ActionRunOptions<S>>,
+    ) -> StreamingResponse<O, S> {
+        let (chunk_tx, chunk_rx) = channel();
+
+        let mut opts = options.unwrap_or_default();
+        opts.on_chunk = Some(Arc::new(move |chunk_result| {
+            match chunk_result {
+                Ok(chunk) => chunk_tx.send(Ok(chunk)),
+                Err(e) => chunk_tx.send(Err(e)),
+            };
+        }));
+
+        let self_clone = self.clone();
+        let future =
+            Box::pin(async move { self_clone.run(input, Some(opts)).await.map(|ar| ar.result) });
+
+        let stream = chunk_rx.map(|res| match res {
+            Ok(inner_result) => inner_result,
+            Err(e) => Err(Error::new_internal(e.to_string())),
+        });
+
+        StreamingResponse {
+            stream: Box::pin(stream),
+            output: future,
+        }
     }
 
     /// Executes the action with a raw JSON value, handling parsing.
@@ -172,7 +268,7 @@ where
     pub async fn run_http(
         &self,
         input: Value,
-        context: Option<ActionContext>,
+        options: Option<ActionRunOptions<S>>,
     ) -> Result<ActionResult<O>> {
         let parsed_input: I = match self.meta.input_schema.clone() {
             Some(schema_def) => parse_schema(input, ProvidedSchema::FromType(schema_def))?,
@@ -184,44 +280,7 @@ where
                 )
             })?,
         };
-        self.run(parsed_input, context).await
-    }
-
-    /// Executes the action and provides a streaming response.
-    pub fn stream(&self, input: I, context: Option<ActionContext>) -> StreamingResponse<O, S> {
-        let (chunk_tx, chunk_rx) = channel::<S>();
-        let func = self.func.clone();
-        let meta_name = self.meta.name.clone();
-
-        let future = Box::pin(async move {
-            let (result, _telemetry) =
-                tracing::in_new_span(meta_name, None, |trace_context| async {
-                    let args = ActionFnArg {
-                        streaming_requested: true,
-                        chunk_sender: chunk_tx,
-                        context: context.clone(),
-                        trace: trace_context,
-                        abort_signal: CancellationToken::new(),
-                    };
-
-                    let fut = func.run(input, args);
-
-                    if let Some(ctx) = context {
-                        context::run_with_context(ctx, fut).await
-                    } else {
-                        fut.await
-                    }
-                })
-                .await?;
-
-            // TODO: Add output schema validation.
-            Ok(result)
-        });
-
-        StreamingResponse {
-            stream: Box::pin(chunk_rx.filter_map(|item| async { item.ok() })),
-            output: future,
-        }
+        self.run(parsed_input, options).await
     }
 }
 

@@ -107,7 +107,7 @@ pub type EvalResponses = Vec<EvalResponse>;
 // Action & Function Types
 //
 
-#[derive(Debug, Serialize, Deserialize, JsonSchema)]
+#[derive(Debug, Serialize, Deserialize, JsonSchema, Clone)]
 #[serde(rename_all = "camelCase")]
 pub struct EvalRequest<O = Value> {
     pub dataset: Dataset,

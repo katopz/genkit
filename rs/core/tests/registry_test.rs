@@ -28,9 +28,9 @@ use std::sync::{
 };
 
 // Helper structs for testing
-#[derive(Serialize, Deserialize, JsonSchema, Debug, PartialEq)]
+#[derive(Serialize, Deserialize, JsonSchema, Debug, PartialEq, Clone)]
 struct TestInput {}
-#[derive(Serialize, Deserialize, JsonSchema, Debug, PartialEq)]
+#[derive(Serialize, Deserialize, JsonSchema, Debug, PartialEq, Clone)]
 struct TestOutput {}
 
 // A mock plugin for testing purposes.

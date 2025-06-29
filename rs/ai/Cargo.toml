@@ -26,12 +26,13 @@ serde_json = "1.0"
 thiserror = "2.0"
 
 # Other utilities
-colored      = "3.0"                                            # For terminal colors, like colorette
+colored      = "3.0"    # For terminal colors, like colorette
 futures-util = "0.3.31"
+
+jsonschema   = "0.30.0"
 tokio-stream = "0.1.17"
 uritemplate  = "0.1"                                            # For RFC 6570 URI Templates
 uuid         = { version = "1.17", features = ["v4", "serde"] } # For generating UUIDs
-jsonschema = "0.30.0"
 
 [dev-dependencies]
 tokio-test = "0.4"

@@ -23,10 +23,14 @@
 
 //! used across asynchronous tasks.
 
-use crate::action::{Action, ActionMetadata};
+use crate::action::{Action, ActionMetadata, ActionRunOptions, StreamingResponse};
 use crate::error::{Error, Result};
-use crate::schema;
+use crate::schema::{self, parse_schema, ProvidedSchema};
+use crate::status::StatusCode;
 use async_trait::async_trait;
+// #[cfg(feature = "dotprompt-private")]
+// use dotprompt::Dotprompt;
+use futures::{FutureExt, StreamExt};
 use schemars::JsonSchema;
 use serde::{de::DeserializeOwned, Deserialize, Serialize};
 use serde_json::Value;
@@ -68,6 +72,13 @@ pub trait ErasedAction: Send + Sync {
         input: Value,
         context: Option<crate::context::ActionContext>,
     ) -> Result<Value>;
+
+    /// Executes a streaming action with a raw JSON value.
+    fn stream_http_json(
+        &self,
+        input: Value,
+        context: Option<crate::context::ActionContext>,
+    ) -> Result<StreamingResponse<Value, Value>>;
     /// Returns the name of the action.
     fn name(&self) -> &str;
     /// Returns the metadata for the action.
@@ -93,18 +104,77 @@ pub trait Plugin: Send + Sync {
 #[async_trait]
 impl<I, O, S> ErasedAction for Action<I, O, S>
 where
-    I: DeserializeOwned + JsonSchema + Send + Sync + 'static,
-    O: Serialize + Send + Sync + 'static,
-    S: Send + Sync + 'static,
+    I: DeserializeOwned + JsonSchema + Send + Sync + Clone + 'static,
+    O: Serialize + JsonSchema + Send + Sync + 'static,
+    S: Serialize + JsonSchema + Send + Sync + Clone + 'static,
 {
     async fn run_http_json(
         &self,
         input: Value,
         context: Option<crate::context::ActionContext>,
     ) -> Result<Value> {
-        let result = self.run_http_json(input, context).await?;
-        serde_json::to_value(result)
+        let parsed_input: I = match self.meta.input_schema.clone() {
+            Some(schema_def) => parse_schema(input, ProvidedSchema::FromType(schema_def))?,
+            None => serde_json::from_value(input).map_err(|e| {
+                Error::new_user_facing(
+                    StatusCode::InvalidArgument,
+                    format!("Failed to parse input: {}", e),
+                    None,
+                )
+            })?,
+        };
+        let result = self
+            .run(
+                parsed_input,
+                Some(ActionRunOptions {
+                    context,
+                    ..Default::default()
+                }),
+            )
+            .await?;
+        serde_json::to_value(&result)
             .map_err(|e| Error::new_internal(format!("Failed to serialize action output: {}", e)))
+    }
+
+    fn stream_http_json(
+        &self,
+        input: Value,
+        context: Option<crate::context::ActionContext>,
+    ) -> Result<StreamingResponse<Value, Value>> {
+        let parsed_input: I = match self.meta.input_schema.clone() {
+            Some(schema_def) => parse_schema(input, ProvidedSchema::FromType(schema_def))?,
+            None => serde_json::from_value(input).map_err(|e| {
+                Error::new_user_facing(
+                    StatusCode::InvalidArgument,
+                    format!("Failed to parse input: {}", e),
+                    None,
+                )
+            })?,
+        };
+        let streaming_response = self.stream(
+            parsed_input,
+            Some(ActionRunOptions {
+                context,
+                ..Default::default()
+            }),
+        );
+
+        let value_stream = streaming_response.stream.map(|chunk_result| {
+            chunk_result.and_then(|chunk| {
+                serde_json::to_value(chunk).map_err(|e| Error::new_internal(e.to_string()))
+            })
+        });
+
+        let value_output = streaming_response.output.then(|output_result| async {
+            output_result.and_then(|output| {
+                serde_json::to_value(output).map_err(|e| Error::new_internal(e.to_string()))
+            })
+        });
+
+        Ok(StreamingResponse {
+            stream: Box::pin(value_stream),
+            output: Box::pin(value_output),
+        })
     }
 
     fn name(&self) -> &str {
@@ -125,10 +195,12 @@ where
 /// The `Registry` is responsible for storing and providing access to all
 /// registered actions, plugins, and schemas. It supports hierarchical
 /// composition, allowing for child registries that inherit from a parent.
-#[derive(Clone, Default)]
+#[derive(Clone)]
 pub struct Registry {
     /// Using `Arc<Mutex<...>>` allows for thread-safe interior mutability.
     state: Arc<Mutex<RegistryState>>,
+    // #[cfg(feature = "dotprompt-private")]
+    // pub dotprompt: Arc<Dotprompt<'static>>,
 }
 
 #[derive(Default)]
@@ -153,10 +225,63 @@ impl Debug for Registry {
     }
 }
 
+impl Default for Registry {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl Registry {
     /// Creates a new, empty `Registry`.
     pub fn new() -> Self {
-        Registry::default()
+        let state = Arc::new(Mutex::new(RegistryState::default()));
+        // #[cfg(feature = "dotprompt-private")]
+        // {
+        //     let state_for_resolver = state.clone();
+        //     let resolver = move |name: String| {
+        //         let resolver_state = state_for_resolver.clone();
+        //         async move {
+        //             fn lookup_schema_from_state(
+        //                 state_arc: &Arc<Mutex<RegistryState>>,
+        //                 name: &str,
+        //             ) -> Option<ProvidedSchema> {
+        //                 let state = state_arc.lock().unwrap();
+        //                 if let Some(schema) = state.schemas.get(name) {
+        //                     return Some(schema.clone());
+        //                 }
+        //                 if let Some(parent) = &state.parent {
+        //                     return lookup_schema_from_state(&parent.state, name);
+        //                 }
+        //                 None
+        //             }
+
+        //             match lookup_schema_from_state(&resolver_state, &name) {
+        //                 Some(schema) => {
+        //                     let json_val = match schema {
+        //                         ProvidedSchema::FromType(s) => {
+        //                             serde_json::to_value(s).map_err(|e| {
+        //                                 dotprompt::Error::new_render_error(format!(
+        //                                     "Failed to serialize schema: {}",
+        //                                     e
+        //                                 ))
+        //                             })?
+        //                         }
+        //                         ProvidedSchema::Raw(v) => v,
+        //                     };
+        //                     Ok(json_val)
+        //                 }
+        //                 None => Err(dotprompt::Error::new_render_error(format!(
+        //                     "Schema '{}' not found",
+        //                     name
+        //                 ))),
+        //             }
+        //         }
+        //     };
+        //     let dotprompt = Arc::new(Dotprompt::new_with_resolver(Box::new(resolver)));
+        //     Self { state, dotprompt }
+        // }
+        // #[cfg(not(feature = "dotprompt-private"))]
+        Self { state }
     }
 
     /// Creates a new registry that inherits from a parent registry.
@@ -164,13 +289,22 @@ impl Registry {
     /// The new registry can override components from the parent or add new ones.
     /// Lookups will fall back to the parent if a component is not found in the child.
     pub fn with_parent(parent: &Registry) -> Self {
-        let state = RegistryState {
+        let state = Arc::new(Mutex::new(RegistryState {
             parent: Some(parent.clone()),
             ..Default::default()
-        };
-        Registry {
-            state: Arc::new(Mutex::new(state)),
-        }
+        }));
+
+        // #[cfg(feature = "dotprompt-private")]
+        // {
+        //     // NOTE: This follows the TS implementation by sharing the parent's dotprompt instance.
+        //     // This means partials and helpers are shared, but it also means the schema resolver
+        //     // will not see schemas defined only in the child registry. This may be revised later.
+        //     let dotprompt = parent.dotprompt.clone();
+
+        //     Self { state, dotprompt }
+        // }
+        // #[cfg(not(feature = "dotprompt-private"))]
+        Self { state }
     }
 
     /// Registers an action with the registry.
@@ -299,6 +433,13 @@ mod tests {
 
     #[tokio::test]
     async fn test_register_and_lookup_action() {
+        // Define a local version of TestInput that derives Clone to satisfy the
+        // ErasedAction trait bounds.
+        #[derive(Serialize, Deserialize, JsonSchema, Debug, PartialEq, Clone)]
+        struct TestInput {
+            value: String,
+        }
+
         let mut registry = Registry::new();
         let test_action = ActionBuilder::<TestInput, TestOutput, (), _>::new(
             ActionType::Flow,

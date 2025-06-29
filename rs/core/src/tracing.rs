@@ -12,84 +12,144 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! # Tracing and Telemetry
+//! # Genkit Tracing
 //!
-//! This module provides the core tracing capabilities for the Genkit framework,
-//! built on top of the OpenTelemetry standard. It is the Rust equivalent of `tracing.ts`.
+//! This module provides the main entry point for configuring and using
+//! OpenTelemetry for tracing within the Genkit framework.
 
-use crate::action::TelemetryInfo;
+// Declare modules.
+pub mod exporter;
+pub mod instrumentation;
+pub mod types;
+
+// Re-export key types and functions for the public API.
+pub use self::instrumentation::in_new_span;
+
 use crate::error::Result;
 use crate::telemetry::TelemetryConfig;
-use serde_json::Value;
-use std::collections::HashMap;
-use std::future::Future;
+use crate::utils::is_dev_env;
+use exporter::TraceServerExporter;
+use once_cell::sync::OnceCell;
+use opentelemetry_sdk::error::OTelSdkResult;
+use opentelemetry_sdk::trace::Span;
+use opentelemetry_sdk::{
+    trace::{
+        BatchSpanProcessor, SdkTracerProvider, SimpleSpanProcessor, SpanData, SpanProcessor,
+        TraceError,
+    },
+    Resource,
+};
+use std::fmt::{Debug, Formatter, Result as FmtResult};
 
-/// Represents the OpenTelemetry trace context passed to actions and flows.
+// A wrapper to allow Box<dyn SpanProcessor> to be used with the new API.
+struct BoxedSpanProcessor(Box<dyn SpanProcessor>);
+
+impl Debug for BoxedSpanProcessor {
+    fn fmt(&self, f: &mut Formatter<'_>) -> FmtResult {
+        self.0.fmt(f)
+    }
+}
+
+impl SpanProcessor for BoxedSpanProcessor {
+    fn on_start(&self, span: &mut Span, cx: &opentelemetry::Context) {
+        self.0.on_start(span, cx)
+    }
+
+    fn on_end(&self, span: SpanData) {
+        self.0.on_end(span)
+    }
+
+    fn force_flush(&self) -> OTelSdkResult {
+        self.0.force_flush()
+    }
+
+    fn shutdown(&self) -> OTelSdkResult {
+        self.0.shutdown()
+    }
+
+    fn set_resource(&mut self, resource: &Resource) {
+        self.0.set_resource(resource);
+    }
+
+    fn shutdown_with_timeout(
+        &self,
+        _timeout: std::time::Duration,
+    ) -> opentelemetry_sdk::error::OTelSdkResult {
+        todo!()
+    }
+}
+
+// A global static to ensure telemetry is initialized only once.
+static TELEMETRY_INIT: OnceCell<()> = OnceCell::new();
+// A global static to hold the tracer provider for calling shutdown.
+static GENKIT_TRACER_PROVIDER: OnceCell<SdkTracerProvider> = OnceCell::new();
+
+/// The OpenTelemetry trace context, containing Trace and Span IDs.
 #[derive(Debug, Clone)]
 pub struct TraceContext {
     pub trace_id: String,
     pub span_id: String,
 }
 
-/// Executes a future within a new trace span.
+/// Enables and configures OpenTelemetry tracing.
 ///
-/// This is a simplified placeholder. A real implementation would interact
-/// with the OpenTelemetry SDK to create and manage spans, propagating context
-/// and recording attributes.
+/// This function should be called once at the beginning of the application's
+/// lifecycle. It sets up the global tracer provider with the specified
+/// configuration. If it is called more than once, subsequent calls will have
+/// no effect and will return `Ok(())`.
 ///
 /// # Arguments
-/// * `_name` - The name for the new span.
-/// * `_attrs` - Optional attributes for the span.
-/// * `f` - The asynchronous closure to execute within the span.
-pub async fn in_new_span<F, Fut, T>(
-    _name: String,
-    _attrs: Option<HashMap<String, Value>>,
-    f: F,
-) -> Result<(T, TelemetryInfo)>
-where
-    F: FnOnce(TraceContext) -> Fut,
-    Fut: Future<Output = Result<T>> + Send,
-    T: Send,
-{
-    // This is a dummy implementation. A real one would use the OpenTelemetry SDK
-    // to start a new span and get a real trace context.
-    let trace_context = TraceContext {
-        trace_id: "dummy-trace-id".to_string(),
-        span_id: "dummy-span-id".to_string(),
-    };
+///
+/// * `config` - A `TelemetryConfig` struct containing custom configuration
+///   for span processors, resources, and samplers.
+pub fn enable_telemetry(mut config: TelemetryConfig) -> Result<(), TraceError> {
+    TELEMETRY_INIT.get_or_try_init(|| {
+        // 1. Create the default processor that exports to the Genkit Telemetry Server.
+        let telemetry_processor: Box<dyn SpanProcessor> = if is_dev_env() {
+            let exporter = TraceServerExporter::new();
+            Box::new(SimpleSpanProcessor::new(exporter))
+        } else {
+            let exporter = TraceServerExporter::new();
+            Box::new(BatchSpanProcessor::new(exporter, Default::default()))
+        };
 
-    let result = f(trace_context.clone()).await?;
+        // 2. Combine with any user-provided processors.
+        let mut processors: Vec<Box<dyn SpanProcessor>> = Vec::new();
+        processors.push(telemetry_processor);
+        processors.append(&mut config.span_processors);
 
-    let telemetry_info = TelemetryInfo {
-        trace_id: trace_context.trace_id,
-        span_id: trace_context.span_id,
-    };
+        // 3. Build the TracerProvider.
+        let mut provider_builder = SdkTracerProvider::builder();
+        for p in processors {
+            provider_builder = provider_builder.with_span_processor(BoxedSpanProcessor(p));
+        }
+        if let Some(sampler) = config.sampler {
+            provider_builder = provider_builder.with_sampler(sampler);
+        }
+        if let Some(resource) = config.resource {
+            provider_builder = provider_builder.with_resource(resource);
+        }
+        let provider = provider_builder.build();
 
-    Ok((result, telemetry_info))
-}
+        // 4. Set the global tracer provider and store our handle for later shutdown.
+        opentelemetry::global::set_tracer_provider(provider.clone());
+        GENKIT_TRACER_PROVIDER
+            .set(provider)
+            .map_err(|_| TraceError::from("Failed to store SdkTracerProvider in global static."))?;
 
-/// Ensures that basic telemetry instrumentation is initialized.
-/// This is a placeholder for a more complex initialization routine.
-pub fn ensure_basic_telemetry_instrumentation() {
-    // In a real implementation, this would set up a global tracer provider
-    // using something like `opentelemetry::global::set_tracer_provider`.
-}
-
-/// Enables and configures OpenTelemetry tracing and metrics.
-/// This is a placeholder.
-pub fn enable_telemetry(_config: TelemetryConfig) -> Result<()> {
-    // A real implementation would configure and start the OpenTelemetry SDK here.
+        Ok::<(), TraceError>(())
+    })?;
     Ok(())
 }
 
-/// Cleans up and shuts down tracing resources.
-/// This is a placeholder.
-pub fn clean_up_tracing() {
-    // In a real implementation, this would call `opentelemetry::global::shutdown_tracer_provider`.
-}
-
-/// Flushes all configured span processors.
-/// This is a placeholder.
-pub fn flush_tracing() {
-    // A real implementation would iterate through registered span processors and flush them.
+/// Shuts down the global tracer provider, flushing any buffered spans.
+///
+/// This should be called before the application exits to ensure all telemetry
+/// data is sent.
+pub fn flush_tracing() -> OTelSdkResult {
+    if let Some(provider) = GENKIT_TRACER_PROVIDER.get() {
+        provider.shutdown()
+    } else {
+        OTelSdkResult::Ok(())
+    }
 }

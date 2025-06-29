@@ -55,54 +55,104 @@ pub fn text_formatter() -> Formatter {
 mod tests {
     use super::*;
     use crate::document::Part;
+    use crate::generate::chunk::{GenerateResponseChunk, GenerateResponseChunkOptions};
+    use crate::message::{Message, MessageData, Role};
+    use crate::model::GenerateResponseChunkData;
+    use serde_json::Value;
 
     #[test]
-    fn test_parse_message() {
+    fn test_streaming_parser() {
         let formatter = text_formatter();
         let handler = (formatter.handler)(None);
-        let message = Message::new(
-            crate::message::MessageData {
-                role: crate::message::Role::Model,
-                content: vec![
-                    Part {
-                        text: Some("Hello, ".to_string()),
-                        ..Default::default()
-                    },
-                    Part {
-                        text: Some("world!".to_string()),
-                        ..Default::default()
-                    },
-                ],
+
+        // Test case 1: "emits text chunks as they arrive"
+        let chunk1_data = GenerateResponseChunkData {
+            index: 0,
+            role: Some(Role::Model),
+            content: vec![Part {
+                text: Some("Hello".to_string()),
+                ..Default::default()
+            }],
+            ..Default::default()
+        };
+        let chunk1 =
+            GenerateResponseChunk::new(chunk1_data, GenerateResponseChunkOptions::default());
+        assert_eq!(
+            handler.parse_chunk(&chunk1),
+            Some(Value::String("Hello".to_string()))
+        );
+
+        let chunk2_data = GenerateResponseChunkData {
+            index: 0,
+            role: Some(Role::Model),
+            content: vec![Part {
+                text: Some(" world".to_string()),
+                ..Default::default()
+            }],
+            ..Default::default()
+        };
+        let chunk2 =
+            GenerateResponseChunk::new(chunk2_data, GenerateResponseChunkOptions::default());
+        assert_eq!(
+            handler.parse_chunk(&chunk2),
+            Some(Value::String(" world".to_string()))
+        );
+
+        // Test case 2: "handles empty chunks"
+        let empty_chunk_data = GenerateResponseChunkData {
+            index: 0,
+            role: Some(Role::Model),
+            content: vec![Part {
+                text: Some("".to_string()),
+                ..Default::default()
+            }],
+            ..Default::default()
+        };
+        let empty_chunk =
+            GenerateResponseChunk::new(empty_chunk_data, GenerateResponseChunkOptions::default());
+        assert_eq!(
+            handler.parse_chunk(&empty_chunk),
+            Some(Value::String("".to_string()))
+        );
+    }
+
+    #[test]
+    fn test_message_parser() {
+        let formatter = text_formatter();
+        let handler = (formatter.handler)(None);
+
+        // Test case 1: Parses complete text response
+        let message1 = Message::new(
+            MessageData {
+                role: Role::Model,
+                content: vec![Part {
+                    text: Some("Hello world".to_string()),
+                    ..Default::default()
+                }],
                 metadata: None,
             },
             None,
         );
-        let parsed = handler.parse_message(&message);
-        assert_eq!(parsed, Value::String("Hello, world!".to_string()));
-    }
+        assert_eq!(
+            handler.parse_message(&message1),
+            Value::String("Hello world".to_string())
+        );
 
-    #[test]
-    fn test_parse_chunk() {
-        let formatter = text_formatter();
-        let handler = (formatter.handler)(None);
-        let chunk = GenerateResponseChunk::new(
-            crate::model::GenerateResponseChunkData {
-                index: 0,
+        // Test case 2: Handles empty response
+        let message2 = Message::new(
+            MessageData {
+                role: Role::Model,
                 content: vec![Part {
-                    text: Some("Genkit".to_string()),
+                    text: Some("".to_string()),
                     ..Default::default()
                 }],
-                custom: None,
-                usage: None,
-                role: None,
+                metadata: None,
             },
-            crate::generate::chunk::GenerateResponseChunkOptions {
-                index: Some(0u32),
-                role: Some(crate::message::Role::Model),
-                ..Default::default()
-            },
+            None,
         );
-        let parsed = handler.parse_chunk(&chunk).unwrap();
-        assert_eq!(parsed, Value::String("Genkit".to_string()));
+        assert_eq!(
+            handler.parse_message(&message2),
+            Value::String("".to_string())
+        );
     }
 }
