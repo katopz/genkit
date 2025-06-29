@@ -100,7 +100,7 @@ pub struct StreamFlowResponse<O, S> {
 /// ## Example
 ///
 /// ```rust,no_run
-/// use genkit_ai::client::{run_flow, RunFlowParams};
+/// use genkit::client::{run_flow, RunFlowParams};
 /// use serde::{Serialize, Deserialize};
 ///
 /// #[derive(Serialize)]
@@ -114,7 +114,7 @@ pub struct StreamFlowResponse<O, S> {
 /// }
 ///
 /// #[tokio::main]
-/// async fn main() -> Result<(), genkit_ai::error::Error> {
+/// async fn main() -> Result<(), genkit::error::Error> {
 ///     let response = run_flow::<_, MyOutput>(RunFlowParams {
 ///         url: "https://my-flow-deployed-url".to_string(),
 ///         input: Some(MyInput { name: "Genkit".to_string() }),
@@ -138,20 +138,24 @@ where
             let header_name = HeaderName::from_str(&key).map_err(|e| {
                 Error::new_internal(format!("Invalid header name '{}': {}", key, e))
             })?;
-            let header_value = HeaderValue::from_str(&value)?;
+            let header_value = HeaderValue::from_str(&value).map_err(|e| {
+                Error::new_internal(format!("Invalid header value for '{}': {}", key, e))
+            })?;
             headers.insert(header_name, header_value);
         }
     }
 
     let request_body = FlowRequest { data: params.input };
-    let body_bytes = serde_json::to_vec(&request_body)?;
+    let body_bytes = serde_json::to_vec(&request_body)
+        .map_err(|e| Error::new_internal(format!("Failed to serialize request body: {}", e)))?;
 
     let response = client
         .post(params.url)
         .headers(headers)
         .body(body_bytes)
         .send()
-        .await?;
+        .await
+        .map_err(|e| Error::new_internal(format!("HTTP request failed: {}", e)))?;
 
     if response.status().as_u16() != 200 {
         return Err(Error::new_internal(format!(
@@ -161,7 +165,10 @@ where
         )));
     }
 
-    let wrapped_result: FlowResponse<O> = response.json().await?;
+    let wrapped_result: FlowResponse<O> = response
+        .json()
+        .await
+        .map_err(|e| Error::new_internal(format!("Failed to deserialize response body: {}", e)))?;
 
     match wrapped_result {
         FlowResponse::Success { result } => Ok(result),
@@ -177,11 +184,11 @@ where
 /// ## Example
 ///
 /// ```rust,no_run
-/// use genkit_ai::client::{stream_flow, StreamFlowParams};
+/// use genkit::client::{stream_flow, StreamFlowParams};
 /// use tokio_stream::StreamExt;
 ///
 /// #[tokio::main]
-/// async fn main() -> Result<(), genkit_ai::error::Error> {
+/// async fn main() -> Result<(), genkit::error::Error> {
 ///     let mut response = stream_flow::<Option<()>, String, String>(StreamFlowParams {
 ///         url: "https://my-flow-deployed-url".to_string(),
 ///         input: None,
@@ -235,13 +242,14 @@ where
             .headers(headers)
             .body(body_bytes)
             .send()
-            .await?;
+            .await
+            .map_err(|e| Error::new_internal(format!("HTTP request failed: {}", e)))?;
 
         if response.status() != 200 {
-            let error_text = response.text().await.unwrap_or_default();
             return Err(Error::new_internal(format!(
-                "Server returned non-200 status: {}",
-                error_text
+                "Server returned: {}: {}",
+                response.status(),
+                response.text().await.unwrap_or_default()
             )));
         }
 
