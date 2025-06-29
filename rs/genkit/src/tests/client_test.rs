@@ -17,15 +17,12 @@
 //! Integration tests for the flow client, validating `run_flow` and `stream_flow`.
 
 use super::helpers::with_mock_server;
-use genkit_ai::client::{run_flow, stream_flow, RunFlowParams, StreamFlowParams};
-use genkit_ai::error::Result;
-use hyper::service::{make_service_fn, service_fn};
-use hyper::{Body, Method, Request, Response, Server, StatusCode};
+use crate::client::{run_flow, stream_flow, RunFlowParams, StreamFlowParams};
+use crate::error::Result;
+use hyper::{Body, Request, Response, StatusCode};
 use serde::{Deserialize, Serialize};
 use serde_json::json;
 use std::convert::Infallible;
-use std::net::SocketAddr;
-use tokio::sync::oneshot;
 use tokio_stream::StreamExt;
 
 #[derive(Serialize, Deserialize, Debug, PartialEq)]
@@ -44,7 +41,7 @@ mod test {
 
     #[tokio::test]
     async fn test_run_flow_success() -> Result<()> {
-        async fn handle(req: Request<Body>) -> Result<Response<Body>, Infallible> {
+        async fn handle(req: Request<Body>) -> std::result::Result<Response<Body>, Infallible> {
             let whole_body = hyper::body::to_bytes(req.into_body()).await.unwrap();
             let input: serde_json::Value = serde_json::from_slice(&whole_body).unwrap();
             let name = input["data"]["name"].as_str().unwrap();
@@ -78,8 +75,83 @@ mod test {
     }
 
     #[tokio::test]
+    async fn test_run_flow_complex_input() -> Result<()> {
+        #[derive(Serialize, Deserialize, Debug, PartialEq)]
+        struct InputDetails {
+            is_active: bool,
+            value: f64,
+        }
+
+        #[derive(Serialize, Deserialize, Debug, PartialEq)]
+        struct ComplexInput {
+            id: i32,
+            name: String,
+            tags: Vec<String>,
+            details: InputDetails,
+        }
+
+        #[derive(Serialize, Deserialize, Debug, PartialEq)]
+        struct ComplexOutput {
+            summary: String,
+        }
+
+        async fn handle(req: Request<Body>) -> std::result::Result<Response<Body>, Infallible> {
+            let whole_body = hyper::body::to_bytes(req.into_body()).await.unwrap();
+            let input_val: serde_json::Value = serde_json::from_slice(&whole_body).unwrap();
+            let complex_input: ComplexInput =
+                serde_json::from_value(input_val["data"].clone()).unwrap();
+
+            assert_eq!(complex_input.id, 123);
+            assert_eq!(complex_input.name, "Complex Item");
+            assert_eq!(complex_input.tags, vec!["a", "b", "c"]);
+            assert!(complex_input.details.is_active);
+            assert_eq!(complex_input.details.value, 99.9);
+
+            let summary = format!(
+                "Received {} with {} tags.",
+                complex_input.name,
+                complex_input.tags.len()
+            );
+
+            let response_data = json!({
+                "result": {
+                    "summary": summary
+                }
+            });
+            Ok(Response::new(Body::from(response_data.to_string())))
+        }
+
+        let url = with_mock_server(handle).await;
+
+        let input_data = ComplexInput {
+            id: 123,
+            name: "Complex Item".to_string(),
+            tags: vec!["a".to_string(), "b".to_string(), "c".to_string()],
+            details: InputDetails {
+                is_active: true,
+                value: 99.9,
+            },
+        };
+
+        let response = run_flow::<_, ComplexOutput>(RunFlowParams {
+            url,
+            input: Some(input_data),
+            headers: None,
+        })
+        .await?;
+
+        assert_eq!(
+            response,
+            ComplexOutput {
+                summary: "Received Complex Item with 3 tags.".to_string()
+            }
+        );
+        Ok(())
+    }
+
+    #[tokio::test]
     async fn test_run_flow_server_error() {
-        async fn handle(_: Request<Body>) -> Result<Response<Body>, Infallible> {
+        async fn handle(req: Request<Body>) -> std::result::Result<Response<Body>, Infallible> {
             Ok(Response::builder()
                 .status(StatusCode::INTERNAL_SERVER_ERROR)
                 .body("Internal Error".into())
@@ -87,7 +159,7 @@ mod test {
         }
         let url = with_mock_server(handle).await;
 
-        let result = run_flow::<_, TestOutput>(RunFlowParams {
+        let result = run_flow::<Option<()>, TestOutput>(RunFlowParams {
             url,
             input: None,
             headers: None,
@@ -102,7 +174,7 @@ mod test {
 
     #[tokio::test]
     async fn test_stream_flow_success() -> Result<()> {
-        async fn handle(_: Request<Body>) -> Result<Response<Body>, Infallible> {
+        async fn handle(_: Request<Body>) -> std::result::Result<Response<Body>, Infallible> {
             let body = "data: {\"message\":\"one\"}\n\ndata: {\"message\":\"two\"}\n\ndata: {\"result\":\"done\"}\n\n";
             let response = Response::builder()
                 .header("Content-Type", "text/event-stream")
@@ -133,7 +205,7 @@ mod test {
 
     #[tokio::test]
     async fn test_stream_flow_error_in_stream() {
-        async fn handle(_: Request<Body>) -> Result<Response<Body>, Infallible> {
+        async fn handle(_: Request<Body>) -> std::result::Result<Response<Body>, Infallible> {
             let body = "data: {\"message\":\"one\"}\n\ndata: {\"error\":{\"status\":\"FATAL\",\"message\":\"Something broke\"}}\n\n";
             let response = Response::builder()
                 .header("Content-Type", "text/event-stream")
@@ -158,5 +230,104 @@ mod test {
         assert!(final_result.is_err());
         let err_msg = final_result.unwrap_err().to_string();
         assert!(err_msg.contains("FATAL: Something broke"));
+    }
+
+    #[tokio::test]
+    async fn test_stream_flow_complex_output() -> Result<()> {
+        #[derive(Serialize, Deserialize, Debug, PartialEq)]
+        struct StatusUpdate {
+            status: String,
+            progress: f32,
+        }
+
+        #[derive(Serialize, Deserialize, Debug, PartialEq)]
+        struct ComplexChunk {
+            update: StatusUpdate,
+            timestamp: u64,
+        }
+
+        #[derive(Serialize, Deserialize, Debug, PartialEq)]
+        struct FinalResult {
+            id: String,
+            summary: String,
+            items_processed: u32,
+        }
+
+        async fn handle(_: Request<Body>) -> std::result::Result<Response<Body>, Infallible> {
+            let chunk1 = json!({
+                "message": {
+                    "update": { "status": "processing", "progress": 0.5 },
+                    "timestamp": 1678886400
+                }
+            });
+            let chunk2 = json!({
+                "message": {
+                    "update": { "status": "validating", "progress": 0.9 },
+                    "timestamp": 1678886401
+                }
+            });
+            let final_result = json!({
+                "result": {
+                    "id": "abc-123",
+                    "summary": "Processing complete",
+                    "items_processed": 100
+                }
+            });
+
+            let body = format!(
+                "data: {}\n\ndata: {}\n\ndata: {}\n\n",
+                chunk1, chunk2, final_result
+            );
+
+            let response = Response::builder()
+                .header("Content-Type", "text/event-stream")
+                .body(Body::from(body))
+                .unwrap();
+            Ok(response)
+        }
+        let url = with_mock_server(handle).await;
+
+        let mut response_stream = stream_flow::<(), FinalResult, ComplexChunk>(StreamFlowParams {
+            url,
+            input: None,
+            headers: None,
+        });
+
+        let mut chunks = Vec::new();
+        while let Some(chunk_result) = response_stream.stream.next().await {
+            chunks.push(chunk_result.unwrap());
+        }
+
+        assert_eq!(
+            chunks,
+            vec![
+                ComplexChunk {
+                    update: StatusUpdate {
+                        status: "processing".to_string(),
+                        progress: 0.5
+                    },
+                    timestamp: 1678886400
+                },
+                ComplexChunk {
+                    update: StatusUpdate {
+                        status: "validating".to_string(),
+                        progress: 0.9
+                    },
+                    timestamp: 1678886401
+                }
+            ]
+        );
+
+        let final_output = response_stream.output.await??;
+        assert_eq!(
+            final_output,
+            FinalResult {
+                id: "abc-123".to_string(),
+                summary: "Processing complete".to_string(),
+                items_processed: 100
+            }
+        );
+
+        Ok(())
     }
 }

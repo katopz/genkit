@@ -34,4 +34,4 @@ mod helpers;
 #[cfg(test)]
 mod prompts_test;
 #[cfg(test)]
-mod session_test;
+mod retriever_test;

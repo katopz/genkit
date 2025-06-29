@@ -21,15 +21,12 @@
 //! session management may be added in the future.
 
 use super::helpers::with_mock_server;
-use genkit_ai::client::{run_flow, stream_flow, RunFlowParams, StreamFlowParams};
-use genkit_ai::error::Result;
-use hyper::service::{make_service_fn, service_fn};
-use hyper::{Body, Request, Response, Server};
+use crate::client::{run_flow, stream_flow, RunFlowParams, StreamFlowParams};
+use crate::error::Result;
+use hyper::{Body, Request, Response};
 use serde::{Deserialize, Serialize};
 use serde_json::json;
 use std::convert::Infallible;
-use std::net::SocketAddr;
-use tokio::sync::oneshot;
 use tokio_stream::StreamExt;
 
 #[derive(Serialize, Deserialize, Debug, PartialEq)]
@@ -49,7 +46,7 @@ mod test {
 
     #[tokio::test]
     async fn test_single_turn_chat() -> Result<()> {
-        async fn handle(req: Request<Body>) -> Result<Response<Body>, Infallible> {
+        async fn handle(req: Request<Body>) -> std::result::Result<Response<Body>, Infallible> {
             let whole_body = hyper::body::to_bytes(req.into_body()).await.unwrap();
             let input_val: serde_json::Value = serde_json::from_slice(&whole_body).unwrap();
 
@@ -87,7 +84,7 @@ mod test {
 
     #[tokio::test]
     async fn test_streaming_chat() -> Result<()> {
-        async fn handle(_: Request<Body>) -> Result<Response<Body>, Infallible> {
+        async fn handle(_: Request<Body>) -> std::result::Result<Response<Body>, Infallible> {
             let body = "data: {\"message\":{\"chunk\":\"Echo:\"}}\n\ndata: {\"message\":{\"chunk\":\" hi\"}}\n\ndata: {\"result\":{\"response\":\"Echo: hi\"}}\n\n";
             let response = Response::builder()
                 .header("Content-Type", "text/event-stream")
@@ -106,14 +103,15 @@ mod test {
             response: String,
         }
 
-        let mut response_stream = stream_flow::<ChatInput, FinalOutput, StreamChunk>(StreamFlowParams {
-            url,
-            input: Some(ChatInput {
-                message: "hi".to_string(),
-                history: vec![],
-            }),
-            headers: None,
-        });
+        let mut response_stream =
+            stream_flow::<ChatInput, FinalOutput, StreamChunk>(StreamFlowParams {
+                url,
+                input: Some(ChatInput {
+                    message: "hi".to_string(),
+                    history: vec![],
+                }),
+                headers: None,
+            });
 
         let mut chunks = Vec::new();
         while let Some(chunk_result) = response_stream.stream.next().await {

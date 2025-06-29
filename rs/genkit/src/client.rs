@@ -21,11 +21,12 @@
 use crate::error::{Error, Result};
 use bytes::Bytes;
 use futures_util::Stream;
-use reqwest::header::{HeaderMap, HeaderValue, ACCEPT, CONTENT_TYPE};
+use reqwest::header::{HeaderMap, HeaderName, HeaderValue, ACCEPT, CONTENT_TYPE};
 use serde::{de::DeserializeOwned, Deserialize, Serialize};
 use serde_json::Value;
 use std::collections::HashMap;
 use std::pin::Pin;
+use std::str::FromStr;
 use tokio::sync::mpsc;
 use tokio_stream::wrappers::ReceiverStream;
 use tokio_stream::StreamExt;
@@ -134,7 +135,11 @@ where
 
     if let Some(user_headers) = params.headers {
         for (key, value) in user_headers {
-            headers.insert(key.as_str(), HeaderValue::from_str(&value)?);
+            let header_name = HeaderName::from_str(&key).map_err(|e| {
+                Error::new_internal(format!("Invalid header name '{}': {}", key, e))
+            })?;
+            let header_value = HeaderValue::from_str(&value)?;
+            headers.insert(header_name, header_value);
         }
     }
 
@@ -148,7 +153,7 @@ where
         .send()
         .await?;
 
-    if response.status() != 200 {
+    if response.status().as_u16() != 200 {
         return Err(Error::new_internal(format!(
             "Server returned: {}: {}",
             response.status(),
@@ -214,7 +219,11 @@ where
 
         if let Some(user_headers) = params.headers {
             for (key, value) in user_headers {
-                headers.insert(key.as_str(), HeaderValue::from_str(&value)?);
+                let header_name = HeaderName::from_str(&key).map_err(|e| {
+                    Error::new_internal(format!("Invalid header name '{}': {}", key, e))
+                })?;
+                let header_value = HeaderValue::from_str(&value)?;
+                headers.insert(header_name, header_value);
             }
         }
 

@@ -17,8 +17,8 @@
 //! Tests for evaluation functionality, simulating calls to an evaluator flow.
 
 use super::helpers::with_mock_server;
-use genkit_ai::client::{run_flow, RunFlowParams};
-use genkit_ai::error::Result;
+use crate::client::{run_flow, RunFlowParams};
+use crate::error::Result;
 use hyper::{Body, Request, Response};
 use serde::{Deserialize, Serialize};
 use serde_json::json;
@@ -67,7 +67,7 @@ mod test {
 
     #[tokio::test]
     async fn test_evaluate_flow() -> Result<()> {
-        async fn handle(req: Request<Body>) -> Result<Response<Body>, Infallible> {
+        async fn handle(req: Request<Body>) -> std::result::Result<Response<Body>, Infallible> {
             let whole_body = hyper::body::to_bytes(req.into_body()).await.unwrap();
             let input: serde_json::Value = serde_json::from_slice(&whole_body).unwrap();
             let data: EvaluateRequest = serde_json::from_value(input["data"].clone()).unwrap();

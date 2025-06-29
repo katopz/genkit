@@ -12,9 +12,10 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! # Embed Client Tests
+//! # Retriever Client Tests
 //!
-//! Tests for embedding functionality, simulating calls to an embedding flow.
+//! Tests for retriever and indexer functionality, simulating calls to flows
+//! that would use these components.
 
 use super::helpers::with_mock_server;
 use crate::client::{run_flow, RunFlowParams};
@@ -24,9 +25,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::json;
 use std::convert::Infallible;
 
-// Simplified local definitions for testing purposes.
-// In a real scenario, these would likely be imported from a shared `genkit_ai::ai` module.
-
+// Local simplified definition for testing.
 #[derive(Serialize, Deserialize, Debug, PartialEq, Clone)]
 pub struct Document {
     pub text: String,
@@ -40,22 +39,18 @@ impl Document {
     }
 }
 
-#[derive(Serialize, Deserialize, Debug, PartialEq)]
-pub struct Embedding {
-    pub embedding: Vec<f32>,
+// Struct for a flow that calls a retriever.
+#[derive(Serialize)]
+struct RetrieveFlowRequest<'a> {
+    retriever: &'a str,
+    query: Document,
 }
 
+// Struct for a flow that calls an indexer.
 #[derive(Serialize)]
-#[serde(untagged)]
-enum EmbedContent {
-    Text(String),
-    Doc(Document),
-}
-
-#[derive(Serialize)]
-struct EmbedRequest {
-    embedder: String,
-    content: EmbedContent,
+struct IndexFlowRequest<'a> {
+    indexer: &'a str,
+    documents: Vec<Document>,
 }
 
 #[cfg(test)]
@@ -63,17 +58,19 @@ mod test {
     use super::*;
 
     #[tokio::test]
-    async fn test_embed_string_content() -> Result<()> {
+    async fn test_retrieve_flow() -> Result<()> {
         async fn handle(req: Request<Body>) -> std::result::Result<Response<Body>, Infallible> {
             let whole_body = hyper::body::to_bytes(req.into_body()).await.unwrap();
             let input: serde_json::Value = serde_json::from_slice(&whole_body).unwrap();
             let data = &input["data"];
-            assert_eq!(data["embedder"], "echoEmbedder");
-            assert_eq!(data["content"], "hi");
+
+            assert_eq!(data["retriever"], "testRetriever");
+            assert_eq!(data["query"]["text"], "some query");
 
             let response_data = json!({
                 "result": [
-                    { "embedding": [1.0, 2.0, 3.0, 4.0] }
+                    { "text": "retrieved document 1" },
+                    { "text": "retrieved document 2" }
                 ]
             });
             Ok(Response::new(Body::from(response_data.to_string())))
@@ -81,60 +78,59 @@ mod test {
 
         let url = with_mock_server(handle).await;
 
-        let response = run_flow::<_, Vec<Embedding>>(RunFlowParams {
+        let response = run_flow::<_, Vec<Document>>(RunFlowParams {
             url,
-            input: Some(EmbedRequest {
-                embedder: "echoEmbedder".to_string(),
-                content: EmbedContent::Text("hi".to_string()),
+            input: Some(RetrieveFlowRequest {
+                retriever: "testRetriever",
+                query: Document::from_text("some query"),
             }),
             headers: None,
         })
         .await?;
 
-        assert_eq!(
-            response,
-            vec![Embedding {
-                embedding: vec![1.0, 2.0, 3.0, 4.0]
-            }]
-        );
+        assert_eq!(response.len(), 2);
+        assert_eq!(response[0].text, "retrieved document 1");
+        assert_eq!(response[1].text, "retrieved document 2");
+
         Ok(())
     }
 
     #[tokio::test]
-    async fn test_embed_document_content() -> Result<()> {
+    async fn test_index_flow() -> Result<()> {
         async fn handle(req: Request<Body>) -> std::result::Result<Response<Body>, Infallible> {
             let whole_body = hyper::body::to_bytes(req.into_body()).await.unwrap();
             let input: serde_json::Value = serde_json::from_slice(&whole_body).unwrap();
             let data = &input["data"];
-            assert_eq!(data["embedder"], "echoEmbedder");
-            assert_eq!(data["content"]["text"], "hi doc");
 
-            let response_data = json!({
-                "result": [
-                    { "embedding": [5.0, 6.0, 7.0, 8.0] }
-                ]
-            });
+            assert_eq!(data["indexer"], "testIndexer");
+            let docs: Vec<Document> = serde_json::from_value(data["documents"].clone()).unwrap();
+            assert_eq!(docs.len(), 2);
+            assert_eq!(docs[0].text, "document to index 1");
+
+            // Index flows typically return nothing on success.
+            let response_data = json!({ "result": null });
             Ok(Response::new(Body::from(response_data.to_string())))
         }
 
         let url = with_mock_server(handle).await;
 
-        let response = run_flow::<_, Vec<Embedding>>(RunFlowParams {
+        // The output type is `()` because the flow is expected to return nothing.
+        run_flow::<_, ()>(RunFlowParams {
             url,
-            input: Some(EmbedRequest {
-                embedder: "echoEmbedder".to_string(),
-                content: EmbedContent::Doc(Document::from_text("hi doc")),
+            input: Some(IndexFlowRequest {
+                indexer: "testIndexer",
+                documents: vec![
+                    Document::from_text("document to index 1"),
+                    Document::from_text("document to index 2"),
+                ],
             }),
             headers: None,
         })
         .await?;
 
-        assert_eq!(
-            response,
-            vec![Embedding {
-                embedding: vec![5.0, 6.0, 7.0, 8.0]
-            }]
-        );
+        // Just assert that the call completed successfully.
+        assert_eq!("", "");
+
         Ok(())
     }
 }

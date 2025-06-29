@@ -20,21 +20,27 @@ use hyper::service::{make_service_fn, service_fn};
 use hyper::{Body, Request, Response, Server, StatusCode};
 use serde::{Deserialize, Serialize};
 use std::convert::Infallible;
+use std::future::Future;
 use std::net::SocketAddr;
+use std::sync::Arc;
 use tokio::sync::oneshot;
 
 // Helper to create and run a mock server for a single test.
-pub async fn with_mock_server<F>(handler: F) -> String
+pub async fn with_mock_server<F, Fut>(handler: F) -> String
 where
-    F: Fn(Request<Body>) -> Result<Response<Body>, Infallible> + Send + Sync + 'static + Copy,
+    F: Fn(Request<Body>) -> Fut + Send + Sync + 'static,
+    Fut: Future<Output = std::result::Result<Response<Body>, Infallible>> + Send + 'static,
 {
+    let handler = Arc::new(handler);
     let addr = SocketAddr::from(([127, 0, 0, 1], 0)); // Port 0 asks OS for a free port
-    let make_svc =
-        make_service_fn(move |_conn| async move { Ok::<_, Infallible>(service_fn(handler)) });
+    let make_svc = make_service_fn(move |_conn| {
+        let handler = handler.clone();
+        async move { Ok::<_, Infallible>(service_fn(move |req| handler.clone()(req))) }
+    });
     let server = Server::bind(&addr).serve(make_svc);
     let url = format!("http://{}", server.local_addr());
 
-    let (tx, rx) = oneshot::channel();
+    let (tx, rx): (oneshot::Sender<()>, oneshot::Receiver<()>) = oneshot::channel();
     let graceful = server.with_graceful_shutdown(async {
         rx.await.ok();
     });

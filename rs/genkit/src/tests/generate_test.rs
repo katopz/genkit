@@ -17,8 +17,8 @@
 //! Tests for the generate functionality, simulating calls to a "generate" flow.
 
 use super::helpers::with_mock_server;
-use genkit_ai::client::{run_flow, stream_flow, RunFlowParams, StreamFlowParams};
-use genkit_ai::error::Result;
+use crate::client::{run_flow, stream_flow, RunFlowParams, StreamFlowParams};
+use crate::error::Result;
 use hyper::{Body, Request, Response};
 use serde::{Deserialize, Serialize};
 use serde_json::json;
@@ -39,7 +39,7 @@ struct GenerateOutput {
     text: String,
 }
 
-#[derive(Serialize, Deserialize, Debug, PartialEq)]
+#[derive(Serialize, Deserialize, Debug, PartialEq, Clone)]
 struct Part {
     text: String,
 }
@@ -55,7 +55,7 @@ mod default_model_tests {
 
     #[tokio::test]
     async fn test_calls_default_model() -> Result<()> {
-        async fn handle(req: Request<Body>) -> Result<Response<Body>, Infallible> {
+        async fn handle(req: Request<Body>) -> std::result::Result<Response<Body>, Infallible> {
             let whole_body = hyper::body::to_bytes(req.into_body()).await.unwrap();
             let input: serde_json::Value = serde_json::from_slice(&whole_body).unwrap();
             let data: GenerateInput = serde_json::from_value(input["data"].clone()).unwrap();
@@ -94,7 +94,7 @@ mod default_model_tests {
 
     #[tokio::test]
     async fn test_calls_default_model_with_string_prompt() -> Result<()> {
-        async fn handle(req: Request<Body>) -> Result<Response<Body>, Infallible> {
+        async fn handle(req: Request<Body>) -> std::result::Result<Response<Body>, Infallible> {
             let whole_body = hyper::body::to_bytes(req.into_body()).await.unwrap();
             let input: serde_json::Value = serde_json::from_slice(&whole_body).unwrap();
             let prompt_str = input["data"].as_str().unwrap();
@@ -127,12 +127,12 @@ mod default_model_tests {
 
     #[tokio::test]
     async fn test_calls_default_model_with_parts_prompt() -> Result<()> {
-        async fn handle(req: Request<Body>) -> Result<Response<Body>, Infallible> {
+        async fn handle(req: Request<Body>) -> std::result::Result<Response<Body>, Infallible> {
             let whole_body = hyper::body::to_bytes(req.into_body()).await.unwrap();
             let input: serde_json::Value = serde_json::from_slice(&whole_body).unwrap();
             let data: GeneratePartsInput = serde_json::from_value(input["data"].clone()).unwrap();
 
-            let prompt_text = data.prompt.get(0).unwrap().text.clone();
+            let prompt_text = data.prompt.first().unwrap().text.clone();
             let response_text = format!("Echo: {}; config: {{}}", prompt_text);
 
             let response_data = json!({
@@ -167,7 +167,7 @@ mod default_model_tests {
 
     #[tokio::test]
     async fn test_calls_default_model_system() -> Result<()> {
-        async fn handle(req: Request<Body>) -> Result<Response<Body>, Infallible> {
+        async fn handle(req: Request<Body>) -> std::result::Result<Response<Body>, Infallible> {
             let whole_body = hyper::body::to_bytes(req.into_body()).await.unwrap();
             let input: serde_json::Value = serde_json::from_slice(&whole_body).unwrap();
             let data: GenerateInput = serde_json::from_value(input["data"].clone()).unwrap();
@@ -210,7 +210,7 @@ mod default_model_tests {
 
     #[tokio::test]
     async fn test_calls_default_model_with_tool_choice() -> Result<()> {
-        async fn handle(req: Request<Body>) -> Result<Response<Body>, Infallible> {
+        async fn handle(req: Request<Body>) -> std::result::Result<Response<Body>, Infallible> {
             let whole_body = hyper::body::to_bytes(req.into_body()).await.unwrap();
             let input: serde_json::Value = serde_json::from_slice(&whole_body).unwrap();
             let data: GenerateInput = serde_json::from_value(input["data"].clone()).unwrap();
@@ -250,7 +250,7 @@ mod default_model_tests {
 
     #[tokio::test]
     async fn test_streams_the_default_model() -> Result<()> {
-        async fn handle(_: Request<Body>) -> Result<Response<Body>, Infallible> {
+        async fn handle(_: Request<Body>) -> std::result::Result<Response<Body>, Infallible> {
             let body = "data: {\"message\":{\"text\":\"3\"}}\n\ndata: {\"message\":{\"text\":\"2\"}}\n\ndata: {\"message\":{\"text\":\"1\"}}\n\ndata: {\"result\":{\"text\":\"Echo: hi; config: {}\"}}\n\n";
             let response = Response::builder()
                 .header("Content-Type", "text/event-stream")
@@ -299,7 +299,7 @@ mod explicit_model_tests {
 
     #[tokio::test]
     async fn test_calls_explicit_model() -> Result<()> {
-        async fn handle(req: Request<Body>) -> Result<Response<Body>, Infallible> {
+        async fn handle(req: Request<Body>) -> std::result::Result<Response<Body>, Infallible> {
             let whole_body = hyper::body::to_bytes(req.into_body()).await.unwrap();
             let input: serde_json::Value = serde_json::from_slice(&whole_body).unwrap();
             let data: GenerateWithModelInput =
@@ -339,7 +339,7 @@ mod explicit_model_tests {
 
     #[tokio::test]
     async fn test_rejects_on_invalid_model() {
-        async fn handle(_: Request<Body>) -> Result<Response<Body>, Infallible> {
+        async fn handle(_: Request<Body>) -> std::result::Result<Response<Body>, Infallible> {
             Ok(Response::builder()
                 .status(404)
                 .body(Body::from("Model not found"))
@@ -370,7 +370,7 @@ mod streaming_tests {
 
     #[tokio::test]
     async fn test_rethrows_response_errors() {
-        async fn handle(_: Request<Body>) -> Result<Response<Body>, Infallible> {
+        async fn handle(_: Request<Body>) -> std::result::Result<Response<Body>, Infallible> {
             let body = "data: {\"message\":{\"text\":\"3\"}}\n\ndata: {\"error\":{\"status\":\"BLOCKED\",\"message\":\"Blocked for some reason\"}}\n\n";
             let response = Response::builder()
                 .header("Content-Type", "text/event-stream")
@@ -399,7 +399,7 @@ mod streaming_tests {
 
     #[tokio::test]
     async fn test_rethrows_initialization_errors() {
-        async fn handle(_: Request<Body>) -> Result<Response<Body>, Infallible> {
+        async fn handle(_: Request<Body>) -> std::result::Result<Response<Body>, Infallible> {
             Ok(Response::builder()
                 .status(404)
                 .body(Body::from("Model not found"))
@@ -416,9 +416,7 @@ mod streaming_tests {
         let final_result = response_stream.output.await.unwrap();
         assert!(final_result.is_err());
         let err = final_result.unwrap_err();
-        assert!(err
-            .to_string()
-            .contains("Server returned non-200 status"));
+        assert!(err.to_string().contains("Server returned non-200 status"));
     }
 }
 
@@ -441,7 +439,7 @@ mod config_tests {
 
     #[tokio::test]
     async fn test_takes_config_passed_to_generate() -> Result<()> {
-        async fn handle(req: Request<Body>) -> Result<Response<Body>, Infallible> {
+        async fn handle(req: Request<Body>) -> std::result::Result<Response<Body>, Infallible> {
             let whole_body = hyper::body::to_bytes(req.into_body()).await.unwrap();
             let input: serde_json::Value = serde_json::from_slice(&whole_body).unwrap();
             let data: GenerateWithConfigInput =
@@ -492,7 +490,7 @@ mod tool_tests {
     use super::*;
     use serde_json::Value;
 
-    #[derive(Serialize, Deserialize, Debug, PartialEq)]
+    #[derive(Serialize, Deserialize, Debug, PartialEq, Clone)]
     struct ToolRequest {
         name: String,
         input: Value,
@@ -519,7 +517,7 @@ mod tool_tests {
     // The client just sends requests and receives responses.
     #[tokio::test]
     async fn test_simulated_tool_call_conversation() -> Result<()> {
-        async fn handle(req: Request<Body>) -> Result<Response<Body>, Infallible> {
+        async fn handle(req: Request<Body>) -> std::result::Result<Response<Body>, Infallible> {
             let whole_body = hyper::body::to_bytes(req.into_body()).await.unwrap();
             let req_val: Value = serde_json::from_slice(&whole_body).unwrap();
             let messages: Vec<Message> =
@@ -615,7 +613,7 @@ mod long_running_tests {
 
     #[tokio::test]
     async fn test_starts_the_operation() -> Result<()> {
-        async fn handle(req: Request<Body>) -> Result<Response<Body>, Infallible> {
+        async fn handle(req: Request<Body>) -> std::result::Result<Response<Body>, Infallible> {
             let whole_body = hyper::body::to_bytes(req.into_body()).await.unwrap();
             let input: serde_json::Value = serde_json::from_slice(&whole_body).unwrap();
             let data: GenerateWithModelInput =
@@ -653,11 +651,10 @@ mod long_running_tests {
 
     #[tokio::test]
     async fn test_checks_operation_status() -> Result<()> {
-        async fn handle(req: Request<Body>) -> Result<Response<Body>, Infallible> {
+        async fn handle(req: Request<Body>) -> std::result::Result<Response<Body>, Infallible> {
             let whole_body = hyper::body::to_bytes(req.into_body()).await.unwrap();
             let input: serde_json::Value = serde_json::from_slice(&whole_body).unwrap();
-            let data: CheckOperationInput =
-                serde_json::from_value(input["data"].clone()).unwrap();
+            let data: CheckOperationInput = serde_json::from_value(input["data"].clone()).unwrap();
 
             assert_eq!(data.action, "/background-model/bkg-model");
             assert_eq!(data.id, "123");
@@ -701,10 +698,7 @@ mod long_running_tests {
 
         assert_eq!(op_result.operation.id, "123");
         assert!(op_result.operation.done);
-        assert_eq!(
-            op_result.operation.result,
-            json!({ "message": "done" })
-        );
+        assert_eq!(op_result.operation.result, json!({ "message": "done" }));
 
         Ok(())
     }

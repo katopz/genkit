@@ -19,8 +19,8 @@
 //! and deserialize the corresponding responses.
 
 use super::helpers::with_mock_server;
-use genkit_ai::client::{run_flow, stream_flow, RunFlowParams, StreamFlowParams};
-use genkit_ai::error::Result;
+use crate::client::{run_flow, stream_flow, RunFlowParams, StreamFlowParams};
+use crate::error::Result;
 use hyper::{Body, Request, Response};
 use serde::{Deserialize, Serialize};
 use serde_json::json;
@@ -52,7 +52,7 @@ mod test {
 
     #[tokio::test]
     async fn test_run_flow_with_custom_format() -> Result<()> {
-        async fn handle(req: Request<Body>) -> Result<Response<Body>, Infallible> {
+        async fn handle(req: Request<Body>) -> std::result::Result<Response<Body>, Infallible> {
             let whole_body = hyper::body::to_bytes(req.into_body()).await.unwrap();
             let input: serde_json::Value = serde_json::from_slice(&whole_body).unwrap();
             let data: GenerateFlowInput = serde_json::from_value(input["data"].clone()).unwrap();
@@ -95,7 +95,7 @@ mod test {
 
     #[tokio::test]
     async fn test_stream_flow_with_custom_format() -> Result<()> {
-        async fn handle(_: Request<Body>) -> Result<Response<Body>, Infallible> {
+        async fn handle(_: Request<Body>) -> std::result::Result<Response<Body>, Infallible> {
             let body = "data: {\"message\":\"banana: 3\"}\n\ndata: {\"message\":\"banana: 2\"}\n\ndata: {\"message\":\"banana: 1\"}\n\ndata: {\"result\":{\"output\":\"banana: Echo: hi\"}}\n\n";
             let response = Response::builder()
                 .header("Content-Type", "text/event-stream")
