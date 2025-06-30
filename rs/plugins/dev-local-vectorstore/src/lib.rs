@@ -37,8 +37,8 @@ pub struct DevLocalVectorStorePlugin {
 }
 
 impl DevLocalVectorStorePlugin {
-    pub fn new(config: LocalVectorStoreConfig) -> Arc<dyn Plugin> {
-        Arc::new(Self { config })
+    pub fn new(config: LocalVectorStoreConfig) -> Self {
+        Self { config }
     }
 }
 
@@ -55,24 +55,31 @@ impl Plugin for DevLocalVectorStorePlugin {
             path.to_str().unwrap().to_string()
         });
 
-        let retriever_action = define_retriever("local", move |req, _args| {
-            let path = data_path.clone();
-            async move {
-                // TODO: Implement file reading and similarity search logic.
-                println!("Retrieving from local store at: {}", path);
-                Ok(Default::default())
-            }
-        });
+        let retriever_data_path = data_path.clone();
+        let retriever_action = define_retriever(
+            "local",
+            move |_req: genkit_ai::retriever::RetrieverRequest<()>, _| {
+                let path = retriever_data_path.clone();
+                async move {
+                    // TODO: Implement file reading and similarity search logic.
+                    println!("Retrieving from local store at: {}", path);
+                    Ok(genkit_ai::retriever::RetrieverResponse { documents: vec![] })
+                }
+            },
+        );
         registry.register_action(retriever_action.0)?;
 
-        let indexer_action = define_indexer("local", move |req, _args| {
-            let path = data_path.clone();
-            async move {
-                // TODO: Implement file writing logic.
-                println!("Indexing to local store at: {}", path);
-                Ok(())
-            }
-        });
+        let indexer_action = define_indexer(
+            "local",
+            move |_req: genkit_ai::retriever::IndexerRequest<()>, _| {
+                let path = data_path.clone();
+                async move {
+                    // TODO: Implement file writing logic.
+                    println!("Indexing to local store at: {}", path);
+                    Ok(())
+                }
+            },
+        );
         registry.register_action(indexer_action.0)?;
 
         Ok(())
@@ -81,7 +88,7 @@ impl Plugin for DevLocalVectorStorePlugin {
 
 /// Creates a new local vector store plugin.
 pub fn local_vector_store(config: LocalVectorStoreConfig) -> Arc<dyn Plugin> {
-    DevLocalVectorStorePlugin::new(config)
+    Arc::new(DevLocalVectorStorePlugin::new(config))
 }
 
 /// A reference to the local retriever.
