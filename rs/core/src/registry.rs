@@ -455,7 +455,7 @@ mod tests {
 
         registry.register_action(Arc::new(test_action)).unwrap();
 
-        let key = "/flow/myflow";
+        let key = "/flow/myFlow";
         let looked_up = registry.lookup_action(key).await;
         assert!(looked_up.is_some());
         let looked_up_action = looked_up.unwrap();
@@ -487,17 +487,17 @@ mod tests {
 
         // Child can find its own action
         assert!(child_registry
-            .lookup_action("/util/childutil")
+            .lookup_action("/util/childUtil")
             .await
             .is_some());
         // Child can find parent's action
         assert!(child_registry
-            .lookup_action("/util/parentutil")
+            .lookup_action("/util/parentUtil")
             .await
             .is_some());
         // Parent cannot find child's action
         assert!(parent_registry
-            .lookup_action("/util/childutil")
+            .lookup_action("/util/childUtil")
             .await
             .is_none());
     }
