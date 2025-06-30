@@ -20,11 +20,13 @@
 use crate::common::get_derived_params;
 use crate::{Error, Result, VertexAIPluginOptions};
 use genkit_ai::{
+    message::Role,
     model::{
         define_model, CandidateData, FinishReason, GenerateRequest, GenerateResponseData,
         GenerationUsage, ModelAction,
     },
     tool::ToolDefinition,
+    ToolRequest,
 };
 use reqwest::header::{HeaderMap, AUTHORIZATION, CONTENT_TYPE};
 use schemars::JsonSchema;
@@ -42,6 +44,13 @@ pub struct SafetySettings {
 
 #[derive(Debug, Serialize, Deserialize, JsonSchema, Default, Clone)]
 #[serde(rename_all = "camelCase")]
+pub struct FunctionCallingConfig {
+    pub mode: Option<String>,
+    pub allowed_function_names: Option<Vec<String>>,
+}
+
+#[derive(Debug, Serialize, Deserialize, JsonSchema, Default, Clone)]
+#[serde(rename_all = "camelCase")]
 pub struct GeminiConfig {
     pub temperature: Option<f32>,
     pub max_output_tokens: Option<u32>,
@@ -49,27 +58,46 @@ pub struct GeminiConfig {
     pub top_p: Option<f32>,
     pub stop_sequences: Option<Vec<String>>,
     pub safety_settings: Option<Vec<SafetySettings>>,
+    pub function_calling_config: Option<FunctionCallingConfig>,
 }
 
 // Data structures that map to the Vertex AI Gemini API request/response format.
 
-#[derive(Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-struct VertexPart {
-    #[serde(skip_serializing_if = "Option::is_none")]
-    text: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    inline_data: Option<VertexMedia>,
-}
-
-#[derive(Serialize, Deserialize)]
+#[derive(Serialize, Deserialize, Debug)]
 #[serde(rename_all = "camelCase")]
 struct VertexMedia {
     mime_type: String,
     data: String,
 }
 
-#[derive(Serialize, Deserialize)]
+#[derive(Serialize, Deserialize, Debug)]
+#[serde(rename_all = "camelCase")]
+struct VertexFunctionCall {
+    name: String,
+    args: Value,
+}
+
+#[derive(Serialize, Deserialize, Debug)]
+#[serde(rename_all = "camelCase")]
+struct VertexFunctionResponse {
+    name: String,
+    response: Value,
+}
+
+#[derive(Serialize, Deserialize, Debug)]
+#[serde(rename_all = "camelCase")]
+struct VertexPart {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    text: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    inline_data: Option<VertexMedia>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    function_call: Option<VertexFunctionCall>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    function_response: Option<VertexFunctionResponse>,
+}
+
+#[derive(Serialize, Deserialize, Debug)]
 #[serde(rename_all = "camelCase")]
 struct VertexContent {
     role: String,
@@ -100,13 +128,30 @@ struct VertexGenerationConfig {
 
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
+struct VertexFunctionCallingConfig {
+    mode: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    allowed_function_names: Option<Vec<String>>,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct VertexToolConfig {
+    function_calling_config: VertexFunctionCallingConfig,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
 struct VertexGeminiRequest {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    system_instruction: Option<VertexContent>,
     contents: Vec<VertexContent>,
     #[serde(skip_serializing_if = "Option::is_none")]
     tools: Option<Vec<VertexTool>>,
     #[serde(skip_serializing_if = "Option::is_none")]
     generation_config: Option<VertexGenerationConfig>,
-    // TODO: Add tool_config
+    #[serde(skip_serializing_if = "Option::is_none")]
+    tool_config: Option<VertexToolConfig>,
 }
 
 #[derive(Deserialize)]
@@ -132,41 +177,88 @@ struct VertexGeminiResponse {
     usage_metadata: Option<VertexUsageMetadata>,
 }
 
+fn to_vertex_part(part: &genkit_ai::document::Part) -> Result<VertexPart> {
+    if let Some(media) = &part.media {
+        let (mime_type, data) = media.url.split_once(";base64,").ok_or_else(|| {
+            Error::VertexAI("Media URL is not a valid base64 data URI.".to_string())
+        })?;
+        Ok(VertexPart {
+            text: None,
+            inline_data: Some(VertexMedia {
+                mime_type: mime_type.replace("data:", ""),
+                data: data.to_string(),
+            }),
+            function_call: None,
+            function_response: None,
+        })
+    } else if let Some(tool_req) = &part.tool_request {
+        Ok(VertexPart {
+            text: None,
+            inline_data: None,
+            function_call: Some(VertexFunctionCall {
+                name: tool_req.name.clone(),
+                args: tool_req.input.clone().unwrap_or_default(),
+            }),
+            function_response: None,
+        })
+    } else if let Some(tool_resp) = &part.tool_response {
+        Ok(VertexPart {
+            text: None,
+            inline_data: None,
+            function_call: None,
+            function_response: Some(VertexFunctionResponse {
+                name: tool_resp.name.clone(),
+                response: serde_json::json!({
+                    "name": tool_resp.name,
+                    "content": tool_resp.output
+                }),
+            }),
+        })
+    } else {
+        Ok(VertexPart {
+            text: part.text.clone(),
+            inline_data: None,
+            function_call: None,
+            function_response: None,
+        })
+    }
+}
+
 /// Converts a Genkit `GenerateRequest` into a `VertexGeminiRequest`.
 fn to_vertex_request(req: &GenerateRequest) -> Result<VertexGeminiRequest> {
-    let contents = req
-        .messages
+    let mut messages = req.messages.clone();
+
+    // Handle system instructions separately
+    let system_instruction = if let Some(pos) = messages.iter().position(|m| m.role == Role::System)
+    {
+        let system_message = messages.remove(pos);
+        let parts = system_message
+            .content
+            .iter()
+            .map(to_vertex_part)
+            .collect::<Result<Vec<VertexPart>>>()?;
+        Some(VertexContent {
+            // System role is not supported directly, use 'user' as per some Gemini patterns
+            // or rely on the dedicated `system_instruction` field. Here we populate the dedicated field.
+            role: "user".to_string(),
+            parts,
+        })
+    } else {
+        None
+    };
+
+    let contents = messages
         .iter()
         .map(|msg| {
             let role = match msg.role {
-                genkit_ai::message::Role::Model => "model".to_string(),
-                _ => "user".to_string(), // System and Tool roles are mapped to user
+                Role::Model => "model".to_string(),
+                Role::Tool => "function".to_string(),
+                _ => "user".to_string(), // System (if not handled above) and User
             };
             let parts = msg
                 .content
                 .iter()
-                .map(|part| {
-                    if let Some(media) = &part.media {
-                        let (mime_type, data) =
-                            media.url.split_once(";base64,").ok_or_else(|| {
-                                Error::VertexAI(
-                                    "Media URL is not a valid base64 data URI.".to_string(),
-                                )
-                            })?;
-                        Ok(VertexPart {
-                            text: None,
-                            inline_data: Some(VertexMedia {
-                                mime_type: mime_type.replace("data:", ""),
-                                data: data.to_string(),
-                            }),
-                        })
-                    } else {
-                        Ok(VertexPart {
-                            text: part.text.clone(),
-                            inline_data: None,
-                        })
-                    }
-                })
+                .map(to_vertex_part)
                 .collect::<Result<Vec<VertexPart>>>()?;
             Ok(VertexContent { role, parts })
         })
@@ -190,10 +282,22 @@ fn to_vertex_request(req: &GenerateRequest) -> Result<VertexGeminiRequest> {
         .as_ref()
         .and_then(|config_val| serde_json::from_value::<GeminiConfig>(config_val.clone()).ok());
 
+    let tool_config = generation_config
+        .as_ref()
+        .and_then(|c| c.function_calling_config.as_ref())
+        .map(|fcc| VertexToolConfig {
+            function_calling_config: VertexFunctionCallingConfig {
+                mode: fcc.mode.clone().unwrap_or_else(|| "AUTO".to_string()),
+                allowed_function_names: fcc.allowed_function_names.clone(),
+            },
+        });
+
     Ok(VertexGeminiRequest {
+        system_instruction,
         contents,
         tools,
         generation_config: generation_config.map(|c| VertexGenerationConfig { common_config: c }),
+        tool_config,
     })
 }
 
@@ -208,13 +312,27 @@ fn to_genkit_response(resp: VertexGeminiResponse) -> Result<GenerateResponseData
                 .content
                 .parts
                 .into_iter()
-                .map(|part| genkit_ai::document::Part {
-                    text: part.text,
-                    ..Default::default()
+                .map(|part| {
+                    if let Some(fc) = part.function_call {
+                        Ok(genkit_ai::document::Part {
+                            tool_request: Some(ToolRequest {
+                                name: fc.name,
+                                input: Some(fc.args),
+                                ..Default::default()
+                            }),
+                            ..Default::default()
+                        })
+                    } else {
+                        Ok(genkit_ai::document::Part {
+                            text: part.text,
+                            ..Default::default()
+                        })
+                    }
                 })
-                .collect();
+                .collect::<Result<Vec<genkit_ai::document::Part>>>()?;
+
             let message = genkit_ai::message::MessageData {
-                role: genkit_ai::message::Role::Model,
+                role: Role::Model,
                 content,
                 metadata: None,
             };
@@ -222,6 +340,7 @@ fn to_genkit_response(resp: VertexGeminiResponse) -> Result<GenerateResponseData
                 Some("STOP") => FinishReason::Stop,
                 Some("MAX_TOKENS") => FinishReason::Length,
                 Some("SAFETY") => FinishReason::Blocked,
+                Some("TOOL_CALL") => FinishReason::Stop, // Maps to stop as per some conventions
                 _ => FinishReason::Unknown,
             };
             Ok(CandidateData {

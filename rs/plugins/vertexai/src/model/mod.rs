@@ -21,17 +21,31 @@ pub mod imagen;
 
 // Lists of supported models, similar to the TS implementation.
 pub const SUPPORTED_GEMINI_MODELS: &[&str] = &[
-    "gemini-1.5-pro-latest",
-    "gemini-1.5-flash-latest",
-    "gemini-1.0-pro",
+    "gemini-1.5-pro",
+    "gemini-1.5-flash",
+    "gemini-2.0-flash",
+    "gemini-2.0-flash-001",
+    "gemini-2.0-flash-lite",
+    "gemini-2.0-flash-lite-preview-02-05",
+    "gemini-2.0-pro-exp-02-05",
+    "gemini-2.5-pro-exp-03-25",
+    "gemini-2.5-pro-preview-03-25",
+    "gemini-2.5-flash-preview-04-17",
 ];
 
-pub const SUPPORTED_IMAGEN_MODELS: &[&str] = &["imagen-3.0-generate"];
+pub const SUPPORTED_IMAGEN_MODELS: &[&str] = &[
+    "imagen-3.0-generate-001",
+    "imagen-3.0-fast-generate-001",
+    "imagen2",
+    "imagen3",
+    "imagen3-fast",
+];
 
 pub const SUPPORTED_EMBEDDER_MODELS: &[&str] = &[
+    "textembedding-gecko@003",
     "text-embedding-004",
+    "text-embedding-005",
+    "textembedding-gecko-multilingual@001",
     "text-multilingual-embedding-002",
-    "text-embedding-gecko@003",
-    "text-embedding-gecko-multilingual@001",
     "multimodalembedding@001",
 ];

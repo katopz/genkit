@@ -39,7 +39,7 @@ pub struct Media {
 }
 
 /// Represents a request from a model to invoke a tool.
-#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, PartialEq)]
+#[derive(Default, Debug, Clone, Serialize, Deserialize, JsonSchema, PartialEq)]
 #[serde(rename_all = "camelCase")]
 pub struct ToolRequest {
     /// An identifier for a specific tool call, used to match a `ToolResponse`.

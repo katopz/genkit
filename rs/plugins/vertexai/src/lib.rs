@@ -26,6 +26,7 @@ use self::common::VertexAIPluginOptions;
 use self::embedder::define_vertex_ai_embedder;
 use self::model::gemini::define_gemini_model;
 use self::model::imagen::define_imagen_model;
+use self::model::{SUPPORTED_EMBEDDER_MODELS, SUPPORTED_GEMINI_MODELS, SUPPORTED_IMAGEN_MODELS};
 use async_trait::async_trait;
 use genkit_ai::{embedder_ref, model_ref, EmbedderRef, ModelRef};
 use genkit_core::{plugin::Plugin, registry::Registry};
@@ -51,23 +52,6 @@ impl From<Error> for genkit_core::error::Error {
         genkit_core::error::Error::new_internal(e.to_string())
     }
 }
-
-// Lists of supported models, similar to the TS implementation.
-const SUPPORTED_GEMINI_MODELS: &[&str] = &[
-    "gemini-1.5-pro-latest",
-    "gemini-1.5-flash-latest",
-    "gemini-1.0-pro",
-];
-
-const SUPPORTED_IMAGEN_MODELS: &[&str] = &["imagen-3.0-generate"];
-
-const SUPPORTED_EMBEDDER_MODELS: &[&str] = &[
-    "text-embedding-004",
-    "text-multilingual-embedding-002",
-    "text-embedding-gecko@003",
-    "text-embedding-gecko-multilingual@001",
-    "multimodalembedding@001",
-];
 
 /// The Vertex AI plugin.
 #[derive(Debug)]
