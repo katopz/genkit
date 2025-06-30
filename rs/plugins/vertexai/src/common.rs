@@ -17,8 +17,8 @@
 //! This module provides shared structs and functions for the Vertex AI plugin,
 //! such as configuration options and client authentication helpers.
 
+use crate::{Error, Result};
 use gcp_auth::{provider, CustomServiceAccount, TokenProvider};
-use genkit_core::error::{Error, Result};
 use serde::Deserialize;
 use std::env;
 use std::sync::Arc;
@@ -62,7 +62,7 @@ async fn get_project_id(
         .project_id()
         .await
         .map(|id| id.to_string())
-        .map_err(|e| Error::new_internal(format!("Failed to determine GCP project ID: {}", e)))
+        .map_err(|e| Error::GcpAuth(format!("Failed to determine GCP project ID: {}", e)))
 }
 
 /// Gets the GCP location from options or the environment.
@@ -83,12 +83,12 @@ fn get_location(options: &VertexAIPluginOptions) -> Result<String> {
 pub async fn get_derived_params(options: &VertexAIPluginOptions) -> Result<DerivedParams> {
     let token_provider: Arc<dyn TokenProvider> = if let Some(key_path) = &options.service_account {
         let sa = CustomServiceAccount::from_file(key_path)
-            .map_err(|e| Error::new_internal(format!("Failed to load service account: {}", e)))?;
+            .map_err(|e| Error::GcpAuth(format!("Failed to load service account: {}", e)))?;
         Arc::new(sa)
     } else {
         provider()
             .await
-            .map_err(|e| Error::new_internal(format!("Failed to create auth provider: {}", e)))?
+            .map_err(|e| Error::GcpAuth(format!("Failed to create auth provider: {}", e)))?
     };
 
     let project_id = get_project_id(options, &token_provider).await?;

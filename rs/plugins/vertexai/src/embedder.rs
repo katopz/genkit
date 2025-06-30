@@ -16,9 +16,11 @@
 //!
 //! This module provides the implementation for Vertex AI text embedding models.
 
-use crate::common::{get_derived_params, VertexAIPluginOptions};
+use crate::{
+    common::{get_derived_params, VertexAIPluginOptions},
+    Error, Result,
+};
 use genkit_ai::embedder::{define_embedder, EmbedRequest, EmbedResponse, Embedding};
-use genkit_core::error::{Error, Result};
 use reqwest::header::{HeaderMap, AUTHORIZATION, CONTENT_TYPE};
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
@@ -74,7 +76,7 @@ async fn invoke_vertex_embedding_api(
         .token_provider
         .token(&["https://www.googleapis.com/auth/cloud-platform"])
         .await
-        .map_err(|e| Error::new_internal(format!("Failed to get auth token: {}", e)))?;
+        .map_err(|e| Error::GcpAuth(format!("Failed to get auth token: {}", e)))?;
 
     let mut headers = HeaderMap::new();
     headers.insert(CONTENT_TYPE, "application/json".parse().unwrap());
@@ -89,16 +91,12 @@ async fn invoke_vertex_embedding_api(
         .headers(headers)
         .json(request)
         .send()
-        .await
-        .map_err(|e| Error::new_internal(format!("API request failed: {}", e)))?;
+        .await?;
 
     let status = response.status();
     if !status.is_success() {
-        let error_text = response
-            .text()
-            .await
-            .unwrap_or_else(|_| "Unknown error".to_string());
-        Err(Error::new_internal(format!(
+        let error_text = response.text().await?;
+        Err(Error::VertexAI(format!(
             "API request failed with status {}: {}",
             status, error_text
         )))
@@ -106,7 +104,7 @@ async fn invoke_vertex_embedding_api(
         response
             .json::<VertexEmbeddingResponse>()
             .await
-            .map_err(|e| Error::new_internal(format!("Failed to parse API response: {}", e)))
+            .map_err(|e| e.into())
     }
 }
 
@@ -134,11 +132,12 @@ pub fn define_vertex_ai_embedder(
                     invoke_vertex_embedding_api(&opts, &model_id, &vertex_req).await?;
 
                 if vertex_resp.predictions.len() != req.input.len() {
-                    return Err(Error::new_internal(format!(
+                    return Err(Error::VertexAI(format!(
                         "Mismatched response count: expected {}, got {}",
                         req.input.len(),
                         vertex_resp.predictions.len()
-                    )));
+                    ))
+                    .into());
                 }
 
                 let embeddings = vertex_resp

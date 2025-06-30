@@ -17,7 +17,8 @@
 //! This module provides the implementation for the Gemini family of models
 //! on Vertex AI.
 
-use crate::common::{get_derived_params, VertexAIPluginOptions};
+use crate::common::get_derived_params;
+use crate::{Error, Result, VertexAIPluginOptions};
 use genkit_ai::{
     model::{
         define_model, CandidateData, FinishReason, GenerateRequest, GenerateResponseData,
@@ -25,7 +26,6 @@ use genkit_ai::{
     },
     tool::ToolDefinition,
 };
-use genkit_core::error::{Error, Result};
 use reqwest::header::{HeaderMap, AUTHORIZATION, CONTENT_TYPE};
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
@@ -149,7 +149,7 @@ fn to_vertex_request(req: &GenerateRequest) -> Result<VertexGeminiRequest> {
                     if let Some(media) = &part.media {
                         let (mime_type, data) =
                             media.url.split_once(";base64,").ok_or_else(|| {
-                                Error::new_internal(
+                                Error::VertexAI(
                                     "Media URL is not a valid base64 data URI.".to_string(),
                                 )
                             })?;
@@ -263,7 +263,7 @@ async fn gemini_runner(
         .token_provider
         .token(&["https://www.googleapis.com/auth/cloud-platform"])
         .await
-        .map_err(|e| Error::new_internal(format!("Failed to get auth token: {}", e)))?;
+        .map_err(|e| Error::GcpAuth(format!("Failed to get auth token: {}", e)))?;
 
     let mut headers = HeaderMap::new();
     headers.insert(CONTENT_TYPE, "application/json".parse().unwrap());
@@ -278,16 +278,12 @@ async fn gemini_runner(
         .headers(headers)
         .json(&vertex_req)
         .send()
-        .await
-        .map_err(|e| Error::new_internal(format!("API request failed: {}", e)))?;
+        .await?;
 
     if !response.status().is_success() {
         let status = response.status();
-        let error_text = response
-            .text()
-            .await
-            .unwrap_or_else(|_| "Unknown error".to_string());
-        return Err(Error::new_internal(format!(
+        let error_text = response.text().await?;
+        return Err(Error::VertexAI(format!(
             "API request failed with status {}: {}",
             status, error_text
         )));
@@ -296,13 +292,10 @@ async fn gemini_runner(
     // In a real implementation, this would handle the streaming response properly.
     // For now, we will collect the response and parse it as a single object for simplicity.
     // This is a placeholder for true streaming.
-    let full_response_text = response
-        .text()
-        .await
-        .map_err(|e| Error::new_internal(format!("Failed to read stream: {}", e)))?;
+    let full_response_text = response.text().await?;
     let aggregated_response: Vec<VertexGeminiResponse> =
         serde_json::from_str(&full_response_text.replace("]\n[", ",")).map_err(|e| {
-            Error::new_internal(format!(
+            Error::VertexAI(format!(
                 "Failed to parse streaming response: {}. Body: {}",
                 e, full_response_text
             ))

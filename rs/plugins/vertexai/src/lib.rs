@@ -28,8 +28,29 @@ use self::model::gemini::define_gemini_model;
 use self::model::imagen::define_imagen_model;
 use async_trait::async_trait;
 use genkit_ai::{embedder_ref, model_ref, EmbedderRef, ModelRef};
-use genkit_core::{error::Result, plugin::Plugin, registry::Registry};
+use genkit_core::{plugin::Plugin, registry::Registry};
 use std::sync::Arc;
+use thiserror::Error;
+
+#[derive(Error, Debug)]
+pub enum Error {
+    #[error("Genkit core error: {0}")]
+    GenkitCore(#[from] genkit_core::error::Error),
+    #[error("GCP auth error: {0}")]
+    GcpAuth(String),
+    #[error("Request error: {0}")]
+    Request(#[from] reqwest::Error),
+    #[error("Vertex AI error: {0}")]
+    VertexAI(String),
+}
+
+pub type Result<T> = std::result::Result<T, Error>;
+
+impl From<Error> for genkit_core::error::Error {
+    fn from(e: Error) -> Self {
+        genkit_core::error::Error::new_internal(e.to_string())
+    }
+}
 
 // Lists of supported models, similar to the TS implementation.
 const SUPPORTED_GEMINI_MODELS: &[&str] = &[
@@ -58,15 +79,8 @@ impl VertexAIPlugin {
     pub fn new(options: VertexAIPluginOptions) -> Self {
         Self { options }
     }
-}
 
-#[async_trait]
-impl Plugin for VertexAIPlugin {
-    fn name(&self) -> &'static str {
-        "vertexai"
-    }
-
-    async fn initialize(&self, registry: &mut Registry) -> Result<()> {
+    async fn register_models(&self, registry: &mut Registry) -> Result<()> {
         for model_name in SUPPORTED_GEMINI_MODELS {
             let model = define_gemini_model(model_name, &self.options);
             registry.register_action(Arc::new(model))?;
@@ -80,6 +94,17 @@ impl Plugin for VertexAIPlugin {
             registry.register_action(Arc::new(embedder))?;
         }
         Ok(())
+    }
+}
+
+#[async_trait]
+impl Plugin for VertexAIPlugin {
+    fn name(&self) -> &'static str {
+        "vertexai"
+    }
+
+    async fn initialize(&self, registry: &mut Registry) -> genkit_core::error::Result<()> {
+        self.register_models(registry).await.map_err(|e| e.into())
     }
 }
 
