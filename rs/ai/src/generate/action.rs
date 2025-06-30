@@ -379,7 +379,10 @@ async fn run_model_via_middleware<O: 'static>(
         // through the context.
         Box::pin(async move {
             let req_value = serde_json::to_value(req).unwrap();
-            let resp_value = model_action.run_http_json(req_value, None).await?;
+            let mut resp_value = model_action.run_http_json(req_value, None).await?;
+            if let Some(result) = resp_value.get_mut("result") {
+                resp_value = result.take();
+            }
             serde_json::from_value(resp_value)
                 .map_err(|e| Error::new_internal(format!("Failed to deserialize: {}", e)))
         }) as Pin<Box<dyn Future<Output = Result<GenerateResponseData>> + Send>>
