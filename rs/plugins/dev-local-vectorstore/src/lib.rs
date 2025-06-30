@@ -141,7 +141,10 @@ impl Plugin for DevLocalVectorStorePlugin {
                             options: None::<()>,
                         })
                         .map_err(|e| Error::new_internal(e.to_string()))?;
-                        let embed_resp_value = embedder.run_http_json(embed_req, None).await?;
+                        let mut embed_resp_value = embedder.run_http_json(embed_req, None).await?;
+                        if let Some(result) = embed_resp_value.get_mut("result") {
+                            embed_resp_value = result.take();
+                        }
                         let embed_resp: EmbedResponse = serde_json::from_value(embed_resp_value)
                             .map_err(|e| Error::new_internal(e.to_string()))?;
 
