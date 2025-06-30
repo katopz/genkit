@@ -202,7 +202,7 @@ mod tests {
                 let errors = e.errors();
                 assert_eq!(errors.len(), 1);
                 assert_eq!(errors[0].path, "/foo");
-                assert!(errors[0].message.contains("is not of type `boolean`"));
+                assert!(errors[0].message.contains("is not of type \"boolean\""));
             }
             _ => panic!("Expected a validation error"),
         }
@@ -244,13 +244,13 @@ mod tests {
         let schema = schema_for::<TestStruct>();
         let details = vec![ValidationErrorDetail {
             path: "/foo".to_string(),
-            message: "123 is not of type `boolean`".to_string(),
+            message: "123 is not of type \"boolean\"".to_string(),
         }];
         let error = ValidationError::new(details, data, schema);
         let error_message = error.to_string();
 
         assert!(error_message.contains("Schema validation failed."));
-        assert!(error_message.contains("- path: `/foo`, message: `123 is not of type `boolean``"));
+        assert!(error_message.contains("- path: `/foo`, message: `123 is not of type \"boolean\"`"));
         assert!(error_message.contains("\"foo\": 123"));
         assert!(error_message.contains("\"type\": \"boolean\""));
     }

@@ -238,6 +238,7 @@ where
         options: Option<ActionRunOptions<S>>,
     ) -> StreamingResponse<O, S> {
         let (chunk_tx, chunk_rx) = channel();
+        let chunk_tx_clone = chunk_tx.clone();
 
         let mut opts = options.unwrap_or_default();
         opts.on_chunk = Some(Arc::new(move |chunk_result| {
@@ -248,8 +249,11 @@ where
         }));
 
         let self_clone = self.clone();
-        let future =
-            Box::pin(async move { self_clone.run(input, Some(opts)).await.map(|ar| ar.result) });
+        let future = Box::pin(async move {
+            let result = self_clone.run(input, Some(opts)).await.map(|ar| ar.result);
+            chunk_tx_clone.close();
+            result
+        });
 
         let stream = chunk_rx.map(|res| match res {
             Ok(inner_result) => inner_result,

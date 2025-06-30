@@ -117,16 +117,17 @@ mod test {
         });
 
         // Use the .stream() helper method
-        let mut response = streaming_action.stream(input, options);
+        let response = streaming_action.stream(input, options);
 
-        // Collect chunks from the stream
-        let mut chunks = Vec::new();
-        while let Some(chunk) = response.stream.next().await {
-            chunks.push(chunk.unwrap());
-        }
+        // Poll the stream and the final result concurrently to avoid deadlock.
+        let (stream_results, output_result) =
+            futures::join!(response.stream.collect::<Vec<_>>(), response.output);
 
-        // Await the final output
-        let output = response.output.await.unwrap();
+        // Check the collected chunks.
+        let chunks: Vec<TestStreamChunk> = stream_results.into_iter().map(|r| r.unwrap()).collect();
+
+        // Check the final output.
+        let output = output_result.unwrap();
 
         assert_eq!(
             chunks,
