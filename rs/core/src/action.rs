@@ -386,7 +386,7 @@ where
 {
     let action = ActionBuilder::new(action_type, name, func).build();
     registry
-        .register_action(action.clone())
+        .register_action(Arc::new(action.clone()))
         .expect("Failed to register action"); // Or handle error more gracefully
     action
 }

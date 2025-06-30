@@ -73,14 +73,16 @@ pub struct IndexerRequest<O = Value> {
 #[derive(Debug, Serialize, Deserialize, JsonSchema, Default, Clone)]
 #[serde(rename_all = "camelCase")]
 pub struct RetrieverInfo {
-    pub label: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub label: Option<String>,
 }
 
 /// Descriptive information about an indexer.
 #[derive(Debug, Serialize, Deserialize, JsonSchema, Default, Clone)]
 #[serde(rename_all = "camelCase")]
 pub struct IndexerInfo {
-    pub label: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub label: Option<String>,
 }
 
 /// A wrapper for a retriever `Action`.
@@ -150,7 +152,8 @@ where
         input: Value,
         context: Option<genkit_core::context::ActionContext>,
     ) -> Result<Value> {
-        self.0.run_http_json(input, context).await
+        self.0.run_http_json(input, context).await?;
+        Ok(serde_json::Value::Null)
     }
 
     fn stream_http_json(
@@ -280,6 +283,15 @@ where
     Ok(())
 }
 
+/// Common retriever options.
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct CommonRetrieverOptions {
+    /// Number of documents to retrieve.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub k: Option<u32>,
+}
+
 //
 // Reference Helpers
 //
@@ -291,6 +303,8 @@ pub struct RetrieverRef<C = Value> {
     pub name: String,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub config: Option<C>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub info: Option<RetrieverInfo>,
 }
 
 /// A serializable reference to an indexer.
@@ -300,20 +314,24 @@ pub struct IndexerRef<C = Value> {
     pub name: String,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub config: Option<C>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub info: Option<IndexerInfo>,
 }
 
 /// Helper to create a `RetrieverRef`.
-pub fn retriever_ref<C>(name: &str) -> RetrieverRef<C> {
+pub fn retriever_ref<C>(name: &str, info: Option<RetrieverInfo>) -> RetrieverRef<C> {
     RetrieverRef {
         name: name.to_string(),
         config: None,
+        info,
     }
 }
 
 /// Helper to create an `IndexerRef`.
-pub fn indexer_ref<C>(name: &str) -> IndexerRef<C> {
+pub fn indexer_ref<C>(name: &str, info: Option<IndexerInfo>) -> IndexerRef<C> {
     IndexerRef {
         name: name.to_string(),
         config: None,
+        info,
     }
 }

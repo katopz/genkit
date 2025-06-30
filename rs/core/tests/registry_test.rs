@@ -63,7 +63,7 @@ impl Plugin for MockPlugin {
             |_, _| async { Ok(TestOutput {}) },
         )
         .build();
-        registry.register_action(test_action)?;
+        registry.register_action(Arc::new(test_action))?;
         Ok(())
     }
 }
@@ -72,32 +72,30 @@ impl Plugin for MockPlugin {
 mod test {
     use crate::*;
     #[tokio::test]
-    async fn test_plugin_initialization_on_lookup() {
+    async fn test_manual_plugin_initialization() {
         let mut registry = Registry::new();
         let plugin = Arc::new(MockPlugin::new("foo"));
         let was_initialized = plugin.initialized.clone();
 
+        // Registering the plugin does not initialize it in this implementation.
         registry.register_plugin(plugin.clone()).await.unwrap();
-
         assert!(
             !was_initialized.load(Ordering::SeqCst),
-            "Plugin should not be initialized yet"
+            "Plugin should not be initialized after registration only."
         );
 
-        // The Rust implementation initializes plugins as soon as they are registered,
-        // which differs from the lazy initialization in the TS version.
-        // Let's adapt the test to reflect this. We'll initialize explicitly for clarity.
+        // Manually initialize the plugin.
         plugin.initialize(&mut registry).await.unwrap();
         assert!(
             was_initialized.load(Ordering::SeqCst),
-            "Plugin should be initialized after explicit call"
+            "Plugin should be initialized after explicit call."
         );
 
-        // Now, lookup the action that the plugin should have registered.
+        // Verify that the plugin registered its action.
         let looked_up = registry.lookup_action("/model/foo/model").await;
         assert!(
             looked_up.is_some(),
-            "Action should be found after plugin initialization"
+            "Action from plugin should be found after initialization."
         );
     }
 
@@ -109,7 +107,9 @@ mod test {
                 Ok(())
             })
             .build();
-        parent_registry.register_action(parent_action).unwrap();
+        parent_registry
+            .register_action(Arc::new(parent_action))
+            .unwrap();
 
         let mut child_registry = Registry::with_parent(&parent_registry);
         let child_action =
@@ -117,7 +117,9 @@ mod test {
                 Ok(())
             })
             .build();
-        child_registry.register_action(child_action).unwrap();
+        child_registry
+            .register_action(Arc::new(child_action))
+            .unwrap();
 
         // Child can find its own action
         assert!(child_registry
@@ -148,7 +150,7 @@ mod test {
         )
         .build();
 
-        registry.register_action(test_action).unwrap();
+        registry.register_action(Arc::new(test_action)).unwrap();
 
         let key = "/flow/myflow";
         let looked_up = registry.lookup_action(key).await;
