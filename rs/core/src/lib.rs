@@ -24,6 +24,8 @@ pub mod background_action;
 pub mod context;
 pub mod error;
 pub mod flow;
+pub mod logging;
+pub mod plugin;
 pub mod reflection;
 pub mod registry;
 pub mod schema;

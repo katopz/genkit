@@ -23,8 +23,19 @@ reqwest      = "0.12.20"
 schemars     = "1.0.3"
 serde        = { version = "1.0.219", features = ["derive"] }
 serde_json   = "1.0.140"
+thiserror    = "1.0.69"
 tokio        = { version = "1.45.1", features = ["full", "stream"] }
 tokio-stream = "0.1.17"
+
+
+# Optional Plugin Dependencies
+genkit-dev-local-vectorstore = { path = "../plugins/dev-local-vectorstore", optional = true }
+genkit-vertexai              = { path = "../plugins/vertexai", optional = true }
+
+
+[features]
+dev-local-vectorstore = ["dep:genkit-dev-local-vectorstore"]
+vertexai              = ["dep:genkit-vertexai"]
 
 [dev-dependencies]
 tokio-test = "0.4.4"

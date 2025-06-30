@@ -1,0 +1,29 @@
+[package]
+description = "Genkit development local vector store plugin."
+edition     = "2021"
+license     = "Apache-2.0"
+name        = "genkit-dev-local-vectorstore"
+repository  = "https://github.com/firebase/genkit"
+version     = "0.1.0"
+
+[dependencies]
+genkit-ai   = { path = "../../ai" }
+genkit-core = { path = "../../core" }
+
+async-trait = "0.1"
+serde       = { version = "1.0", features = ["derive"] }
+serde_json  = "1.0"
+thiserror   = "1.0"
+
+# For vector math
+ndarray = "0.15"
+
+# For file system operations & async file I/O
+tokio = { version = "1", features = ["fs", "io-util"] }
+# For unique IDs
+log  = "0.4"
+uuid = { version = "1.17", features = ["v4", "serde"] }
+
+[dev-dependencies]
+tempfile   = "3"
+tokio-test = "0.4"
