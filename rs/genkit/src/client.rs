@@ -229,13 +229,16 @@ where
                 let header_name = HeaderName::from_str(&key).map_err(|e| {
                     Error::new_internal(format!("Invalid header name '{}': {}", key, e))
                 })?;
-                let header_value = HeaderValue::from_str(&value)?;
+                let header_value = HeaderValue::from_str(&value).map_err(|e| {
+                    Error::new_internal(format!("Invalid header value for '{}': {}", key, e))
+                })?;
                 headers.insert(header_name, header_value);
             }
         }
 
         let request_body = FlowRequest { data: params.input };
-        let body_bytes = serde_json::to_vec(&request_body)?;
+        let body_bytes = serde_json::to_vec(&request_body)
+            .map_err(|e| Error::new_internal(format!("Failed to serialize request body: {}", e)))?;
 
         let response = client
             .post(params.url)
@@ -257,7 +260,8 @@ where
         let mut buffer = Vec::new();
 
         while let Some(item) = stream.next().await {
-            let chunk: Bytes = item?;
+            let chunk: Bytes =
+                item.map_err(|e| Error::new_internal(format!("chunk error: {}", e)))?;
             buffer.extend_from_slice(&chunk);
 
             while let Some(delimiter_pos) = buffer
@@ -268,9 +272,11 @@ where
                 // Also remove the delimiter itself
                 buffer.drain(..FLOW_STREAM_DELIMITER.len());
 
-                let message_str = String::from_utf8(message_bytes)?;
+                let message_str = String::from_utf8(message_bytes)
+                    .map_err(|e| Error::new_internal(format!("message_bytes error: {}", e)))?;
                 if let Some(data_str) = message_str.strip_prefix("data: ") {
-                    let stream_chunk: StreamChunk<S> = serde_json::from_str(data_str)?;
+                    let stream_chunk: StreamChunk<S> = serde_json::from_str(data_str)
+                        .map_err(|e| Error::new_internal(format!("stream_chunk error: {}", e)))?;
 
                     if let Some(msg) = stream_chunk.message {
                         if tx.send(Ok(msg)).await.is_err() {
@@ -278,7 +284,10 @@ where
                             return Err(Error::new_internal("Stream receiver closed."));
                         }
                     } else if let Some(result_value) = stream_chunk.result {
-                        let final_output: O = serde_json::from_value(result_value)?;
+                        let final_output: O =
+                            serde_json::from_value(result_value).map_err(|e| {
+                                Error::new_internal(format!("final_output error: {}", e))
+                            })?;
                         return Ok(final_output);
                     } else if let Some(err_detail) = stream_chunk.error {
                         return Err(Error::new_internal(format!(

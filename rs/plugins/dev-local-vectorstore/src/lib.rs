@@ -63,7 +63,7 @@ impl Plugin for DevLocalVectorStorePlugin {
                 Ok(Default::default())
             }
         });
-        registry.register_action(retriever_action)?;
+        registry.register_action(retriever_action.0)?;
 
         let indexer_action = define_indexer("local", move |req, _args| {
             let path = data_path.clone();
@@ -73,7 +73,7 @@ impl Plugin for DevLocalVectorStorePlugin {
                 Ok(())
             }
         });
-        registry.register_action(indexer_action)?;
+        registry.register_action(indexer_action.0)?;
 
         Ok(())
     }
