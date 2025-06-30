@@ -25,17 +25,29 @@
 #![allow(unused_variables)]
 
 // Public modules that form the core API of the Genkit library.
+pub mod beta;
 pub mod client;
+pub mod common;
+pub mod context;
 pub mod embedder;
 pub mod error;
+pub mod extract;
 pub mod flow;
+pub mod formats;
+pub mod logging;
+pub mod middleware;
 pub mod model;
 pub mod plugin;
 pub mod prompt;
+pub mod registry;
 pub mod retriever;
+pub mod schema;
+pub mod testing;
 pub mod tool;
+pub mod tracing;
 
 // Re-export key components for a unified and convenient API.
+pub use self::beta::genkit_beta::{genkit, GenkitBeta, GenkitBetaOptions};
 pub use self::embedder::{
     define_embedder, embed, embedder_ref, EmbedParams, EmbedderAction, EmbedderArgument,
     EmbedderInfo, EmbedderRef, Embedding, EmbeddingBatch,

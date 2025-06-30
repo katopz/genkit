@@ -47,6 +47,13 @@ pub struct ActionContext {
     pub additional_context: HashMap<String, Value>,
 }
 
+/// Context type for API key-based authentication.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct ApiKeyContext {
+    pub api_key: String,
+}
+
 /// A universal type that request handling extensions (e.g., web frameworks) can
 /// map their incoming requests to.
 ///
@@ -109,6 +116,11 @@ impl ApiKeyProvider {
     pub fn new(policy: ApiKeyPolicy) -> Self {
         Self { policy }
     }
+}
+
+/// Creates an API key-based authentication provider.
+pub fn api_key(policy: ApiKeyPolicy) -> ApiKeyProvider {
+    ApiKeyProvider::new(policy)
 }
 
 /// Helper to extract the API key from the 'authorization' header.
