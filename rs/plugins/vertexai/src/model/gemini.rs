@@ -342,6 +342,10 @@ pub fn define_gemini_model(model_name: &str, options: &VertexAIPluginOptions) ->
     define_model(model_options, move |req, _| {
         let model_id_clone = model_id.clone();
         let opts_clone = opts.clone();
-        Box::pin(async move { gemini_runner(req, model_id_clone, opts_clone).await })
+        Box::pin(async move {
+            gemini_runner(req, model_id_clone, opts_clone)
+                .await
+                .map_err(|e| e.into())
+        })
     })
 }
