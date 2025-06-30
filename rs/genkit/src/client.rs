@@ -180,33 +180,6 @@ where
 }
 
 /// Invoke and stream the response from a deployed flow.
-///
-/// ## Example
-///
-/// ```rust,no_run
-/// use genkit::client::{stream_flow, StreamFlowParams};
-/// use tokio_stream::StreamExt;
-///
-/// #[tokio::main]
-/// async fn main() -> Result<(), genkit::error::Error> {
-///     let mut response = stream_flow::<Option<()>, String, String>(StreamFlowParams {
-///         url: "https://my-flow-deployed-url".to_string(),
-///         input: None,
-///         headers: None,
-///     });
-///
-///     while let Some(chunk_result) = response.stream.next().await {
-///         match chunk_result {
-///             Ok(chunk) => println!("Chunk: {}", chunk),
-///             Err(e) => eprintln!("Stream error: {}", e),
-///         }
-///     }
-///
-///     let final_output = response.output.await??;
-///     println!("Final output: {}", final_output);
-///     Ok(())
-/// }
-/// ```
 pub fn stream_flow<I, O, S>(params: StreamFlowParams<I>) -> StreamFlowResponse<O, S>
 where
     I: Serialize + Send + 'static,
