@@ -121,7 +121,7 @@ mod test {
 
         // Poll the stream and the final result concurrently to avoid deadlock.
         let (stream_results, output_result) =
-            futures::join!(response.stream.collect::<Vec<_>>(), response.output);
+            tokio::join!(response.stream.collect::<Vec<_>>(), response.output);
 
         // Check the collected chunks.
         let chunks: Vec<TestStreamChunk> = stream_results.into_iter().map(|r| r.unwrap()).collect();
