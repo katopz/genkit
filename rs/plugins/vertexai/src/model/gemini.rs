@@ -18,7 +18,7 @@
 //! on Vertex AI.
 
 use crate::common::get_derived_params;
-use crate::{Error, Result, VertexAIPluginOptions};
+use crate::{context_caching, Error, Result, VertexAIPluginOptions};
 use genkit_ai::{
     message::Role,
     model::{
@@ -63,30 +63,30 @@ pub struct GeminiConfig {
 
 // Data structures that map to the Vertex AI Gemini API request/response format.
 
-#[derive(Serialize, Deserialize, Debug)]
+#[derive(Serialize, Deserialize, Debug, Clone)]
 #[serde(rename_all = "camelCase")]
-struct VertexMedia {
+pub struct VertexMedia {
     mime_type: String,
     data: String,
 }
 
-#[derive(Serialize, Deserialize, Debug)]
+#[derive(Serialize, Deserialize, Debug, Clone)]
 #[serde(rename_all = "camelCase")]
-struct VertexFunctionCall {
+pub struct VertexFunctionCall {
     name: String,
     args: Value,
 }
 
-#[derive(Serialize, Deserialize, Debug)]
+#[derive(Serialize, Deserialize, Debug, Clone)]
 #[serde(rename_all = "camelCase")]
-struct VertexFunctionResponse {
+pub struct VertexFunctionResponse {
     name: String,
     response: Value,
 }
 
-#[derive(Serialize, Deserialize, Debug)]
+#[derive(Serialize, Deserialize, Debug, Clone)]
 #[serde(rename_all = "camelCase")]
-struct VertexPart {
+pub struct VertexPart {
     #[serde(skip_serializing_if = "Option::is_none")]
     text: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -97,9 +97,9 @@ struct VertexPart {
     function_response: Option<VertexFunctionResponse>,
 }
 
-#[derive(Serialize, Deserialize, Debug)]
+#[derive(Serialize, Deserialize, Debug, Clone)]
 #[serde(rename_all = "camelCase")]
-struct VertexContent {
+pub struct VertexContent {
     role: String,
     parts: Vec<VertexPart>,
 }
@@ -152,6 +152,8 @@ struct VertexGeminiRequest {
     generation_config: Option<VertexGenerationConfig>,
     #[serde(skip_serializing_if = "Option::is_none")]
     tool_config: Option<VertexToolConfig>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    cached_content: Option<String>,
 }
 
 #[derive(Deserialize)]
@@ -298,6 +300,7 @@ fn to_vertex_request(req: &GenerateRequest) -> Result<VertexGeminiRequest> {
         tools,
         generation_config: generation_config.map(|c| VertexGenerationConfig { common_config: c }),
         tool_config,
+        cached_content: None,
     })
 }
 
@@ -371,8 +374,24 @@ async fn gemini_runner(
     model_id: String,
     options: VertexAIPluginOptions,
 ) -> Result<GenerateResponseData> {
-    let vertex_req = to_vertex_request(&req)?;
+    let mut vertex_req = to_vertex_request(&req)?;
     let params = get_derived_params(&options).await?;
+
+    if let Some(cache_config_details) = context_caching::utils::extract_cache_config(&req)? {
+        if let Some(cache_result) = context_caching::handle_cache_if_needed(
+            &params,
+            &req,
+            &vertex_req.contents,
+            &model_id,
+            &Some(cache_config_details),
+        )
+        .await?
+        {
+            vertex_req.contents = cache_result.remaining_contents;
+            vertex_req.cached_content = cache_result.cache.name;
+        }
+    }
+
     let url = format!(
         "https://{}-aiplatform.googleapis.com/v1/projects/{}/locations/{}/publishers/google/models/{}:streamGenerateContent",
         params.location, params.project_id, params.location, model_id

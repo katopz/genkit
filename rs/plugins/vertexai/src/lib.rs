@@ -19,6 +19,7 @@
 
 // Declare modules that will be created later.
 pub mod common;
+pub mod context_caching;
 pub mod embedder;
 pub mod model;
 
