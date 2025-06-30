@@ -314,7 +314,11 @@ impl Registry {
     pub fn register_action(&mut self, action: Arc<dyn ErasedAction>) -> Result<()> {
         let mut state = self.state.lock().unwrap();
         let meta = action.metadata();
-        let key = format!("/{:?}/{}", meta.action_type, meta.name).to_lowercase();
+        let key = format!(
+            "/{}/{}",
+            format!("{:?}", meta.action_type).to_lowercase(),
+            meta.name
+        );
 
         if state.actions.contains_key(&key) {
             // In a production framework, you might want to log a warning here.

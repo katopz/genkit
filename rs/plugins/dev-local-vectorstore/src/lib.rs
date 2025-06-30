@@ -31,6 +31,8 @@ use semanticsimilarity_rs::cosine_similarity;
 use serde::{Deserialize, Serialize};
 use std::{collections::HashMap, fs, path::Path, sync::Arc};
 
+const DEV_LOCAL_VECTORSTORE_PREFIX: &str = "devLocalVectorstore";
+
 #[derive(Debug, Serialize, Deserialize, Clone)]
 struct DbValue {
     doc: Document,
@@ -103,7 +105,7 @@ impl DevLocalVectorStorePlugin {
 #[async_trait]
 impl Plugin for DevLocalVectorStorePlugin {
     fn name(&self) -> &'static str {
-        "dev-local-vectorstore"
+        DEV_LOCAL_VECTORSTORE_PREFIX
     }
 
     async fn initialize(&self, registry: &mut Registry) -> Result<()> {
@@ -123,7 +125,7 @@ impl Plugin for DevLocalVectorStorePlugin {
                     Error::new_internal(format!("Embedder '{}' not found", embedder_name))
                 })?;
 
-            let aname = format!("devLocalVectorstore/{}", config.index_name);
+            let aname = format!("{}/{}", DEV_LOCAL_VECTORSTORE_PREFIX, config.index_name);
             let action_name: &'static str = Box::leak(aname.into_boxed_str());
 
             let retriever_data_path = data_path.clone();
@@ -211,7 +213,7 @@ pub fn local_vector_store(configs: Vec<LocalVectorStoreConfig>) -> Arc<dyn Plugi
 /// A reference to the local retriever.
 pub fn local_retriever_ref(index_name: &str) -> RetrieverRef<CommonRetrieverOptions> {
     retriever_ref(
-        format!("devLocalVectorstore/{}", index_name).as_str(),
+        format!("{}/{}", DEV_LOCAL_VECTORSTORE_PREFIX, index_name).as_str(),
         Some(RetrieverInfo {
             label: Some(format!("Local file-based Retriever - {}", index_name)),
         }),
@@ -221,7 +223,7 @@ pub fn local_retriever_ref(index_name: &str) -> RetrieverRef<CommonRetrieverOpti
 /// A reference to the local indexer.
 pub fn local_indexer_ref(index_name: &str) -> IndexerRef<()> {
     indexer_ref(
-        format!("devLocalVectorstore/{}", index_name).as_str(),
+        format!("{}/{}", DEV_LOCAL_VECTORSTORE_PREFIX, index_name).as_str(),
         Some(IndexerInfo {
             label: Some(format!("Local file-based Indexer - {}", index_name)),
         }),
