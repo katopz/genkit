@@ -36,9 +36,6 @@ use std::future::Future;
 use std::pin::Pin;
 use std::sync::Arc;
 
-/// The action type for a model.
-pub type ModelAction = Action<GenerateRequest, GenerateResponseData, GenerateResponseChunkData>;
-
 pub type NextFn = Box<
     dyn FnOnce(
             GenerateRequest,
@@ -162,15 +159,7 @@ pub fn define_generate_action(registry: &mut Registry) -> Arc<GenerateAction> {
                                 .ok_or_else(|| {
                                     Error::new_internal(format!("Model '{}' not found", model_name))
                                 })?;
-                            let model_action = any_downcast::downcast_arc::<ModelAction>(
-                                erased_action,
-                            )
-                            .map_err(|_| {
-                                Error::new_internal(format!(
-                                    "'{}' is not a valid ModelAction",
-                                    model_name
-                                ))
-                            })?;
+                            let model_action = erased_action;
 
                             if let Some(format) =
                                 formats::resolve_format(&registry, request.output.as_ref()).await
@@ -377,7 +366,7 @@ where
 
 /// Builds the middleware chain and calls the underlying model action.
 async fn run_model_via_middleware<O: 'static>(
-    model_action: Arc<ModelAction>,
+    model_action: Arc<dyn ErasedAction>,
     request: GenerateRequest,
     middleware: Vec<ModelMiddleware>,
     _on_chunk: Option<OnChunkCallback<O>>,
@@ -437,10 +426,7 @@ where
             .lookup_action(&format!("/model/{}", model_name))
             .await
             .ok_or_else(|| Error::new_internal(format!("Model '{}' not found", model_name)))?;
-        let model_action =
-            any_downcast::downcast_arc::<ModelAction>(erased_action).map_err(|_| {
-                Error::new_internal(format!("'{}' is not a valid ModelAction", model_name))
-            })?;
+        let model_action = erased_action;
 
         // 2. Resolve and apply format.
         if let Some(format) = formats::resolve_format(&registry, request.output.as_ref()).await {
@@ -631,24 +617,4 @@ pub async fn to_generate_request<O>(
         return_tool_requests: options.return_tool_requests,
         // ResumeOptions are handled in generate_internal, not passed to model.
     })
-}
-
-// `any_downcast` helper module
-mod any_downcast {
-    use genkit_core::registry::ErasedAction;
-    use std::sync::Arc;
-
-    pub fn downcast_arc<T: 'static>(
-        arc: Arc<dyn ErasedAction>,
-    ) -> std::result::Result<Arc<T>, Arc<dyn ErasedAction>> {
-        if arc.as_any().is::<T>() {
-            unsafe {
-                let raw = Arc::into_raw(arc);
-                let ptr = raw as *const T;
-                Ok(Arc::from_raw(ptr))
-            }
-        } else {
-            Err(arc)
-        }
-    }
 }
