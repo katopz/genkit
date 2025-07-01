@@ -575,7 +575,7 @@ pub fn augment_with_context(options: Option<AugmentWithContextOptions>) -> Model
 pub struct ModelRef<T> {
     pub name: String,
     pub info: ModelInfo,
-    pub config: PhantomData<T>,
+    pub config: std::marker::PhantomData<T>,
 }
 
 /// Represents a reference to a model.

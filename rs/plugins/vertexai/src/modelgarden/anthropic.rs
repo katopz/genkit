@@ -232,7 +232,7 @@ async fn anthropic_runner(
 }
 
 pub fn define_anthropic_model(
-    model_ref: ModelRef<AnthropicConfig>,
+    model_ref: genkit_ai::model::ModelRef<serde_json::Value>,
     options: &VertexAIPluginOptions,
 ) -> ModelAction {
     let model_id = model_ref.name.split('/').last().unwrap().to_string();

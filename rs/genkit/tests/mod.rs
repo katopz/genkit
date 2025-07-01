@@ -13,8 +13,8 @@ mod flow_test;
 #[cfg(test)]
 mod formats_test;
 
-// #[cfg(test)]
-// mod generate_test;
+#[cfg(test)]
+mod generate_test;
 
 // #[cfg(test)]
 // mod prompts_test;

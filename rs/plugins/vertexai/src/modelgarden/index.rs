@@ -25,6 +25,18 @@ use async_trait::async_trait;
 use genkit_core::{plugin::Plugin, registry::Registry, Result};
 use std::sync::Arc;
 
+use genkit_ai::ModelRef;
+use serde_json::Value;
+use std::marker::PhantomData;
+
+fn specialize_model_ref<T>(model_ref: &ModelRef<Value>) -> ModelRef<T> {
+    ModelRef {
+        name: model_ref.name.clone(),
+        info: model_ref.info.clone(),
+        config: PhantomData,
+    }
+}
+
 fn is_anthropic_model(name: &str) -> bool {
     name.contains("claude")
 }
@@ -62,41 +74,19 @@ impl Plugin for VertexAIModelGardenPlugin {
 
         for model_ref in &model_garden_options.models {
             let action = if is_anthropic_model(&model_ref.name) {
-                let typed_model_ref = genkit_ai::ModelRef {
-                    name: model_ref.name.clone(),
-                    info: model_ref.info.clone(),
-                    config: std::marker::PhantomData,
-                };
-                define_anthropic_model(typed_model_ref, base_options)
+                define_anthropic_model(model_ref.clone(), base_options)
             } else if is_mistral_model(&model_ref.name) {
-                let config = match model_ref.config.as_ref() {
-                    Some(v) => Some(serde_json::from_value(v.clone())?),
-                    None => None,
-                };
-                let typed_model_ref = genkit_ai::ModelRef {
-                    name: model_ref.name.clone(),
-                    info: model_ref.info.clone(),
-                    config,
-                };
                 define_mistral_model(
-                    typed_model_ref,
+                    model_ref.clone(),
                     base_options,
                     model_garden_options
                         .open_ai_base_url_template
+                        .clone()
                         .unwrap_or_default(),
                 )
             } else if is_llama_model(&model_ref.name) {
-                let config = match model_ref.config.as_ref() {
-                    Some(v) => Some(serde_json::from_value(v.clone())?),
-                    None => None,
-                };
-                let typed_model_ref = genkit_ai::ModelRef {
-                    name: model_ref.name.clone(),
-                    info: model_ref.info.clone(),
-                    config,
-                };
                 model_garden_openai_compatible_model(
-                    typed_model_ref,
+                    model_ref.clone(),
                     base_options,
                     model_garden_options.open_ai_base_url_template.clone(),
                 )
