@@ -311,20 +311,25 @@ impl Registry {
     ///
     /// The action key is automatically generated from its type and name.
     /// The action must be wrapped in an `Arc` to allow for shared ownership.
-    pub fn register_action(&mut self, action: Arc<dyn ErasedAction>) -> Result<()> {
+    pub fn register_action<A: ErasedAction + Send + Sync + 'static>(
+        &mut self,
+        name: String,
+        action: A,
+    ) -> Result<()> {
+        let action_arc: Arc<dyn ErasedAction> = Arc::new(action);
         let mut state = self.state.lock().unwrap();
-        let meta = action.metadata();
+        let meta = action_arc.metadata();
         let key = format!(
             "/{}/{}",
             format!("{:?}", meta.action_type).to_lowercase(),
-            meta.name
+            name
         );
 
         if state.actions.contains_key(&key) {
             // In a production framework, you might want to log a warning here.
         }
 
-        state.actions.insert(key, action);
+        state.actions.insert(key, action_arc);
         Ok(())
     }
 
@@ -453,7 +458,9 @@ mod tests {
         )
         .build();
 
-        registry.register_action(Arc::new(test_action)).unwrap();
+        registry
+            .register_action("myFlow".to_string(), test_action)
+            .unwrap();
 
         let key = "/flow/myFlow";
         let looked_up = registry.lookup_action(key).await;
@@ -472,7 +479,7 @@ mod tests {
             })
             .build();
         parent_registry
-            .register_action(Arc::new(parent_action))
+            .register_action("parentUtil".to_string(), parent_action)
             .unwrap();
 
         let mut child_registry = Registry::with_parent(&parent_registry);
@@ -482,7 +489,7 @@ mod tests {
             })
             .build();
         child_registry
-            .register_action(Arc::new(child_action))
+            .register_action("childUtil".to_string(), child_action)
             .unwrap();
 
         // Child can find its own action

@@ -242,7 +242,7 @@ pub type ModelMiddleware = Arc<
 
 /// An action that can be used to generate content.
 #[derive(Clone)]
-pub struct ModelAction(Action<GenerateRequest, GenerateResponseData, GenerateResponseChunkData>);
+pub struct ModelAction(Action<GenerateRequest, GenerateResponse, GenerateResponseChunkData>);
 
 impl Deref for ModelAction {
     type Target = Action<GenerateRequest, GenerateResponseData, GenerateResponseChunkData>;
@@ -363,7 +363,11 @@ fn get_model_middleware(options: &DefineModelOptions) -> Vec<ModelMiddleware> {
     middleware
 }
 
-pub fn define_model<F, Fut>(options: DefineModelOptions, f: F) -> ModelAction
+pub fn define_model<F, Fut>(
+    registry: &mut genkit_core::Registry,
+    options: DefineModelOptions,
+    f: F,
+) -> ModelAction
 where
     F: Fn(GenerateRequest, Option<Box<dyn Fn(GenerateResponseChunkData) + Send + Sync>>) -> Fut
         + Send
@@ -442,12 +446,16 @@ where
 
     let action = genkit_core::action::ActionBuilder::new(
         genkit_core::registry::ActionType::Model,
-        options.name,
+        options.name.clone(),
         action_f,
     )
     .with_metadata(metadata_map)
     .build();
-    ModelAction(action)
+    let model_action = ModelAction(action);
+    registry
+        .register_action(options.name.clone(), model_action.clone())
+        .unwrap();
+    model_action
 }
 
 pub struct DefineBackgroundModelOptions {
@@ -461,7 +469,10 @@ pub struct DefineBackgroundModelOptions {
     pub cancel: Arc<dyn Fn(String) -> Result<(), String> + Send + Sync>,
 }
 
-pub fn define_background_model(options: DefineBackgroundModelOptions) -> BackgroundModelAction {
+pub fn define_background_model(
+    registry: &mut genkit_core::Registry,
+    options: DefineBackgroundModelOptions,
+) -> BackgroundModelAction {
     let mut supports = options.supports.clone().unwrap_or_default();
     supports.long_running = Some(true);
     let model_info = ModelInfo {
@@ -475,22 +486,21 @@ pub fn define_background_model(options: DefineBackgroundModelOptions) -> Backgro
     metadata.insert("name".to_string(), json!(options.name));
     metadata.insert("type".to_string(), json!("backgroundModel"));
     metadata.insert("metadata".to_string(), json!(model_info));
-    if let Some(config_schema) = options.config_schema {
-        metadata.insert("configSchema".to_string(), config_schema);
+    if let Some(config_schema) = &options.config_schema {
+        metadata.insert("configSchema".to_string(), config_schema.clone());
     }
     let metadata_value = json!(metadata);
 
     let start_fn = options.start.clone();
     let check_fn = options.check.clone();
 
-    let _action_f = |req: &GenerateRequest, _args: &genkit_core::action::ActionFnArg<()>| {
+    let action_f = move |req: GenerateRequest, _args: genkit_core::action::ActionFnArg<()>| {
         // This pattern separates the `Fn` closure from the `async` block.
         // The outer closure borrows the `Arc`s and clones them.
         // The `async move` block then takes ownership of the clones,
         // satisfying the `Send` bound for the returned `Future`.
         let start_fn = start_fn.clone();
         let check_fn = check_fn.clone();
-        let req = req.clone();
 
         async move {
             let op_id = start_fn(req);
@@ -525,18 +535,21 @@ pub fn define_background_model(options: DefineBackgroundModelOptions) -> Backgro
         }
     };
 
-    let _metadata_map: std::collections::HashMap<String, serde_json::Value> =
+    let metadata_map: std::collections::HashMap<String, serde_json::Value> =
         serde_json::from_value(metadata_value).unwrap();
 
-    todo!()
-    // let action = genkit_core::action::ActionBuilder::new(
-    //     genkit_core::registry::ActionType::Model,
-    //     options.name,
-    //     action_f,
-    // )
-    // .with_metadata(metadata_map)
-    // .build();
-    // BackgroundModelAction(action)
+    let action = genkit_core::action::ActionBuilder::new(
+        genkit_core::registry::ActionType::BackgroundModel,
+        options.name.clone(),
+        action_f,
+    )
+    .with_metadata(metadata_map)
+    .build();
+    let bg_model_action = BackgroundModelAction(action);
+    registry
+        .register_action(options.name.clone(), bg_model_action.clone())
+        .unwrap();
+    bg_model_action
 }
 
 /// Validates that a model supports a given feature.

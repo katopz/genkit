@@ -384,9 +384,10 @@ where
     Fut: Future<Output = Result<O>> + Send,
     Action<I, O, S>: crate::registry::ErasedAction + 'static,
 {
-    let action = ActionBuilder::new(action_type, name, func).build();
+    let name_str = name.into();
+    let action = ActionBuilder::new(action_type, name_str.clone(), func).build();
     registry
-        .register_action(Arc::new(action.clone()))
+        .register_action(name_str, action.clone())
         .expect("Failed to register action"); // Or handle error more gracefully
     action
 }

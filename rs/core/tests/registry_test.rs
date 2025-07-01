@@ -59,11 +59,11 @@ impl Plugin for MockPlugin {
         let action_name = format!("{}/model", self.name);
         let test_action = ActionBuilder::<TestInput, TestOutput, (), _>::new(
             ActionType::Model,
-            action_name,
+            action_name.clone(),
             |_, _| async { Ok(TestOutput {}) },
         )
         .build();
-        registry.register_action(Arc::new(test_action))?;
+        registry.register_action(action_name, test_action)?;
         Ok(())
     }
 }
@@ -108,7 +108,7 @@ mod test {
             })
             .build();
         parent_registry
-            .register_action(Arc::new(parent_action))
+            .register_action("parentUtil".to_string(), parent_action)
             .unwrap();
 
         let mut child_registry = Registry::with_parent(&parent_registry);
@@ -118,24 +118,24 @@ mod test {
             })
             .build();
         child_registry
-            .register_action(Arc::new(child_action))
+            .register_action("childUtil".to_string(), child_action)
             .unwrap();
 
         // Child can find its own action
         assert!(child_registry
-            .lookup_action("/util/childutil")
+            .lookup_action("/util/childUtil")
             .await
             .is_some());
 
         // Child can find parent's action by falling back
         assert!(child_registry
-            .lookup_action("/util/parentutil")
+            .lookup_action("/util/parentUtil")
             .await
             .is_some());
 
         // Parent cannot find child's action
         assert!(parent_registry
-            .lookup_action("/util/childutil")
+            .lookup_action("/util/childUtil")
             .await
             .is_none());
     }
@@ -150,9 +150,11 @@ mod test {
         )
         .build();
 
-        registry.register_action(Arc::new(test_action)).unwrap();
+        registry
+            .register_action("myFlow".to_string(), test_action)
+            .unwrap();
 
-        let key = "/flow/myflow";
+        let key = "/flow/myFlow";
         let looked_up = registry.lookup_action(key).await;
         assert!(looked_up.is_some());
         let looked_up_action = looked_up.unwrap();
