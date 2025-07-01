@@ -25,7 +25,6 @@
 #![allow(unused_variables)]
 
 // Public modules that form the core API of the Genkit library.
-pub mod beta;
 pub mod client;
 pub mod common;
 pub mod context;
@@ -47,7 +46,6 @@ pub mod tool;
 pub mod tracing;
 
 // Re-export key components for a unified and convenient API.
-pub use self::beta::genkit_beta::{genkit, GenkitBeta, GenkitBetaOptions};
 pub use self::embedder::{
     define_embedder, embed, embedder_ref, EmbedParams, EmbedderAction, EmbedderArgument,
     EmbedderInfo, EmbedderRef, Embedding, EmbeddingBatch,
@@ -77,6 +75,8 @@ pub use genkit_ai::session::{Session, SessionStore};
 pub use genkit_core::context::ActionContext;
 pub use genkit_core::registry::Registry;
 use once_cell::sync::OnceCell;
+#[cfg(feature = "beta")]
+use serde::{de::DeserializeOwned, Serialize};
 use std::sync::Arc;
 
 static GENKIT_INSTANCE: OnceCell<Arc<Genkit>> = OnceCell::new();
@@ -84,6 +84,14 @@ static GENKIT_INSTANCE: OnceCell<Arc<Genkit>> = OnceCell::new();
 /// The main entry point for the Genkit framework.
 pub struct Genkit {
     registry: Registry,
+}
+
+/// Options for creating a new session.
+#[cfg(feature = "beta")]
+#[derive(Default)]
+pub struct CreateSessionOptions<S> {
+    pub store: Option<Arc<dyn SessionStore<S>>>,
+    pub initial_state: Option<S>,
 }
 
 impl Genkit {
@@ -112,5 +120,53 @@ impl Genkit {
     /// Returns a reference to the underlying registry.
     pub fn registry(&self) -> &Registry {
         &self.registry
+    }
+
+    /// Creates a new, empty session.
+    #[cfg(feature = "beta")]
+    pub async fn create_session<S>(
+        &self,
+        options: CreateSessionOptions<S>,
+    ) -> Result<Arc<Session<S>>>
+    where
+        S: Serialize + DeserializeOwned + Clone + Send + Sync + 'static,
+    {
+        let session = Session::new(
+            Arc::new(self.registry.clone()),
+            options.store,
+            None,
+            options.initial_state,
+        )
+        .await?;
+        Ok(Arc::new(session))
+    }
+
+    /// Loads an existing session from a store.
+    ///
+    /// Returns `Ok(None)` if the session is not found in the provided store.
+    #[cfg(feature = "beta")]
+    pub async fn load_session<S>(
+        &self,
+        id: String,
+        store: Arc<dyn SessionStore<S>>,
+    ) -> Result<Option<Arc<Session<S>>>>
+    where
+        S: Serialize + DeserializeOwned + Clone + Send + Sync + 'static,
+    {
+        // First, check if the session exists.
+        let session_data = store.get(&id).await?;
+        if session_data.is_none() {
+            return Ok(None);
+        }
+
+        // If it exists, Session::new will load it.
+        let session = Session::new(
+            Arc::new(self.registry.clone()),
+            Some(store),
+            Some(id),
+            None, // initial_state is not used when loading
+        )
+        .await?;
+        Ok(Some(Arc::new(session)))
     }
 }

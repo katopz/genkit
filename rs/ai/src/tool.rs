@@ -17,7 +17,7 @@
 //! This module provides the structures and functions for defining and using
 //! tools with generative models. It is the Rust equivalent of `tool.ts`.
 
-use crate::document::{Part, ToolRequestPart, ToolResponsePart};
+use crate::document::{Part, ToolRequest, ToolRequestPart, ToolResponsePart};
 use async_trait::async_trait;
 use genkit_core::action::{detached_action, Action, ActionBuilder, ActionFnArg};
 use genkit_core::context::ActionContext;
@@ -46,6 +46,16 @@ pub struct ToolDefinition {
     pub output_schema: Option<Value>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub metadata: Option<Value>,
+}
+
+impl From<ToolDefinition> for ToolRequest {
+    fn from(def: ToolDefinition) -> Self {
+        ToolRequest {
+            name: def.name,
+            ref_id: None,
+            input: def.input_schema,
+        }
+    }
 }
 
 /// An error thrown to interrupt a tool's execution.
