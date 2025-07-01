@@ -243,7 +243,7 @@ where
 
         let mut opts = options.unwrap_or_default();
         opts.on_chunk = Some(Arc::new(move |chunk_result| {
-            match chunk_result {
+            let _ = match chunk_result {
                 Ok(chunk) => chunk_tx.send(Ok(chunk)),
                 Err(e) => chunk_tx.send(Err(e)),
             };
