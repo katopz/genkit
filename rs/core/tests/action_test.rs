@@ -93,7 +93,7 @@ mod test {
             "streamingFlow",
             |input: TestInput, args: ActionFnArg<TestStreamChunk>| async move {
                 for i in 1..=3 {
-                    args.chunk_sender.send(TestStreamChunk { count: i });
+                    let _ = args.chunk_sender.send(TestStreamChunk { count: i });
                 }
                 // Close the sender to signal the end of the stream.
                 // Note: The async_utils::Channel doesn't have an explicit close on the sender side.

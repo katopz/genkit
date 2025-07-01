@@ -53,8 +53,8 @@ mod test {
     async fn test_channel_simple_send_and_close() {
         let (tx, mut rx) = channel::<i32>();
 
-        tx.send(1);
-        tx.send(2);
+        let _ = tx.send(1);
+        let _ = tx.send(2);
         tx.close();
 
         assert_eq!(rx.try_next().await.unwrap(), Some(1));
@@ -68,7 +68,7 @@ mod test {
 
         let handle = tokio::spawn(async move {
             sleep(Duration::from_millis(10)).await;
-            tx.send(100);
+            let _ = tx.send(100);
             tx.close();
         });
 
@@ -81,7 +81,7 @@ mod test {
     async fn test_channel_error() {
         let (tx, mut rx) = channel::<i32>();
 
-        tx.send(1);
+        let _ = tx.send(1);
         tx.error("something went wrong");
 
         assert_eq!(rx.try_next().await.unwrap(), Some(1));
