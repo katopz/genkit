@@ -482,6 +482,7 @@ dependencies = [
  "opentelemetry_sdk 0.26.0",
  "reqwest",
  "rstest",
+ "rstest_macros",
  "schemars",
  "serde",
  "serde_json",

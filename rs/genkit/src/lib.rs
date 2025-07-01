@@ -75,12 +75,9 @@ pub use genkit_ai::chat::Chat;
 pub use genkit_ai::session::{Session, SessionStore};
 pub use genkit_core::context::ActionContext;
 pub use genkit_core::registry::Registry;
-use once_cell::sync::OnceCell;
 #[cfg(feature = "beta")]
 use serde::{de::DeserializeOwned, Serialize};
 use std::sync::Arc;
-
-static GENKIT_INSTANCE: OnceCell<Arc<Genkit>> = OnceCell::new();
 
 /// The main entry point for the Genkit framework.
 pub struct Genkit {
@@ -104,7 +101,7 @@ pub struct CreateSessionOptions<S> {
 
 impl Genkit {
     /// Initializes the Genkit framework with a list of plugins.
-    pub async fn init(options: GenkitOptions) -> Result<&'static Arc<Self>> {
+    pub async fn init(options: GenkitOptions) -> Result<Arc<Self>> {
         let mut registry = Registry::new();
         if let Some(model_name) = options.default_model {
             registry.set_default_model(model_name);
@@ -113,19 +110,7 @@ impl Genkit {
             plugin.initialize(&mut registry).await?;
         }
         let instance = Arc::new(Self { registry });
-        GENKIT_INSTANCE
-            .set(instance.clone())
-            .map_err(|_| Error::new_internal("Genkit already initialized."))?;
-        Ok(GENKIT_INSTANCE.get().unwrap())
-    }
-
-    /// Returns a reference to the global Genkit instance.
-    ///
-    /// Panics if `init` has not been called.
-    pub fn get() -> &'static Arc<Self> {
-        GENKIT_INSTANCE
-            .get()
-            .expect("Genkit has not been initialized. Call Genkit::init() first.")
+        Ok(instance)
     }
 
     /// Returns a reference to the underlying registry.

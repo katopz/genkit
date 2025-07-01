@@ -7,6 +7,7 @@ use genkit_ai::{
     },
     prompt,
 };
+use rstest::*;
 use serde_json::Value;
 use std::sync::Arc;
 
@@ -46,17 +47,23 @@ impl Plugin for EchoModelPlugin {
     }
 }
 
-#[tokio::test]
-async fn test_genkit_initialization_and_generate() -> Result<()> {
-    // 1. Initialize Genkit with the EchoModelPlugin and a default model.
+/// This fixture function acts as the "beforeEach" block.
+/// It will be run for each test that uses the `genkit_instance` argument.
+#[fixture]
+async fn genkit_instance() -> Arc<Genkit> {
     let echo_plugin = Arc::new(EchoModelPlugin);
-    let genkit = Genkit::init(GenkitOptions {
+    Genkit::init(GenkitOptions {
         plugins: vec![echo_plugin],
         default_model: Some("echoModel".to_string()),
     })
-    .await?;
+    .await
+    .unwrap()
+}
 
-    // 2. Call `generate` with the "echoModel" specified explicitly (still works).
+#[rstest]
+#[tokio::test]
+async fn test_generate_with_explicit_model(#[future] genkit_instance: Arc<Genkit>) -> Result<()> {
+    let genkit = genkit_instance.await;
     let response = generate::<Value>(
         genkit.registry(),
         GenerateOptions {
@@ -67,33 +74,46 @@ async fn test_genkit_initialization_and_generate() -> Result<()> {
     )
     .await?;
     assert_eq!(response.text()?, "hello explicit");
+    Ok(())
+}
 
-    // 3. Call `generate` *without* a model, relying on the default.
-    let response_default = generate::<Value>(
+#[rstest]
+#[tokio::test]
+async fn test_generate_with_default_model(#[future] genkit_instance: Arc<Genkit>) -> Result<()> {
+    let genkit = genkit_instance.await;
+    let response = generate::<Value>(
         genkit.registry(),
         GenerateOptions {
+            // No model specified, relying on the default from the fixture.
             prompt: Some(vec![genkit_ai::document::Part::text("hello default")]),
             ..Default::default()
         },
     )
     .await?;
-    assert_eq!(response_default.text()?, "hello default");
+    assert_eq!(response.text()?, "hello default");
+    Ok(())
+}
 
-    // 4. Define and use a prompt that relies on the default model.
+#[rstest]
+#[tokio::test]
+async fn test_prompt_with_default_model(#[future] genkit_instance: Arc<Genkit>) -> Result<()> {
+    let genkit = genkit_instance.await;
+    // We need a mutable reference to the registry for define_prompt.
+    // Since the Arc gives us shared ownership, we can clone it.
+    let mut registry = genkit.registry().clone();
+
     let my_prompt = prompt::define_prompt::<(), Value, ()>(
-        &mut genkit.registry().clone(),
+        &mut registry,
         prompt::PromptConfig {
             name: "myPrompt".to_string(),
-            // No model specified here, should use default.
+            // No model specified here, should use default from the registry.
             model: None,
             prompt: Some("This is a test prompt".to_string()),
             ..Default::default()
         },
     );
 
-    // Generate content using the executable prompt.
-    let response_from_prompt = my_prompt.generate((), None).await?;
-    assert_eq!(response_from_prompt.text()?, "This is a test prompt");
-
+    let response = my_prompt.generate((), None).await?;
+    assert_eq!(response.text()?, "This is a test prompt");
     Ok(())
 }
