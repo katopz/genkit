@@ -19,6 +19,7 @@
 
 use crate::common::get_derived_params;
 use crate::{context_caching, Error, Result, VertexAIPluginOptions};
+use genkit_ai::tool;
 use genkit_ai::{
     message::Role,
     model::{
@@ -270,11 +271,10 @@ fn to_vertex_request(req: &GenerateRequest) -> Result<VertexGeminiRequest> {
         vec![VertexTool {
             function_declarations: tools
                 .iter()
-                .map(|t: &ToolDefinition| VertexFunctionDeclaration {
-                    name: t.name.clone(),
-                    description: t.description.clone(),
-                    parameters: t.input_schema.clone(),
-                })
+                .map(|t| tool::to_tool_definition(t.as_ref()))
+                .collect::<Result<Vec<_>>>()?
+                .into_iter()
+                .map(ToolRequest::from)
                 .collect(),
         }]
     });
@@ -472,7 +472,7 @@ pub fn define_gemini_model(model_name: &str, options: &VertexAIPluginOptions) ->
     let model_id = model_name.to_string();
     let opts = options.clone();
 
-    let model_options = genkit_ai::model::DefineModelOptions::<GeminiConfig> {
+    let model_options = genkit_ai::model::DefineModelOptions {
         name: format!("vertexai/{}", model_name),
         ..Default::default()
     };

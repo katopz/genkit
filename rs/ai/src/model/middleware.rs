@@ -334,13 +334,6 @@ pub struct SimulatedConstrainedGenerationOptions {
     pub instructions_renderer: Option<InstructionsRenderer>,
 }
 
-fn default_constrained_generation_instructions(schema: &serde_json::Value) -> String {
-    format!(
-        "Output should be in JSON format and conform to the following schema:\n\n```\n{}\n```\n",
-        serde_json::to_string_pretty(schema).unwrap_or_else(|_| "Invalid schema".to_string())
-    )
-}
-
 /// Model middleware that simulates constrained generation by injecting generation
 /// instructions into the user message.
 pub fn simulate_constrained_generation(
@@ -350,31 +343,29 @@ pub fn simulate_constrained_generation(
     // A simpler approach for now is to not support custom renderers.
     let _ = options; // Mark as used.
 
-    Arc::new(
-        move |mut req: GenerateRequest, next: ModelMiddlewareNext<'_>| {
-            Box::pin(async move {
-                let mut instructions: Option<String> = None;
-                // TODO
-                // if let Some(output) = &req.output {
-                //     if output.constrained == Some(true) {
-                //         if let Some(schema) = &output.schema {
-                //             instructions =
-                //                 Some(default_constrained_generation_instructions(schema));
-                //         }
-                //     }
-                // }
-                // if let Some(instr) = instructions {
-                //     req.messages = inject_instructions(&req.messages, Some(instr));
-                //     if let Some(output) = req.output.as_mut() {
-                //         output.constrained = Some(false);
-                //         output.format = None;
-                //         output.content_type = None;
-                //         output.schema = None;
-                //     }
-                // }
+    Arc::new(move |req: GenerateRequest, next: ModelMiddlewareNext<'_>| {
+        Box::pin(async move {
+            let mut _instructions: Option<String> = None;
+            // TODO
+            // if let Some(output) = &req.output {
+            //     if output.constrained == Some(true) {
+            //         if let Some(schema) = &output.schema {
+            //             instructions =
+            //                 Some(default_constrained_generation_instructions(schema));
+            //         }
+            //     }
+            // }
+            // if let Some(instr) = instructions {
+            //     req.messages = inject_instructions(&req.messages, Some(instr));
+            //     if let Some(output) = req.output.as_mut() {
+            //         output.constrained = Some(false);
+            //         output.format = None;
+            //         output.content_type = None;
+            //         output.schema = None;
+            //     }
+            // }
 
-                next(req).await
-            })
-        },
-    )
+            next(req).await
+        })
+    })
 }

@@ -140,6 +140,7 @@ pub struct GenerateRequest {
 /// The reason why a model finished generating a response.
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, PartialEq)]
 #[serde(rename_all = "SCREAMING_SNAKE_CASE")]
+#[derive(Default)]
 pub enum FinishReason {
     /// The model finished generating the response.
     Stop,
@@ -150,6 +151,7 @@ pub enum FinishReason {
     /// The model finished for some other reason.
     Other,
     /// The finish reason is unknown.
+    #[default]
     Unknown,
     /// The model was interrupted.
     Interrupted,
@@ -215,35 +217,27 @@ pub struct GenerateResponseChunkData {
     pub custom: Option<Value>,
 }
 
-type GenerateRequestPlus = (
-    GenerateRequest,
-    Option<Box<dyn Fn(GenerateResponseChunkData) + Send + Sync>>,
-);
+/// The response from a model generation call.
+pub type GenerateResponse = GenerateResponseData;
 
-/// A function that can be used to chain middleware.
-pub type NextFn = Pin<
-    Box<
-        dyn Fn(
-                GenerateRequest,
-                Option<Box<dyn Fn(GenerateResponseChunkData) + Send + Sync>>,
-            )
-                -> Pin<Box<dyn Future<Output = Result<GenerateResponseData, Value>> + Send>>
-            + Send
-            + Sync,
-    >,
+/// A boxed, pinned future.
+pub type BoxFuture<'a, T> = Pin<Box<dyn Future<Output = T> + Send + 'a>>;
+
+/// The `next` function passed to a `ModelMiddleware`.
+pub type ModelMiddlewareNext<'a> = Box<
+    dyn Fn(GenerateRequest) -> BoxFuture<'a, Result<GenerateResponse, genkit_core::error::Error>>
+        + Send
+        + Sync,
 >;
 
-/// A middleware function for a generative model.
-pub type ModelMiddleware = Pin<
-    Box<
-        dyn Fn(
-                GenerateRequestPlus,
-                NextFn,
-            )
-                -> Pin<Box<dyn Future<Output = Result<GenerateResponseData, Value>> + Send>>
-            + Send
-            + Sync,
-    >,
+/// A middleware function for a `ModelAction`.
+pub type ModelMiddleware = Arc<
+    dyn for<'a> Fn(
+            GenerateRequest,
+            ModelMiddlewareNext<'a>,
+        ) -> BoxFuture<'a, Result<GenerateResponse, genkit_core::error::Error>>
+        + Send
+        + Sync,
 >;
 
 /// An action that can be used to generate content.
@@ -340,7 +334,7 @@ impl ErasedAction for BackgroundModelAction {
 #[derive(Default, Serialize, Deserialize, Debug, Clone, JsonSchema)]
 pub struct DefineModelOptions {
     pub name: String,
-    pub label: String,
+    pub label: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub versions: Option<Vec<String>>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -348,45 +342,51 @@ pub struct DefineModelOptions {
     pub config_schema: Option<Value>,
 }
 
-fn get_model_middleware(
-    f: Pin<
-        Box<
-            dyn Fn(
-                    GenerateRequest,
-                    Option<Box<dyn Fn(GenerateResponseChunkData) + Send + Sync>>,
-                )
-                    -> Pin<Box<dyn Future<Output = Result<GenerateResponseData, Value>> + Send>>
-                + Send
-                + Sync,
-        >,
-    >,
-) -> NextFn {
-    Box::pin(move |req, chunk_cb| f(req, chunk_cb))
+/// Defines a new generative model.
+fn get_model_middleware(options: &DefineModelOptions) -> Vec<ModelMiddleware> {
+    let mut middleware: Vec<ModelMiddleware> = Vec::new();
+    let supports = options.supports.clone().unwrap_or_default();
+
+    middleware.push(middleware::download_request_media(None, None));
+    middleware.push(middleware::validate_support(
+        options.name.clone(),
+        supports.clone(),
+    ));
+
+    if supports.system_role != Some(true) {
+        middleware.push(middleware::simulate_system_prompt(None));
+    }
+
+    middleware.push(middleware::augment_with_context(None));
+    middleware.push(middleware::simulate_constrained_generation(None));
+
+    middleware
 }
 
-/// Defines a new generative model.
 pub fn define_model<F, Fut>(options: DefineModelOptions, f: F) -> ModelAction
 where
     F: Fn(GenerateRequest, Option<Box<dyn Fn(GenerateResponseChunkData) + Send + Sync>>) -> Fut
         + Send
         + Sync
         + 'static,
-    Fut: Future<Output = Result<GenerateResponseData, Value>> + Send + 'static,
+    Fut: Future<Output = Result<GenerateResponse, genkit_core::error::Error>> + Send + 'static,
 {
-    let f = std::sync::Arc::new(f);
+    let all_middlewares = Arc::new(get_model_middleware(&options));
+    let f = Arc::new(f);
+
     let model_info = ModelInfo {
         name: options.name.clone(),
-        label: options.label,
-        versions: options.versions,
-        supports: options.supports,
+        label: options.label.clone().unwrap_or_default(),
+        versions: options.versions.clone(),
+        supports: options.supports.clone(),
     };
 
     let mut metadata = HashMap::new();
     metadata.insert("name".to_string(), json!(options.name));
     metadata.insert("type".to_string(), json!("model"));
     metadata.insert("metadata".to_string(), json!(model_info));
-    if let Some(config_schema) = options.config_schema {
-        metadata.insert("configSchema".to_string(), config_schema);
+    if let Some(config_schema) = &options.config_schema {
+        metadata.insert("configSchema".to_string(), config_schema.clone());
     }
     let metadata_value = json!(metadata);
     let metadata_map: std::collections::HashMap<String, serde_json::Value> =
@@ -396,16 +396,47 @@ where
         move |req: GenerateRequest,
               args: genkit_core::action::ActionFnArg<GenerateResponseChunkData>| {
             let f = f.clone();
+            let middlewares = all_middlewares.clone();
+
             async move {
-                let callback: Option<Box<dyn Fn(GenerateResponseChunkData) + Send + Sync>> =
-                    if args.streaming_requested {
-                        Some(Box::new(move |chunk| args.chunk_sender.send(chunk)))
+                if args.streaming_requested {
+                    let callback = Some(Box::new(move |chunk| {
+                        args.chunk_sender.send(chunk);
+                    })
+                        as Box<dyn Fn(GenerateResponseChunkData) + Send + Sync>);
+                    // TODO: Apply middleware to streaming requests.
+                    return f(req, callback).await;
+                }
+
+                fn apply_middleware<F2, Fut2>(
+                    req: GenerateRequest,
+                    middlewares: Arc<Vec<ModelMiddleware>>,
+                    index: usize,
+                    f: Arc<F2>,
+                ) -> BoxFuture<'static, Result<GenerateResponse, genkit_core::error::Error>>
+                where
+                    F2: Fn(
+                            GenerateRequest,
+                            Option<Box<dyn Fn(GenerateResponseChunkData) + Send + Sync>>,
+                        ) -> Fut2
+                        + Send
+                        + Sync
+                        + 'static,
+                    Fut2: Future<Output = Result<GenerateResponse, genkit_core::error::Error>>
+                        + Send
+                        + 'static,
+                {
+                    if index < middlewares.len() {
+                        let middleware = middlewares[index].clone();
+                        let next: ModelMiddlewareNext<'static> = Box::new(move |req| {
+                            apply_middleware(req, middlewares.clone(), index + 1, f.clone())
+                        });
+                        middleware(req, next)
                     } else {
-                        None
-                    };
-                f(req, callback)
-                    .await
-                    .map_err(|e| genkit_core::error::Error::new_internal(e.to_string()))
+                        Box::pin(f(req, None))
+                    }
+                }
+                apply_middleware(req, middlewares, 0, f).await
             }
         };
 
@@ -421,7 +452,7 @@ where
 
 pub struct DefineBackgroundModelOptions {
     pub name: String,
-    pub label: String,
+    pub label: Option<String>,
     pub versions: Option<Vec<String>>,
     pub supports: Option<ModelInfoSupports>,
     pub config_schema: Option<Value>,
@@ -431,12 +462,12 @@ pub struct DefineBackgroundModelOptions {
 }
 
 pub fn define_background_model(options: DefineBackgroundModelOptions) -> BackgroundModelAction {
-    let mut supports = options.supports.unwrap_or_default();
+    let mut supports = options.supports.clone().unwrap_or_default();
     supports.long_running = Some(true);
     let model_info = ModelInfo {
         name: options.name.clone(),
-        label: options.label,
-        versions: options.versions,
+        label: options.label.clone().unwrap_or_default(),
+        versions: options.versions.clone(),
         supports: Some(supports),
     };
 
@@ -452,7 +483,7 @@ pub fn define_background_model(options: DefineBackgroundModelOptions) -> Backgro
     let start_fn = options.start.clone();
     let check_fn = options.check.clone();
 
-    let action_f = |req: &GenerateRequest, _args: &genkit_core::action::ActionFnArg<()>| {
+    let _action_f = |req: &GenerateRequest, _args: &genkit_core::action::ActionFnArg<()>| {
         // This pattern separates the `Fn` closure from the `async` block.
         // The outer closure borrows the `Arc`s and clones them.
         // The `async move` block then takes ownership of the clones,
@@ -494,7 +525,7 @@ pub fn define_background_model(options: DefineBackgroundModelOptions) -> Backgro
         }
     };
 
-    let metadata_map: std::collections::HashMap<String, serde_json::Value> =
+    let _metadata_map: std::collections::HashMap<String, serde_json::Value> =
         serde_json::from_value(metadata_value).unwrap();
 
     todo!()
@@ -509,154 +540,20 @@ pub fn define_background_model(options: DefineBackgroundModelOptions) -> Backgro
 }
 
 /// Validates that a model supports a given feature.
-pub fn validate_support(
-    model_name: &str,
-    _model_supports: &ModelInfoSupports,
-    feature_name: &str,
-    feature_supported: bool,
-) {
-    if !feature_supported {
-        panic!("Model {} does not support {}.", model_name, feature_name);
-    }
+pub fn validate_support(name: String, supports: ModelInfoSupports) -> ModelMiddleware {
+    middleware::validate_support(name, supports)
 }
 
-/// Options for simulating a system prompt.
-pub struct SimulateSystemPromptOptions {
-    pub preface: Option<String>,
-    pub acknowledgement: Option<String>,
+pub use middleware::SimulateSystemPromptOptions;
+
+pub fn simulate_system_prompt(options: Option<SimulateSystemPromptOptions>) -> ModelMiddleware {
+    middleware::simulate_system_prompt(options)
 }
 
-/// Simulates a system prompt for models that do not support it natively.
-pub fn simulate_system_prompt(
-    messages: &mut Vec<MessageData>,
-    options: Option<SimulateSystemPromptOptions>,
-) {
-    let options = options.unwrap_or(SimulateSystemPromptOptions {
-        preface: None,
-        acknowledgement: None,
-    });
-    let preface = options.preface.unwrap_or_else(|| {
-        "The user wants you to act as the following persona. Do not talk about this persona, just embody it. Do not mention that you are an AI model.".to_string()
-    });
-    let acknowledgement = options
-        .acknowledgement
-        .unwrap_or_else(|| "Understood.".to_string());
+pub use middleware::AugmentWithContextOptions;
 
-    let mut system_message: Option<MessageData> = None;
-    messages.retain(|msg| {
-        if msg.role == Role::System {
-            system_message = Some(msg.clone());
-            false
-        } else {
-            true
-        }
-    });
-
-    if let Some(sm) = system_message {
-        let new_user_content = format!(
-            "{}\n\n{}\n\nBegin.",
-            preface,
-            sm.content
-                .iter()
-                .map(|p| p.text.clone().unwrap_or_default())
-                .collect::<Vec<_>>()
-                .join("")
-        );
-
-        messages.insert(
-            0,
-            MessageData {
-                role: Role::User,
-                content: vec![Part {
-                    text: Some(new_user_content),
-                    ..Default::default()
-                }],
-                metadata: None,
-            },
-        );
-
-        messages.insert(
-            1,
-            MessageData {
-                role: Role::Model,
-                content: vec![Part {
-                    text: Some(acknowledgement),
-                    ..Default::default()
-                }],
-                metadata: None,
-            },
-        );
-    }
-}
-
-/// Options for augmenting a request with context.
-pub struct AugmentWithContextOptions {
-    pub preface: Option<String>,
-    pub citation_key: Option<String>,
-}
-
-pub const CONTEXT_PREFACE: &str = "The user has provided the following documents to provide context for the prompt. This is not part of the prompt, just supporting information.";
-fn default_item_template(doc: &Part, citation: usize, key: &str) -> String {
-    let mut parts = Vec::new();
-    if let Some(metadata) = &doc.metadata {
-        if let Some(title) = metadata.get("title") {
-            parts.push(format!("title: {}", title.as_str().unwrap_or("")));
-        }
-        if let Some(url) = metadata.get("url") {
-            parts.push(format!("url: {}", url.as_str().unwrap_or("")));
-        }
-    }
-    if let Some(text) = &doc.text {
-        parts.push(format!("content: {}", text));
-    }
-    format!(
-        "Document(/{}/{})\n---\n{}\n---",
-        key,
-        citation,
-        parts.join("\n")
-    )
-}
-
-/// Augments a request with context from a list of documents.
-pub fn augment_with_context(
-    messages: &mut Vec<MessageData>,
-    docs: &[Part],
-    options: AugmentWithContextOptions,
-) {
-    if docs.is_empty() {
-        return;
-    }
-    let preface = options
-        .preface
-        .unwrap_or_else(|| CONTEXT_PREFACE.to_string());
-    let citation_key = options
-        .citation_key
-        .unwrap_or_else(|| "document".to_string());
-
-    let mut doc_strs = Vec::new();
-    for (i, doc) in docs.iter().enumerate() {
-        doc_strs.push(default_item_template(doc, i + 1, &citation_key));
-    }
-
-    let context_str = format!("{}\n\n{}\n\n", preface, doc_strs.join("\n\n"));
-    if let Some(last_message) = messages.last_mut() {
-        if last_message.role == Role::User {
-            if let Some(last_part) = last_message.content.last_mut() {
-                if let Some(text) = &mut last_part.text {
-                    *text = format!("{}\n\n{}", context_str, text);
-                    return;
-                }
-            }
-        }
-    }
-    messages.push(MessageData {
-        role: Role::User,
-        content: vec![Part {
-            text: Some(context_str),
-            ..Default::default()
-        }],
-        metadata: None,
-    });
+pub fn augment_with_context(options: Option<AugmentWithContextOptions>) -> ModelMiddleware {
+    middleware::augment_with_context(options)
 }
 
 /// A serializable reference to a model, often used in plugin configurations.
@@ -694,11 +591,5 @@ pub fn model_ref<T: DeserializeOwned>(info: ModelInfo) -> ModelRef<T> {
         name: info.name.clone(),
         info,
         config: PhantomData,
-    }
-}
-
-impl Default for FinishReason {
-    fn default() -> Self {
-        FinishReason::Unknown
     }
 }
