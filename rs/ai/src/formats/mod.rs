@@ -101,15 +101,31 @@ pub fn resolve_instructions(
     schema: Option<&Schema>,
     instructions_option: Option<&Value>,
 ) -> Option<String> {
+    println!(
+        "[resolve_instructions] format: {:?}",
+        format.map(|f| &f.name)
+    );
+    println!("[resolve_instructions] schema: {:?}", schema.is_some());
+    println!(
+        "[resolve_instructions] instructions_option: {:?}",
+        instructions_option
+    );
     if let Some(Value::String(s)) = instructions_option {
+        println!("[resolve_instructions] user provided instructions");
         return Some(s.clone()); // user provided instructions
     }
     if let Some(Value::Bool(false)) = instructions_option {
+        println!("[resolve_instructions] user says no instructions");
         return None; // user says no instructions
     }
     let format = format?;
     let handler = (format.handler)(schema);
-    handler.instructions()
+    let instructions = handler.instructions();
+    println!(
+        "[resolve_instructions] resolved instructions: {:?}",
+        instructions
+    );
+    instructions
 }
 
 /// Injects formatting instructions into the message list.
@@ -148,8 +164,8 @@ pub fn inject_instructions(
     // find the system message or the last user message
     let target_index = messages
         .iter()
-        .position(|m| m.role == Role::System)
-        .or_else(|| messages.iter().rposition(|m| m.role == Role::User));
+        .rposition(|m| m.role == Role::User)
+        .or_else(|| messages.iter().position(|m| m.role == Role::System));
 
     if let Some(target_index) = target_index {
         let mut out_messages = messages.to_vec();

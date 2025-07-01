@@ -18,14 +18,13 @@ use genkit::model::{Candidate, GenerateRequest, Message, Role};
 use genkit::{FinishReason, Part};
 use genkit_ai::formats::types::FormatHandler;
 use genkit_ai::generate::{generate, generate_stream, OutputOptions};
-use genkit_ai::model::DefineModelOptions;
+use genkit_ai::model::{DefineModelOptions, ModelInfoSupports};
 use genkit_ai::{
     define_model, GenerateOptions, GenerateResponseChunkData, GenerateResponseData, MessageData,
 };
 use genkit_core::registry::Registry;
 use rstest::*;
 use serde_json::{json, Value};
-use std::collections::HashMap;
 use std::sync::Arc;
 
 struct BananaFormat;
@@ -43,13 +42,21 @@ impl genkit_ai::formats::Format for BananaFormat {
 
 // Helper to define an echo model for testing.
 fn define_echo_model(registry: &mut Registry, constrained_support: &str) {
-    let mut metadata = HashMap::new();
-    let supports = json!({ "constrained": constrained_support });
-    metadata.insert("supports".to_string(), supports);
+    let supports = if constrained_support == "all" {
+        Some(ModelInfoSupports {
+            output: Some(vec!["banana".to_string()]),
+            ..Default::default()
+        })
+    } else {
+        Some(ModelInfoSupports {
+            output: Some(vec![]),
+            ..Default::default()
+        })
+    };
     let model_opts = DefineModelOptions {
         name: "echoModel".to_string(),
         label: Some("Echo Model".to_string()),
-
+        supports,
         ..Default::default()
     };
     define_model(
@@ -79,12 +86,15 @@ fn define_echo_model(registry: &mut Registry, constrained_support: &str) {
                 ];
 
                 for data in chunks_data {
-                    cb(data)
+                    cb(data);
                 }
             }
 
             // Both streaming and non-streaming calls return a final response.
-            let text = format!("Echo: {:?}", last_msg_text);
+            let text = format!(
+                "Echo: {}",
+                Message::<String>::new(last_msg_text, None).text()
+            );
             Ok(GenerateResponseData {
                 candidates: vec![Candidate {
                     index: 0,
