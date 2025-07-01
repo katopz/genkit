@@ -122,11 +122,7 @@ where
 
     /// Throws an error if the response does not conform to expected schema.
     pub fn assert_valid_schema(&self) -> Result<()> {
-        let schema_value = self
-            .request
-            .as_ref()
-            .and_then(|req| req.output.as_ref())
-            .and_then(|out| Some(out));
+        let schema_value = self.request.as_ref().and_then(|req| req.output.as_ref());
 
         if let Some(schema) = schema_value {
             let output = self.output()?;
