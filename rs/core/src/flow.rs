@@ -20,6 +20,7 @@
 //! other actions, models, or external services.
 
 use crate::action::{Action, ActionBuilder, ActionFnArg};
+use crate::context::{run_with_flow_context, FlowContext};
 use crate::error::Result;
 use crate::registry::ActionType;
 use crate::tracing as genkit_tracing;
@@ -50,10 +51,22 @@ where
     I: DeserializeOwned + JsonSchema + Send + Sync + 'static,
     O: Serialize + JsonSchema + Send + Sync + 'static,
     S: Serialize + JsonSchema + Send + Sync + 'static,
-    F: Fn(I, ActionFnArg<S>) -> Fut + Send + Sync + 'static,
+    F: Fn(I, ActionFnArg<S>) -> Fut + Send + Sync + Clone + 'static,
     Fut: Future<Output = Result<O>> + Send,
 {
-    ActionBuilder::new(ActionType::Flow, name, func).build()
+    let name = name.into();
+    let flow_name = name.clone();
+    let wrapped_func = move |input: I, args: ActionFnArg<S>| {
+        let func = func.clone();
+        let flow_name = flow_name.clone();
+        async move {
+            let flow_context = FlowContext {
+                flow_id: format!("{}-{}", flow_name, args.trace.trace_id),
+            };
+            run_with_flow_context(flow_context, func(input, args)).await
+        }
+    };
+    ActionBuilder::new(ActionType::Flow, name, wrapped_func).build()
 }
 
 /// Executes a given function as a distinct step within a flow.

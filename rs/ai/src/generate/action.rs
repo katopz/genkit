@@ -23,7 +23,7 @@ use crate::document::Part;
 use crate::generate::{OnChunkCallback, OutputOptions, ToolChoice};
 use crate::message::{Message, MessageData, Role};
 use crate::model::{self, GenerateRequest, GenerateResponseChunkData, GenerateResponseData};
-use crate::{formats, tool, Document, Model};
+use crate::{formats, to_generate_request, Document, Model};
 use genkit_core::action::{Action, ActionBuilder, ActionFnArg};
 use genkit_core::error::{Error, Result};
 use genkit_core::registry::{ActionType, ErasedAction, Registry};
@@ -150,7 +150,7 @@ pub fn define_generate_action(registry: &mut Registry) -> Arc<GenerateAction> {
                                 Error::new_internal("Model not specified".to_string())
                             })?;
                             let model_name = match model_ref {
-                                model::Model::Reference(r) => r.name.clone(),
+                                model::Model::Reference(r) => r.clone(),
                                 model::Model::Name(n) => n.clone(),
                             };
                             let erased_action = registry
@@ -422,7 +422,7 @@ where
             .as_ref()
             .ok_or_else(|| Error::new_internal("Model not specified".to_string()))?;
         let model_name = match model_ref {
-            model::Model::Reference(r) => r.name.clone(),
+            model::Model::Reference(r) => r.clone(),
             model::Model::Name(n) => n.clone(),
         };
         let erased_action = registry
@@ -564,60 +564,5 @@ where
             },
         )
         .await
-    })
-}
-
-/// Converts high-level `GenerateOptions` to the `GenerateRequest` for a model.
-pub async fn to_generate_request<O>(
-    registry: &Registry,
-    options: &GenerateOptions<O>,
-) -> Result<GenerateRequest> {
-    let mut messages: Vec<MessageData> = Vec::new();
-    if let Some(system_parts) = &options.system {
-        messages.push(MessageData {
-            role: Role::System,
-            content: system_parts.clone(),
-            metadata: None,
-        });
-    }
-    if let Some(user_messages) = &options.messages {
-        messages.extend(user_messages.clone());
-    }
-    if let Some(prompt_parts) = &options.prompt {
-        messages.push(MessageData {
-            role: Role::User,
-            content: prompt_parts.clone(),
-            metadata: None,
-        });
-    }
-
-    if messages.is_empty() {
-        return Err(Error::new_internal(
-            "No messages provided for generation".to_string(),
-        ));
-    }
-
-    let resolved_tools = tool::resolve_tools(registry, options.tools.as_deref()).await?;
-    let tool_definitions = if !resolved_tools.is_empty() {
-        Some(
-            resolved_tools
-                .iter()
-                .map(|t| tool::to_tool_definition(t.as_ref()))
-                .collect::<Result<Vec<_>>>()?,
-        )
-    } else {
-        None
-    };
-
-    Ok(GenerateRequest {
-        messages,
-        config: options.config.clone(),
-        tools: tool_definitions,
-        output: options.output.clone(),
-        docs: options.docs.clone(),
-        tool_choice: options.tool_choice.clone(),
-        max_turns: options.max_turns,
-        return_tool_requests: options.return_tool_requests,
-        // ResumeOptions are handled in generate_internal, not passed to model.
     })
 }

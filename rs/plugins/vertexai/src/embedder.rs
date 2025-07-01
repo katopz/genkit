@@ -16,12 +16,8 @@
 //!
 //! This module provides the implementation for Vertex AI text embedding models.
 
-use crate::{
-    common::{get_derived_params, VertexAIPluginOptions},
-    Error, Result,
-};
+use crate::{common::VertexAIPluginOptions, predict::predict_model, Error};
 use genkit_ai::embedder::{define_embedder, EmbedRequest, EmbedResponse, Embedding};
-use reqwest::header::{HeaderMap, AUTHORIZATION, CONTENT_TYPE};
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
@@ -39,11 +35,6 @@ struct VertexEmbeddingInstance<'a> {
     content: &'a str,
 }
 
-#[derive(Serialize)]
-struct VertexEmbeddingRequest<'a> {
-    instances: Vec<VertexEmbeddingInstance<'a>>,
-}
-
 #[derive(Deserialize)]
 struct VertexEmbeddingPrediction {
     embeddings: VertexEmbeddings,
@@ -53,59 +44,6 @@ struct VertexEmbeddingPrediction {
 struct VertexEmbeddings {
     values: Vec<f32>,
     // statistics are ignored for now.
-}
-
-#[derive(Deserialize)]
-struct VertexEmbeddingResponse {
-    predictions: Vec<VertexEmbeddingPrediction>,
-}
-
-/// Invokes the Vertex AI API to generate embeddings.
-async fn invoke_vertex_embedding_api(
-    options: &VertexAIPluginOptions,
-    model_id: &str,
-    request: &VertexEmbeddingRequest<'_>,
-) -> Result<VertexEmbeddingResponse> {
-    let params = get_derived_params(options).await?;
-    let url = format!(
-        "https://{}-aiplatform.googleapis.com/v1/projects/{}/locations/{}/publishers/google/models/{}:predict",
-        params.location, params.project_id, params.location, model_id
-    );
-
-    let token = params
-        .token_provider
-        .token(&["https://www.googleapis.com/auth/cloud-platform"])
-        .await
-        .map_err(|e| Error::GcpAuth(format!("Failed to get auth token: {}", e)))?;
-
-    let mut headers = HeaderMap::new();
-    headers.insert(CONTENT_TYPE, "application/json".parse().unwrap());
-    headers.insert(
-        AUTHORIZATION,
-        format!("Bearer {}", token.as_str()).parse().unwrap(),
-    );
-
-    let client = reqwest::Client::new();
-    let response = client
-        .post(&url)
-        .headers(headers)
-        .json(request)
-        .send()
-        .await?;
-
-    let status = response.status();
-    if !status.is_success() {
-        let error_text = response.text().await?;
-        Err(Error::VertexAI(format!(
-            "API request failed with status {}: {}",
-            status, error_text
-        )))
-    } else {
-        response
-            .json::<VertexEmbeddingResponse>()
-            .await
-            .map_err(|e| e.into())
-    }
 }
 
 /// Defines a Vertex AI embedder action.
@@ -127,9 +65,11 @@ pub fn define_vertex_ai_embedder(
                     .map(|content| VertexEmbeddingInstance { content })
                     .collect();
 
-                let vertex_req = VertexEmbeddingRequest { instances };
-                let vertex_resp =
-                    invoke_vertex_embedding_api(&opts, &model_id, &vertex_req).await?;
+                #[derive(Serialize)]
+                struct EmptyParams {}
+                let parameters = EmptyParams {};
+
+                let vertex_resp = predict_model(&opts, &model_id, &instances, &parameters).await?;
 
                 if vertex_resp.predictions.len() != req.input.len() {
                     return Err(Error::VertexAI(format!(
@@ -143,7 +83,7 @@ pub fn define_vertex_ai_embedder(
                 let embeddings = vertex_resp
                     .predictions
                     .into_iter()
-                    .map(|p| Embedding {
+                    .map(|p: VertexEmbeddingPrediction| Embedding {
                         embedding: p.embeddings.values,
                         metadata: None, // No metadata from Vertex API
                     })

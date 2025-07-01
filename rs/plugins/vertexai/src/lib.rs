@@ -21,13 +21,18 @@
 pub mod common;
 pub mod context_caching;
 pub mod embedder;
+pub mod evaluation;
+pub mod list_models;
 pub mod model;
+pub mod modelgarden;
+pub mod predict;
 
 use self::common::VertexAIPluginOptions;
 use self::embedder::define_vertex_ai_embedder;
+use self::list_models::list_models;
 use self::model::gemini::define_gemini_model;
 use self::model::imagen::define_imagen_model;
-use self::model::{SUPPORTED_EMBEDDER_MODELS, SUPPORTED_GEMINI_MODELS, SUPPORTED_IMAGEN_MODELS};
+use self::model::SUPPORTED_EMBEDDER_MODELS;
 use async_trait::async_trait;
 use genkit_ai::{embedder_ref, model_ref, EmbedderRef, ModelRef};
 use genkit_core::{plugin::Plugin, registry::Registry};
@@ -44,6 +49,8 @@ pub enum Error {
     Request(#[from] reqwest::Error),
     #[error("Vertex AI error: {0}")]
     VertexAI(String),
+    #[error("JSON error: {0}")]
+    Json(#[from] serde_json::Error),
 }
 
 pub type Result<T> = std::result::Result<T, Error>;
@@ -51,6 +58,12 @@ pub type Result<T> = std::result::Result<T, Error>;
 impl From<Error> for genkit_core::error::Error {
     fn from(e: Error) -> Self {
         genkit_core::error::Error::new_internal(e.to_string())
+    }
+}
+
+impl From<gcp_auth::Error> for Error {
+    fn from(e: gcp_auth::Error) -> Self {
+        Error::GcpAuth(e.to_string())
     }
 }
 
@@ -66,17 +79,32 @@ impl VertexAIPlugin {
     }
 
     async fn register_models(&self, registry: &mut Registry) -> Result<()> {
-        for model_name in SUPPORTED_GEMINI_MODELS {
-            let model = define_gemini_model(model_name, &self.options);
-            registry.register_action(Arc::new(model))?;
-        }
-        for model_name in SUPPORTED_IMAGEN_MODELS {
-            let model = define_imagen_model(model_name, &self.options);
-            registry.register_action(Arc::new(model))?;
-        }
-        for model_name in SUPPORTED_EMBEDDER_MODELS {
-            let embedder = define_vertex_ai_embedder(model_name, &self.options);
-            registry.register_action(Arc::new(embedder))?;
+        const KNOWN_DECOMISSIONED_MODELS: &[&str] = &[
+            "gemini-pro-vision",
+            "gemini-pro",
+            "gemini-ultra",
+            "gemini-ultra-vision",
+        ];
+
+        let all_models = list_models(&self.options).await?;
+
+        for model in all_models {
+            let short_name = model.name.split('/').next_back().unwrap_or(&model.name);
+
+            if KNOWN_DECOMISSIONED_MODELS.contains(&short_name) {
+                continue;
+            }
+
+            if short_name.contains("gemini") {
+                let action = define_gemini_model(short_name, &self.options);
+                registry.register_action(Arc::new(action))?;
+            } else if short_name.contains("imagen") {
+                let action = define_imagen_model(short_name, &self.options);
+                registry.register_action(Arc::new(action))?;
+            } else if SUPPORTED_EMBEDDER_MODELS.contains(&short_name) {
+                let embedder = define_vertex_ai_embedder(short_name, &self.options);
+                registry.register_action(Arc::new(embedder))?;
+            }
         }
         Ok(())
     }

@@ -20,6 +20,7 @@
 use crate::document::Document;
 use crate::formats::inject_instructions;
 use crate::model::{MessageData, ModelInfoSupports, ModelMiddleware, Part};
+use crate::GenerateRequest;
 use base64::Engine;
 use std::sync::Arc;
 
@@ -29,7 +30,7 @@ pub fn download_request_media(
     max_bytes: Option<usize>,
     filter: Option<fn(&Part) -> bool>,
 ) -> ModelMiddleware {
-    Arc::new(move |req, next| {
+    Arc::new(move |req: GenerateRequest, next: ModelMiddlewareNext| {
         let max_bytes = max_bytes;
         let filter = filter;
         Box::pin(async move {
@@ -108,7 +109,7 @@ pub fn download_request_media(
 
 /// Validates that a GenerateRequest does not include unsupported features.
 pub fn validate_support(name: String, supports: ModelInfoSupports) -> ModelMiddleware {
-    Arc::new(move |req, next| {
+    Arc::new(move |req: GenerateRequest, next: ModelMiddlewareNext| {
         let name = name.clone();
         let supports = supports.clone();
         Box::pin(async move {
@@ -164,7 +165,7 @@ pub fn simulate_system_prompt(options: Option<SimulateSystemPromptOptions>) -> M
         .acknowledgement
         .unwrap_or_else(|| "Understood.".to_string());
 
-    Arc::new(move |mut req, next| {
+    Arc::new(move |mut req: GenerateRequest, next: ModelMiddlewareNext| {
         let preface = preface.clone();
         let acknowledgement = acknowledgement.clone();
         Box::pin(async move {
@@ -242,7 +243,7 @@ fn default_item_template(
 /// Injects retrieved documents as context into the last user message.
 pub fn augment_with_context(options: Option<AugmentWithContextOptions>) -> ModelMiddleware {
     let opts = options.unwrap_or_default();
-    Arc::new(move |mut req, next| {
+    Arc::new(move |mut req: GenerateRequest, next: ModelMiddlewareNext| {
         let opts = opts.clone();
         Box::pin(async move {
             let docs = match req.docs.as_ref() {
@@ -331,7 +332,7 @@ pub fn simulate_constrained_generation(
     // A simpler approach for now is to not support custom renderers.
     let _ = options; // Mark as used.
 
-    Arc::new(move |mut req, next| {
+    Arc::new(move |mut req: GenerateRequest, next: ModelMiddlewareNext| {
         Box::pin(async move {
             let mut instructions: Option<String> = None;
             if let Some(output) = &req.output {

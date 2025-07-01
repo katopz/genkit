@@ -17,7 +17,9 @@
 //! This module provides the implementation for the Imagen family of models
 //! on Vertex AI for image generation.
 
-use crate::common::{get_derived_params, VertexAIPluginOptions};
+use crate::common::VertexAIPluginOptions;
+use crate::predict::predict_model;
+use crate::Result;
 use genkit_ai::{
     model::{
         define_model, CandidateData, FinishReason, GenerateRequest, GenerateResponseData,
@@ -25,8 +27,7 @@ use genkit_ai::{
     },
     Part,
 };
-use genkit_core::error::{Error, Result};
-use reqwest::header::{HeaderMap, AUTHORIZATION, CONTENT_TYPE};
+use genkit_core::error::Error as CoreError;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
@@ -40,7 +41,7 @@ pub struct ImagenConfig {
 
 // Data structures that map to the Vertex AI Imagen API request/response format.
 
-#[derive(Serialize)]
+#[derive(Serialize, Clone)]
 struct VertexImagenInstance<'a> {
     prompt: &'a str,
 }
@@ -51,12 +52,6 @@ struct VertexImagenParameters {
     sample_count: u32,
 }
 
-#[derive(Serialize)]
-struct VertexImagenRequest<'a> {
-    instances: Vec<VertexImagenInstance<'a>>,
-    parameters: VertexImagenParameters,
-}
-
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]
 struct VertexImagenPrediction {
@@ -64,44 +59,47 @@ struct VertexImagenPrediction {
     mime_type: String,
 }
 
-#[derive(Deserialize)]
-struct VertexImagenResponse {
-    predictions: Vec<VertexImagenPrediction>,
-    // DeployedModelId is ignored
-}
-
-/// Converts a Genkit `GenerateRequest` into a `VertexImagenRequest`.
-fn to_vertex_request(req: &GenerateRequest) -> Result<VertexImagenRequest> {
+/// The core runner for the Imagen model.
+async fn imagen_runner(
+    req: GenerateRequest,
+    model_id: String,
+    options: VertexAIPluginOptions,
+) -> Result<GenerateResponseData> {
     let prompt = req
         .messages
         .last()
-        .ok_or_else(|| Error::new_internal("Imagen requires a prompt in the last message."))?
+        .ok_or_else(|| CoreError::new_internal("Imagen requires a prompt in the last message."))
+        .map_err(crate::Error::from)?
         .content
         .iter()
         .find_map(|p| p.text.as_deref())
-        .ok_or_else(|| Error::new_internal("Imagen prompt message must contain text."))?;
+        .ok_or_else(|| CoreError::new_internal("Imagen prompt message must contain text."))
+        .map_err(crate::Error::from)?;
 
     let config: ImagenConfig = req
         .config
         .as_ref()
         .map(|v| serde_json::from_value(v.clone()))
         .transpose()
-        .map_err(|e| Error::new_internal(format!("Failed to parse Imagen config: {}", e)))?
+        .map_err(|e| {
+            crate::Error::from(CoreError::new_internal(format!(
+                "Failed to parse Imagen config: {}",
+                e
+            )))
+        })?
         .unwrap_or_default();
 
     let parameters = VertexImagenParameters {
         sample_count: config.num_images.unwrap_or(1),
     };
 
-    Ok(VertexImagenRequest {
-        instances: vec![VertexImagenInstance { prompt }],
-        parameters,
-    })
-}
+    let instances = vec![VertexImagenInstance { prompt }];
 
-/// Converts a `VertexImagenResponse` into a Genkit `GenerateResponseData`.
-fn to_genkit_response(resp: VertexImagenResponse) -> Result<GenerateResponseData> {
-    let content: Vec<Part> = resp
+    let response =
+        predict_model::<_, _, VertexImagenPrediction>(&options, &model_id, &instances, &parameters)
+            .await?;
+
+    let content: Vec<Part> = response
         .predictions
         .into_iter()
         .map(|pred| {
@@ -116,7 +114,7 @@ fn to_genkit_response(resp: VertexImagenResponse) -> Result<GenerateResponseData
                 ..Default::default()
             })
         })
-        .collect::<Result<Vec<Part>>>()?;
+        .collect::<crate::Result<Vec<Part>>>()?;
 
     let candidate = CandidateData {
         index: 0,
@@ -133,61 +131,6 @@ fn to_genkit_response(resp: VertexImagenResponse) -> Result<GenerateResponseData
         candidates: vec![candidate],
         ..Default::default()
     })
-}
-
-/// The core runner for the Imagen model.
-async fn imagen_runner(
-    req: GenerateRequest,
-    model_id: String,
-    options: VertexAIPluginOptions,
-) -> Result<GenerateResponseData> {
-    let vertex_req = to_vertex_request(&req)?;
-    let params = get_derived_params(&options).await?;
-    let url = format!(
-        "https://{}-aiplatform.googleapis.com/v1/projects/{}/locations/{}/publishers/google/models/{}:predict",
-        params.location, params.project_id, params.location, model_id
-    );
-
-    let token = params
-        .token_provider
-        .token(&["https://www.googleapis.com/auth/cloud-platform"])
-        .await
-        .map_err(|e| Error::new_internal(format!("Failed to get auth token: {}", e)))?;
-
-    let mut headers = HeaderMap::new();
-    headers.insert(CONTENT_TYPE, "application/json".parse().unwrap());
-    headers.insert(
-        AUTHORIZATION,
-        format!("Bearer {}", token.as_str()).parse().unwrap(),
-    );
-
-    let client = reqwest::Client::new();
-    let response = client
-        .post(&url)
-        .headers(headers)
-        .json(&vertex_req)
-        .send()
-        .await
-        .map_err(|e| Error::new_internal(format!("API request failed: {}", e)))?;
-
-    if !response.status().is_success() {
-        let status = response.status();
-        let error_text = response
-            .text()
-            .await
-            .unwrap_or_else(|_| "Unknown error".to_string());
-        return Err(Error::new_internal(format!(
-            "API request failed with status {}: {}",
-            status, error_text
-        )));
-    }
-
-    let vertex_resp = response
-        .json::<VertexImagenResponse>()
-        .await
-        .map_err(|e| Error::new_internal(format!("Failed to parse API response: {}", e)))?;
-
-    to_genkit_response(vertex_resp)
 }
 
 /// Defines an Imagen model action.
@@ -218,6 +161,10 @@ pub fn define_imagen_model(model_name: &str, options: &VertexAIPluginOptions) ->
     define_model(model_options, move |req, _| {
         let model_id_clone = model_id.clone();
         let opts_clone = opts.clone();
-        async move { imagen_runner(req, model_id_clone, opts_clone).await }
+        async move {
+            imagen_runner(req, model_id_clone, opts_clone)
+                .await
+                .map_err(|e| e.into())
+        }
     })
 }

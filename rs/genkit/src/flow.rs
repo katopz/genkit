@@ -16,4 +16,7 @@
 //!
 //! This module re-exports flow-related types and functions from `genkit-core`.
 
-pub use genkit_core::flow::{define_flow, run, Flow};
+pub use genkit_core::{
+    context::{get_flow_context, run_with_flow_context, FlowContext},
+    flow::{define_flow, run, Flow},
+};

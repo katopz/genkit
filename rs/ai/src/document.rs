@@ -97,6 +97,16 @@ pub struct Part {
     pub metadata: Option<HashMap<String, Value>>,
 }
 
+impl Part {
+    /// Creates a new `Part` from a text string.
+    pub fn text(text: impl Into<String>) -> Self {
+        Part {
+            text: Some(text.into()),
+            ..Default::default()
+        }
+    }
+}
+
 /// A type alias for a `Part` that is known to contain a `tool_request`.
 pub type ToolRequestPart = Part;
 pub type ToolResponsePart = Part;
@@ -115,10 +125,7 @@ impl Document {
     /// Creates a new `Document` from a text string.
     pub fn from_text(text: impl Into<String>, metadata: Option<HashMap<String, Value>>) -> Self {
         Document {
-            content: vec![Part {
-                text: Some(text.into()),
-                ..Default::default()
-            }],
+            content: vec![Part::text(text)],
             metadata,
         }
     }

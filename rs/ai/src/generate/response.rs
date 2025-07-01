@@ -126,7 +126,7 @@ where
             .request
             .as_ref()
             .and_then(|req| req.output.as_ref())
-            .and_then(|out| out.schema.as_ref());
+            .and_then(|out| Some(out));
 
         if let Some(schema) = schema_value {
             let output = self.output()?;
@@ -137,7 +137,13 @@ where
                 ))
             })?;
 
-            jsonschema::validate(schema, &output_value).map_err(|error_message| {
+            jsonschema::validate(
+                &serde_json::to_value(schema).map_err(|error_message| {
+                    Error::new_internal(format!("Schema validation failed: {}", error_message))
+                })?,
+                &output_value,
+            )
+            .map_err(|error_message| {
                 Error::new_internal(format!("Schema validation failed: {}", error_message))
             })?;
         }

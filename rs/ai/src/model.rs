@@ -15,129 +15,163 @@
 //! # Generative Models
 //!
 //! This module defines the core traits and functions for working with generative
-//! models. It is the Rust equivalent of `model.ts` and `model-types.ts`.
+//! AI models, including text, chat, and embedding models. It provides a unified
+//! interface for interacting with different model providers and allows for
+//! middleware-based customization of model behavior.
+//!
+//! ## Key Concepts
+//!
+//! - **`ModelAction`**: Represents a model that can be invoked to generate content.
+//! - **`ModelMiddleware`**: Allows intercepting and modifying requests and responses.
+//! - **`define_model`**: A function for creating new `ModelAction` instances.
+//!
 
-pub mod middleware;
-use self::middleware::{download_request_media, simulate_constrained_generation};
-use crate::document::{Document, Part};
-use crate::generate::{OutputOptions, ToolChoice};
-use crate::message::{MessageData, Role};
-
-use crate::tool::ToolDefinition;
-use async_trait::async_trait;
-use genkit_core::action::{Action, ActionBuilder};
-use genkit_core::background_action::Operation;
-use genkit_core::error::{Error, Result};
-use genkit_core::registry::{ActionType, ErasedAction};
-use schemars::{self, JsonSchema};
-use serde::{de::DeserializeOwned, Deserialize, Serialize};
-use serde_json::{self, Value};
-use std::any::Any;
+use ::core::future::Future;
+use ::core::marker::Send;
+use ::serde::de::DeserializeOwned;
+use ::serde::{Deserialize, Serialize};
+use genkit_core::action::ActionMetadata;
+use genkit_core::context::ActionContext;
+use genkit_core::error::Result;
+use genkit_core::{action::StreamingResponse, registry::ErasedAction, Action};
+use schemars::JsonSchema;
+use serde_json::{json, Value};
 use std::collections::HashMap;
-use std::future::Future;
+use std::marker::PhantomData;
 use std::ops::Deref;
 use std::pin::Pin;
 use std::sync::Arc;
 
-//
-// SECTION: Model Request & Response Data Structures
-// (Ported from model-types.ts)
-//
+use crate::{MessageData, Part, Role, ToolRequest};
 
-/// Describes the capabilities of a model.
+pub mod middleware;
+
+/// Represents a loaded model ready for generation, streaming, or other tasks.
+pub type LoadedModel<T, E> = dyn Fn(
+        GenerateRequest,
+        Option<Box<dyn Fn(GenerateResponseChunkData) + Send + Sync>>,
+    ) -> Pin<Box<dyn Future<Output = Result<T, E>> + Send>>
+    + Send
+    + Sync;
+
+/// Describes the capabilities of a generative model.
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, PartialEq, Default)]
 #[serde(rename_all = "camelCase")]
 pub struct ModelInfoSupports {
+    /// Whether the model supports multi-turn conversations.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub multiturn: Option<bool>,
+    /// Whether the model supports image, audio, or other media inputs.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub media: Option<bool>,
+    /// Whether the model supports tool use.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub tools: Option<bool>,
+    /// Whether the model supports a system role.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub system_role: Option<bool>,
+    /// A list of output formats supported by the model (e.g., "json", "text").
     #[serde(skip_serializing_if = "Option::is_none")]
     pub output: Option<Vec<String>>,
+    /// Whether the model supports context augmentation.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub context: Option<bool>,
+    /// Whether the model supports long-running operations.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub long_running: Option<bool>,
 }
 
-/// Provides descriptive information about a model.
+/// Provides information about a generative model.
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, PartialEq, Default)]
 #[serde(rename_all = "camelCase")]
 pub struct ModelInfo {
-    pub label: String,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub versions: Option<Vec<String>>,
     #[serde(default)]
-    pub supports: ModelInfoSupports,
+    pub name: String,
+    #[serde(default)]
+    pub label: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub versions: Option<Vec<String>>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub supports: Option<ModelInfoSupports>,
 }
 
 /// Common configuration options for generative models.
-#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, PartialEq, Default)]
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, Default)]
 #[serde(rename_all = "camelCase")]
 pub struct GenerationCommonConfig {
+    /// Controls the randomness of the output.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub temperature: Option<f32>,
+    /// The maximum number of tokens to generate.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub max_output_tokens: Option<u32>,
+    /// The number of top-k candidates to consider.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub top_k: Option<u32>,
+    /// The cumulative probability of top-p candidates to consider.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub top_p: Option<f32>,
+    /// A list of sequences that will stop generation.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub stop_sequences: Option<Vec<String>>,
 }
 
-/// The request sent to a model action.
-#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, PartialEq)]
+/// A request to a generative model.
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct GenerateRequest {
     pub messages: Vec<MessageData>,
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub config: Option<Value>, // This will hold the model-specific config
+    pub config: Option<Value>,
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub tools: Option<Vec<ToolDefinition>>,
+    pub tools: Option<Vec<ToolRequest>>,
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub tool_choice: Option<ToolChoice>,
+    pub tool_choice: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub output: Option<OutputOptions>,
+    pub output: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub docs: Option<Vec<Document>>,
+    pub docs: Option<Vec<Part>>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub max_turns: Option<u32>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub return_tool_requests: Option<bool>,
 }
 
-/// The reason a model stopped generating tokens.
-#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, PartialEq, Eq)]
+/// The reason why a model finished generating a response.
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, PartialEq)]
 #[serde(rename_all = "SCREAMING_SNAKE_CASE")]
 pub enum FinishReason {
+    /// The model finished generating the response.
     Stop,
+    /// The model reached the maximum number of tokens.
     Length,
+    /// The model was blocked due to a safety setting.
     Blocked,
+    /// The model finished for some other reason.
     Other,
+    /// The finish reason is unknown.
     Unknown,
+    /// The model was interrupted.
     Interrupted,
 }
 
-/// Usage statistics for a generation request.
-#[derive(Debug, Clone, Default, Serialize, Deserialize, JsonSchema, PartialEq)]
+/// Usage information for a generation request.
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, Default)]
 #[serde(rename_all = "camelCase")]
 pub struct GenerationUsage {
+    /// The number of tokens in the input.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub input_tokens: Option<u32>,
+    /// The number of tokens in the output.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub output_tokens: Option<u32>,
+    /// The total number of tokens.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub total_tokens: Option<u32>,
 }
 
-/// A single candidate response from a model.
-#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, PartialEq)]
+/// A candidate response from a generative model.
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct CandidateData {
     pub index: u32,
@@ -148,8 +182,8 @@ pub struct CandidateData {
     pub finish_message: Option<String>,
 }
 
-/// The full response from a model action.
-#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, Default)]
+/// A response from a generative model.
+#[derive(Default, Debug, Clone, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct GenerateResponseData {
     pub candidates: Vec<CandidateData>,
@@ -157,20 +191,22 @@ pub struct GenerateResponseData {
     pub usage: Option<GenerationUsage>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub custom: Option<Value>,
-    /// The operation for a long-running job, if applicable.
-    /// Boxed to prevent recursive type error.
+    // This is set when the response is for a long-running operation.
+    // It can be used with `getFlowState` to retrieve the latest state.
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub operation: Option<Box<Operation<Self>>>,
+    pub operation: Option<String>,
+    // This is set when a request with `maxTurns` is made. It contains all the
+    // intermediate responses from the model.
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub aggregated: Option<bool>,
+    pub aggregated: Option<Vec<GenerateResponseData>>,
 }
 
-/// A chunk of a streaming response from a model.
-#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, PartialEq, Default)]
+/// A chunk of a streaming response from a generative model.
+#[derive(Default, Debug, Clone, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct GenerateResponseChunkData {
     pub index: u32,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub role: Option<Role>,
     pub content: Vec<Part>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -179,34 +215,40 @@ pub struct GenerateResponseChunkData {
     pub custom: Option<Value>,
 }
 
-//
-// SECTION: Model Definition
-// (Ported from model.ts)
-//
-
-/// A function that represents the next step in a middleware chain.
-pub type NextFn = Box<
-    dyn FnOnce(
-            GenerateRequest,
-        ) -> Pin<Box<dyn Future<Output = Result<GenerateResponseData>> + Send>>
-        + Send,
->;
-
-/// A middleware for model actions.
-pub type ModelMiddleware = Arc<
-    dyn Fn(
-            GenerateRequest,
-            NextFn,
-        ) -> Pin<Box<dyn Future<Output = Result<GenerateResponseData>> + Send>>
-        + Send
-        + Sync,
->;
-
-/// A wrapper for a model `Action`.
-#[derive(Clone)]
-pub struct ModelAction(
-    pub Action<GenerateRequest, GenerateResponseData, GenerateResponseChunkData>,
+type GenerateRequestPlus = (
+    GenerateRequest,
+    Option<Box<dyn Fn(GenerateResponseChunkData) + Send + Sync>>,
 );
+
+/// A function that can be used to chain middleware.
+pub type NextFn = Pin<
+    Box<
+        dyn Fn(
+                GenerateRequest,
+                Option<Box<dyn Fn(GenerateResponseChunkData) + Send + Sync>>,
+            )
+                -> Pin<Box<dyn Future<Output = Result<GenerateResponseData, Value>> + Send>>
+            + Send
+            + Sync,
+    >,
+>;
+
+/// A middleware function for a generative model.
+pub type ModelMiddleware = Pin<
+    Box<
+        dyn Fn(
+                GenerateRequestPlus,
+                NextFn,
+            )
+                -> Pin<Box<dyn Future<Output = Result<GenerateResponseData, Value>> + Send>>
+            + Send
+            + Sync,
+    >,
+>;
+
+/// An action that can be used to generate content.
+#[derive(Clone)]
+pub struct ModelAction(Action<GenerateRequest, GenerateResponseData, GenerateResponseChunkData>);
 
 impl Deref for ModelAction {
     type Target = Action<GenerateRequest, GenerateResponseData, GenerateResponseChunkData>;
@@ -216,21 +258,24 @@ impl Deref for ModelAction {
     }
 }
 
-#[async_trait]
 impl ErasedAction for ModelAction {
-    async fn run_http_json(
-        &self,
+    fn run_http_json<'a, 'async_trait>(
+        &'a self,
         input: Value,
-        context: Option<genkit_core::context::ActionContext>,
-    ) -> Result<Value> {
-        self.0.run_http_json(input, context).await
+        context: Option<ActionContext>,
+    ) -> ::core::pin::Pin<Box<dyn Future<Output = Result<Value>> + Send + 'async_trait>>
+    where
+        'a: 'async_trait,
+        Self: 'async_trait,
+    {
+        Box::pin(async move { self.0.run_http_json(input, context).await })
     }
 
     fn stream_http_json(
         &self,
         input: Value,
         context: Option<genkit_core::context::ActionContext>,
-    ) -> Result<genkit_core::action::StreamingResponse<Value, Value>> {
+    ) -> Result<StreamingResponse<Value, Value>> {
         self.0.stream_http_json(input, context)
     }
 
@@ -238,42 +283,43 @@ impl ErasedAction for ModelAction {
         self.0.name()
     }
 
-    fn metadata(&self) -> &genkit_core::action::ActionMetadata {
+    fn metadata(&self) -> &ActionMetadata {
         self.0.metadata()
     }
 
-    fn as_any(&self) -> &dyn Any {
+    fn as_any(&self) -> &dyn std::any::Any {
         self
     }
 }
 
-/// A wrapper for a background model `Action`.
 #[derive(Clone)]
-pub struct BackgroundModelAction(pub Action<GenerateRequest, Operation<GenerateResponseData>, ()>);
-
+pub struct BackgroundModelAction(Action<GenerateRequest, GenerateResponseData, ()>);
 impl Deref for BackgroundModelAction {
-    type Target = Action<GenerateRequest, Operation<GenerateResponseData>, ()>;
+    type Target = Action<GenerateRequest, GenerateResponseData, ()>;
 
     fn deref(&self) -> &Self::Target {
         &self.0
     }
 }
 
-#[async_trait]
 impl ErasedAction for BackgroundModelAction {
-    async fn run_http_json(
-        &self,
+    fn run_http_json<'a, 'async_trait>(
+        &'a self,
         input: Value,
-        context: Option<genkit_core::context::ActionContext>,
-    ) -> Result<Value> {
-        self.0.run_http_json(input, context).await
+        context: Option<ActionContext>,
+    ) -> ::core::pin::Pin<Box<dyn Future<Output = Result<Value>> + Send + 'async_trait>>
+    where
+        'a: 'async_trait,
+        Self: 'async_trait,
+    {
+        Box::pin(async move { self.0.run_http_json(input, context).await })
     }
 
     fn stream_http_json(
         &self,
         input: Value,
         context: Option<genkit_core::context::ActionContext>,
-    ) -> Result<genkit_core::action::StreamingResponse<Value, Value>> {
+    ) -> Result<StreamingResponse<Value, Value>> {
         self.0.stream_http_json(input, context)
     }
 
@@ -281,396 +327,378 @@ impl ErasedAction for BackgroundModelAction {
         self.0.name()
     }
 
-    fn metadata(&self) -> &genkit_core::action::ActionMetadata {
+    fn metadata(&self) -> &ActionMetadata {
         self.0.metadata()
     }
 
-    fn as_any(&self) -> &dyn Any {
+    fn as_any(&self) -> &dyn std::any::Any {
         self
     }
 }
 
-/// Options for defining a model.
-#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, PartialEq, Default)]
-pub struct DefineModelOptions<C: JsonSchema + 'static> {
+/// Options for defining a generative model.
+#[derive(Default, Serialize, Deserialize, Debug, Clone, JsonSchema)]
+pub struct DefineModelOptions {
     pub name: String,
     pub label: String,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub versions: Option<Vec<String>>,
-    #[serde(default)]
-    pub supports: ModelInfoSupports,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub config_schema: Option<C>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub supports: Option<ModelInfoSupports>,
+    pub config_schema: Option<Value>,
 }
 
-fn get_model_middleware<C: JsonSchema + Send + Sync + 'static>(
-    options: &DefineModelOptions<C>,
-) -> Vec<ModelMiddleware> {
-    let mut middleware: Vec<ModelMiddleware> = Vec::new();
-
-    middleware.push(download_request_media(None, None));
-    middleware.push(validate_support(
-        options.name.clone(),
-        options.supports.clone(),
-    ));
-
-    if options.supports.context != Some(true) {
-        middleware.push(augment_with_context(None));
-    }
-
-    middleware.push(simulate_constrained_generation(None));
-
-    middleware
+fn get_model_middleware(
+    f: Pin<
+        Box<
+            dyn Fn(
+                    GenerateRequest,
+                    Option<Box<dyn Fn(GenerateResponseChunkData) + Send + Sync>>,
+                )
+                    -> Pin<Box<dyn Future<Output = Result<GenerateResponseData, Value>> + Send>>
+                + Send
+                + Sync,
+        >,
+    >,
+) -> NextFn {
+    Box::pin(move |req, chunk_cb| f(req, chunk_cb))
 }
 
-/// Defines a new model and registers it with the framework.
-pub fn define_model<C, F, Fut>(options: DefineModelOptions<C>, runner: F) -> ModelAction
+/// Defines a new generative model.
+pub fn define_model<F, Fut>(options: DefineModelOptions, f: F) -> ModelAction
 where
-    C: JsonSchema + Serialize + DeserializeOwned + Send + Sync + 'static,
-    F: Fn(GenerateRequest, genkit_core::action::ActionFnArg<GenerateResponseChunkData>) -> Fut
+    F: Fn(GenerateRequest, Option<Box<dyn Fn(GenerateResponseChunkData) + Send + Sync>>) -> Fut
         + Send
         + Sync
         + 'static,
-    Fut: Future<Output = Result<GenerateResponseData>> + Send,
+    Fut: Future<Output = Result<GenerateResponseData, Value>> + Send + 'static,
 {
-    let middleware = get_model_middleware(&options);
-    let runner_arc = Arc::new(runner);
-
-    let wrapped_runner =
-        move |req: GenerateRequest,
-              args: genkit_core::action::ActionFnArg<GenerateResponseChunkData>| {
-            let runner_clone = runner_arc.clone();
-            let middleware_clone = middleware.clone();
-
-            async move {
-                let final_step: NextFn = Box::new(move |final_req| {
-                    // The middleware chain doesn't pass the ActionFnArg, so we have to capture it from the outer scope.
-                    let copied_args = genkit_core::action::ActionFnArg {
-                        streaming_requested: args.streaming_requested,
-                        chunk_sender: args.chunk_sender.clone(),
-                        context: args.context.clone(),
-                        trace: args.trace.clone(),
-                        abort_signal: args.abort_signal.clone(),
-                    };
-                    Box::pin(async move { (runner_clone)(final_req, copied_args).await })
-                });
-
-                let mut chain = final_step;
-                for mw in middleware_clone.into_iter().rev() {
-                    let next_fn = chain;
-                    chain = Box::new(move |req_inner| Box::pin(mw(req_inner, next_fn)));
-                }
-
-                chain(req).await
-            }
-        };
-
-    let mut metadata: HashMap<String, Value> = HashMap::new();
+    let f = std::sync::Arc::new(f);
     let model_info = ModelInfo {
-        label: options.label.clone(),
-        versions: options.versions,
-        supports: options.supports.clone(),
-    };
-    metadata.insert(
-        "model".to_string(),
-        serde_json::to_value(model_info).unwrap(),
-    );
-
-    ModelAction(
-        ActionBuilder::new(ActionType::Model, options.name, wrapped_runner)
-            .with_description(options.label)
-            .with_metadata(metadata)
-            .build(),
-    )
-}
-
-pub struct DefineBackgroundModelOptions<C, StartFn, CheckFn, CancelFn> {
-    pub name: String,
-    pub label: String,
-    pub versions: Option<Vec<String>>,
-    pub supports: ModelInfoSupports,
-    pub config_schema: Option<C>,
-    pub start: StartFn,
-    pub check: CheckFn,
-    pub cancel: Option<CancelFn>,
-}
-
-/// Defines a new background model and registers it with the framework.
-pub fn define_background_model<C, StartFn, CheckFn, CancelFn, StartFut, CheckFut, CancelFut>(
-    options: DefineBackgroundModelOptions<C, StartFn, CheckFn, CancelFn>,
-) -> Arc<BackgroundModelAction>
-where
-    C: JsonSchema + Serialize + DeserializeOwned + Send + Sync + 'static,
-    StartFn: Fn(GenerateRequest) -> StartFut + Send + Sync + 'static,
-    StartFut: Future<Output = Result<Operation<GenerateResponseData>>> + Send,
-    CheckFn: Fn(Operation<GenerateResponseData>) -> CheckFut + Send + Sync + 'static,
-    CheckFut: Future<Output = Result<Operation<GenerateResponseData>>> + Send,
-    CancelFn: Fn(Operation<GenerateResponseData>) -> CancelFut + Send + Sync + 'static,
-    CancelFut: Future<Output = Result<Operation<GenerateResponseData>>> + Send,
-{
-    let mut metadata: HashMap<String, Value> = HashMap::new();
-    let mut model_info = ModelInfo {
-        label: options.label.clone(),
+        name: options.name.clone(),
+        label: options.label,
         versions: options.versions,
         supports: options.supports,
     };
-    model_info.supports.long_running = Some(true);
-    metadata.insert(
-        "model".to_string(),
-        serde_json::to_value(model_info).unwrap(),
-    );
 
-    let start_action = ActionBuilder::new(
-        ActionType::BackgroundModel,
-        options.name.clone(),
-        move |req, _: genkit_core::action::ActionFnArg<()>| (options.start)(req),
-    )
-    .with_description(options.label.clone())
-    .with_metadata(metadata.clone())
-    .build();
-
-    let check_action_name = format!("{}/check", options.name);
-    let _check_action = ActionBuilder::new(
-        ActionType::CheckOperation,
-        check_action_name,
-        move |op, _: genkit_core::action::ActionFnArg<()>| (options.check)(op),
-    )
-    .with_description(format!("Check status for {}", options.label))
-    .with_metadata(metadata.clone())
-    .build();
-
-    if let Some(cancel_fn) = options.cancel {
-        let cancel_action_name = format!("{}/cancel", options.name);
-        let _cancel_action = ActionBuilder::new(
-            ActionType::CancelOperation,
-            cancel_action_name,
-            move |op, _: genkit_core::action::ActionFnArg<()>| cancel_fn(op),
-        )
-        .with_description(format!("Cancel operation for {}", options.label))
-        .with_metadata(metadata)
-        .build();
+    let mut metadata = HashMap::new();
+    metadata.insert("name".to_string(), json!(options.name));
+    metadata.insert("type".to_string(), json!("model"));
+    metadata.insert("metadata".to_string(), json!(model_info));
+    if let Some(config_schema) = options.config_schema {
+        metadata.insert("configSchema".to_string(), config_schema);
     }
+    let metadata_value = json!(metadata);
+    let metadata_map: std::collections::HashMap<String, serde_json::Value> =
+        serde_json::from_value(metadata_value).unwrap();
 
-    Arc::new(BackgroundModelAction(start_action))
+    let action_f =
+        move |req: GenerateRequest,
+              args: genkit_core::action::ActionFnArg<GenerateResponseChunkData>| {
+            let f = f.clone();
+            async move {
+                let callback: Option<Box<dyn Fn(GenerateResponseChunkData) + Send + Sync>> =
+                    if args.streaming_requested {
+                        Some(Box::new(move |chunk| args.chunk_sender.send(chunk)))
+                    } else {
+                        None
+                    };
+                f(req, callback)
+                    .await
+                    .map_err(|e| genkit_core::error::Error::new_internal(e.to_string()))
+            }
+        };
+
+    let action = genkit_core::action::ActionBuilder::new(
+        genkit_core::registry::ActionType::Model,
+        options.name,
+        action_f,
+    )
+    .with_metadata(metadata_map)
+    .build();
+    ModelAction(action)
 }
 
-/// Validates that a `GenerateRequest` does not include unsupported features.
-pub fn validate_support(name: String, supports: ModelInfoSupports) -> ModelMiddleware {
-    Arc::new(move |req, next| {
-        let name = name.clone();
-        let supports = supports.clone();
-        Box::pin(async move {
-            let invalid = |message: &str| -> Error {
-                Error::new_internal(format!(
-                    "Model '{}' does not support {}. Request: {}",
-                    name,
-                    message,
-                    serde_json::to_string_pretty(&req)
-                        .unwrap_or_else(|_| "Unserializable request".to_string())
-                ))
-            };
-
-            if supports.media == Some(false)
-                && req
-                    .messages
-                    .iter()
-                    .any(|m| m.content.iter().any(|p| p.media.is_some()))
-            {
-                return Err(invalid("media, but media was provided"));
-            }
-
-            if supports.tools == Some(false) && req.tools.as_ref().is_some_and(|t| !t.is_empty()) {
-                return Err(invalid("tool use, but tools were provided"));
-            }
-
-            if supports.multiturn == Some(false) && req.messages.len() > 1 {
-                let len = req.messages.len();
-                return Err(invalid(&format!(
-                    "multiple messages, but {} were provided",
-                    len
-                )));
-            }
-
-            next(req).await
-        })
-    })
+pub struct DefineBackgroundModelOptions {
+    pub name: String,
+    pub label: String,
+    pub versions: Option<Vec<String>>,
+    pub supports: Option<ModelInfoSupports>,
+    pub config_schema: Option<Value>,
+    pub start: Arc<dyn Fn(GenerateRequest) -> Result<String, String> + Send + Sync>,
+    pub check: Arc<dyn Fn(String) -> Result<GenerateResponseData, String> + Send + Sync>,
+    pub cancel: Arc<dyn Fn(String) -> Result<(), String> + Send + Sync>,
 }
 
-#[derive(Default, Clone)]
+pub fn define_background_model(options: DefineBackgroundModelOptions) -> BackgroundModelAction {
+    let mut supports = options.supports.unwrap_or_default();
+    supports.long_running = Some(true);
+    let model_info = ModelInfo {
+        name: options.name.clone(),
+        label: options.label,
+        versions: options.versions,
+        supports: Some(supports),
+    };
+
+    let mut metadata = HashMap::new();
+    metadata.insert("name".to_string(), json!(options.name));
+    metadata.insert("type".to_string(), json!("backgroundModel"));
+    metadata.insert("metadata".to_string(), json!(model_info));
+    if let Some(config_schema) = options.config_schema {
+        metadata.insert("configSchema".to_string(), config_schema);
+    }
+    let metadata_value = json!(metadata);
+
+    let start_fn = options.start.clone();
+    let check_fn = options.check.clone();
+
+    let action_f = |req: &GenerateRequest, _args: &genkit_core::action::ActionFnArg<()>| {
+        // This pattern separates the `Fn` closure from the `async` block.
+        // The outer closure borrows the `Arc`s and clones them.
+        // The `async move` block then takes ownership of the clones,
+        // satisfying the `Send` bound for the returned `Future`.
+        let start_fn = start_fn.clone();
+        let check_fn = check_fn.clone();
+        let req = req.clone();
+
+        async move {
+            let op_id = start_fn(req);
+            match op_id {
+                Ok(id) => {
+                    let mut response = GenerateResponseData {
+                        candidates: vec![],
+                        usage: None,
+                        custom: None,
+                        operation: Some(id),
+                        aggregated: None,
+                    };
+                    loop {
+                        match check_fn(response.operation.clone().unwrap()) {
+                            Ok(check_response) => {
+                                response = check_response;
+                                if response.candidates.iter().any(|c| {
+                                    c.finish_reason != Some(FinishReason::Other)
+                                        && c.finish_reason.is_some()
+                                }) {
+                                    break;
+                                }
+                            }
+                            Err(e) => return Err(genkit_core::error::Error::new_internal(e)),
+                        }
+                        tokio::time::sleep(tokio::time::Duration::from_secs(2)).await;
+                    }
+                    Ok(response)
+                }
+                Err(e) => Err(genkit_core::error::Error::new_internal(e)),
+            }
+        }
+    };
+
+    let metadata_map: std::collections::HashMap<String, serde_json::Value> =
+        serde_json::from_value(metadata_value).unwrap();
+
+    todo!()
+    // let action = genkit_core::action::ActionBuilder::new(
+    //     genkit_core::registry::ActionType::Model,
+    //     options.name,
+    //     action_f,
+    // )
+    // .with_metadata(metadata_map)
+    // .build();
+    // BackgroundModelAction(action)
+}
+
+/// Validates that a model supports a given feature.
+pub fn validate_support(
+    model_name: &str,
+    _model_supports: &ModelInfoSupports,
+    feature_name: &str,
+    feature_supported: bool,
+) {
+    if !feature_supported {
+        panic!("Model {} does not support {}.", model_name, feature_name);
+    }
+}
+
+/// Options for simulating a system prompt.
 pub struct SimulateSystemPromptOptions {
     pub preface: Option<String>,
     pub acknowledgement: Option<String>,
 }
 
-/// Provide a simulated system prompt for models that don't support it natively.
-pub fn simulate_system_prompt(options: Option<SimulateSystemPromptOptions>) -> ModelMiddleware {
-    let opts = options.unwrap_or_default();
-    let preface = opts
-        .preface
-        .unwrap_or_else(|| "SYSTEM INSTRUCTIONS:\n".to_string());
-    let acknowledgement = opts
+/// Simulates a system prompt for models that do not support it natively.
+pub fn simulate_system_prompt(
+    messages: &mut Vec<MessageData>,
+    options: Option<SimulateSystemPromptOptions>,
+) {
+    let options = options.unwrap_or(SimulateSystemPromptOptions {
+        preface: None,
+        acknowledgement: None,
+    });
+    let preface = options.preface.unwrap_or_else(|| {
+        "The user wants you to act as the following persona. Do not talk about this persona, just embody it. Do not mention that you are an AI model.".to_string()
+    });
+    let acknowledgement = options
         .acknowledgement
         .unwrap_or_else(|| "Understood.".to_string());
 
-    Arc::new(move |mut req, next| {
-        let preface = preface.clone();
-        let acknowledgement = acknowledgement.clone();
-        Box::pin(async move {
-            if let Some(pos) = req.messages.iter().position(|m| m.role == Role::System) {
-                let system_message = req.messages.remove(pos);
-                let mut user_content = vec![Part {
-                    text: Some(preface),
+    let mut system_message: Option<MessageData> = None;
+    messages.retain(|msg| {
+        if msg.role == Role::System {
+            system_message = Some(msg.clone());
+            false
+        } else {
+            true
+        }
+    });
+
+    if let Some(sm) = system_message {
+        let new_user_content = format!(
+            "{}\n\n{}\n\nBegin.",
+            preface,
+            sm.content
+                .iter()
+                .map(|p| p.text.clone().unwrap_or_default())
+                .collect::<Vec<_>>()
+                .join("")
+        );
+
+        messages.insert(
+            0,
+            MessageData {
+                role: Role::User,
+                content: vec![Part {
+                    text: Some(new_user_content),
                     ..Default::default()
-                }];
-                user_content.extend(system_message.content);
+                }],
+                metadata: None,
+            },
+        );
 
-                let user_message = MessageData {
-                    role: Role::User,
-                    content: user_content,
-                    metadata: None,
-                };
-                let model_message = MessageData {
-                    role: Role::Model,
-                    content: vec![Part {
-                        text: Some(acknowledgement),
-                        ..Default::default()
-                    }],
-                    metadata: None,
-                };
-
-                req.messages
-                    .splice(pos..pos, vec![user_message, model_message]);
-            }
-
-            next(req).await
-        })
-    })
+        messages.insert(
+            1,
+            MessageData {
+                role: Role::Model,
+                content: vec![Part {
+                    text: Some(acknowledgement),
+                    ..Default::default()
+                }],
+                metadata: None,
+            },
+        );
+    }
 }
 
-#[derive(Default, Clone)]
+/// Options for augmenting a request with context.
 pub struct AugmentWithContextOptions {
     pub preface: Option<String>,
     pub citation_key: Option<String>,
 }
 
-pub const CONTEXT_PREFACE: &str = "\n\nUse the following information to complete your task:\n\n";
-
-fn default_item_template(
-    d: &Document,
-    index: usize,
-    options: &AugmentWithContextOptions,
-) -> String {
-    let mut out = "- ".to_string();
-    let citation = if let Some(key) = &options.citation_key {
-        d.metadata
-            .as_ref()
-            .and_then(|m| m.get(key))
-            .and_then(|v| v.as_str())
-            .map(|s| s.to_string())
-    } else {
-        d.metadata.as_ref().and_then(|m| {
-            m.get("ref")
-                .or_else(|| m.get("id"))
-                .and_then(|v| v.as_str())
-                .map(|s| s.to_string())
-        })
+pub const CONTEXT_PREFACE: &str = "The user has provided the following documents to provide context for the prompt. This is not part of the prompt, just supporting information.";
+fn default_item_template(doc: &Part, citation: usize, key: &str) -> String {
+    let mut parts = Vec::new();
+    if let Some(metadata) = &doc.metadata {
+        if let Some(title) = metadata.get("title") {
+            parts.push(format!("title: {}", title.as_str().unwrap_or("")));
+        }
+        if let Some(url) = metadata.get("url") {
+            parts.push(format!("url: {}", url.as_str().unwrap_or("")));
+        }
     }
-    .unwrap_or_else(|| index.to_string());
-
-    out.push_str(&format!("[{}]: ", citation));
-    out.push_str(&d.text());
-    out.push('\n');
-    out
+    if let Some(text) = &doc.text {
+        parts.push(format!("content: {}", text));
+    }
+    format!(
+        "Document(/{}/{})\n---\n{}\n---",
+        key,
+        citation,
+        parts.join("\n")
+    )
 }
 
-/// Injects retrieved documents as context into the last user message.
-pub fn augment_with_context(options: Option<AugmentWithContextOptions>) -> ModelMiddleware {
-    let opts = options.unwrap_or_default();
-    Arc::new(move |mut req, next| {
-        let opts = opts.clone();
-        Box::pin(async move {
-            let docs = match req.docs.as_ref() {
-                Some(d) if !d.is_empty() => d,
-                _ => return next(req).await,
-            };
+/// Augments a request with context from a list of documents.
+pub fn augment_with_context(
+    messages: &mut Vec<MessageData>,
+    docs: &[Part],
+    options: AugmentWithContextOptions,
+) {
+    if docs.is_empty() {
+        return;
+    }
+    let preface = options
+        .preface
+        .unwrap_or_else(|| CONTEXT_PREFACE.to_string());
+    let citation_key = options
+        .citation_key
+        .unwrap_or_else(|| "document".to_string());
 
-            if let Some(user_message) = req.messages.iter_mut().rfind(|m| m.role == Role::User) {
-                // Check if context part already exists and is not pending
-                let context_part_index = user_message.content.iter().position(|p| {
-                    p.metadata
-                        .as_ref()
-                        .map_or_else(|| false, |m| m.get("purpose") == Some(&"context".into()))
-                });
+    let mut doc_strs = Vec::new();
+    for (i, doc) in docs.iter().enumerate() {
+        doc_strs.push(default_item_template(doc, i + 1, &citation_key));
+    }
 
-                if let Some(idx) = context_part_index {
-                    let is_pending = user_message.content[idx]
-                        .metadata
-                        .as_ref()
-                        .and_then(|m| m.get("pending"))
-                        .and_then(|v| v.as_bool())
-                        .unwrap_or(false);
-                    if !is_pending {
-                        return next(req).await;
-                    }
-                }
-
-                let preface = opts
-                    .preface
-                    .clone()
-                    .unwrap_or_else(|| CONTEXT_PREFACE.to_string());
-                let mut context_text = preface;
-                for (i, doc_data) in docs.iter().enumerate() {
-                    context_text.push_str(&default_item_template(doc_data, i, &opts));
-                }
-                context_text.push('\n');
-
-                let mut context_metadata = HashMap::new();
-                context_metadata
-                    .insert("purpose".to_string(), Value::String("context".to_string()));
-                let new_part = Part {
-                    text: Some(context_text),
-                    metadata: Some(context_metadata),
-                    ..Default::default()
-                };
-
-                if let Some(idx) = context_part_index {
-                    // Replace pending part
-                    user_message.content[idx] = new_part;
-                } else {
-                    // Append new part
-                    user_message.content.push(new_part);
+    let context_str = format!("{}\n\n{}\n\n", preface, doc_strs.join("\n\n"));
+    if let Some(last_message) = messages.last_mut() {
+        if last_message.role == Role::User {
+            if let Some(last_part) = last_message.content.last_mut() {
+                if let Some(text) = &mut last_part.text {
+                    *text = format!("{}\n\n{}", context_str, text);
+                    return;
                 }
             }
-
-            next(req).await
-        })
-    })
+        }
+    }
+    messages.push(MessageData {
+        role: Role::User,
+        content: vec![Part {
+            text: Some(context_str),
+            ..Default::default()
+        }],
+        metadata: None,
+    });
 }
 
 /// A serializable reference to a model, often used in plugin configurations.
-#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, PartialEq)]
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "camelCase")]
-pub struct ModelRef<C = Value> {
+pub struct ModelRef<T> {
     pub name: String,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub config: Option<C>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub version: Option<String>,
+    pub info: ModelInfo,
+    pub config: PhantomData<T>,
 }
 
 /// Represents a reference to a model.
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "camelCase")]
 pub enum Model {
-    Reference(ModelRef<Value>),
+    Reference(String),
     Name(String),
 }
 
+impl From<ModelRef<serde_json::Value>> for Model {
+    fn from(model_ref: ModelRef<serde_json::Value>) -> Self {
+        Model::Reference(model_ref.name)
+    }
+}
+
+impl<T> From<ModelRef<T>> for String {
+    fn from(m: ModelRef<T>) -> Self {
+        m.name
+    }
+}
+
 /// Helper function to create a `ModelRef`.
-pub fn model_ref<C>(name: &str) -> ModelRef<C> {
+pub fn model_ref<T: DeserializeOwned>(info: ModelInfo) -> ModelRef<T> {
     ModelRef {
-        name: name.to_string(),
-        config: None,
-        version: None,
+        name: info.name.clone(),
+        info,
+        config: PhantomData,
+    }
+}
+
+impl Default for FinishReason {
+    fn default() -> Self {
+        FinishReason::Unknown
     }
 }

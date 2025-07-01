@@ -47,6 +47,16 @@ pub struct ActionContext {
     pub additional_context: HashMap<String, Value>,
 }
 
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq)]
+pub struct FlowContext {
+    pub flow_id: String,
+}
+
+tokio::task_local! {
+    /// Task-local storage for the current `FlowContext`.
+    pub static FLOW_CONTEXT: FlowContext;
+}
+
 /// Context type for API key-based authentication.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(rename_all = "camelCase")]
@@ -95,6 +105,24 @@ where
 /// Returns `None` if called outside the scope of `run_with_context`.
 pub fn get_context() -> Option<ActionContext> {
     CONTEXT.try_with(|context| context.clone()).ok()
+}
+
+/// Executes a future within the scope of a given `FlowContext`.
+///
+/// Any code inside the future (and any functions it calls) can access the
+/// context using `get_flow_context()`.
+pub async fn run_with_flow_context<F, R>(context: FlowContext, future: F) -> R
+where
+    F: std::future::Future<Output = R>,
+{
+    FLOW_CONTEXT.scope(context, future).await
+}
+
+/// Gets a clone of the `FlowContext` for the current task.
+///
+/// Returns `None` if called outside the scope of `run_with_flow_context`.
+pub fn get_flow_context() -> Option<FlowContext> {
+    FLOW_CONTEXT.try_with(|context| context.clone()).ok()
 }
 
 /// Defines the validation policy for the `ApiKeyProvider`.
@@ -257,5 +285,36 @@ mod tests {
         .await;
 
         assert!(get_context().is_none());
+    }
+
+    #[tokio::test]
+    async fn test_run_and_get_flow_context() {
+        assert!(get_flow_context().is_none());
+
+        let my_context = FlowContext {
+            flow_id: "test".into(),
+        };
+
+        run_with_flow_context(my_context.clone(), async {
+            let retrieved_context = get_flow_context().unwrap();
+            assert_eq!(retrieved_context, my_context);
+
+            // Nested context
+            let nested_context = FlowContext {
+                flow_id: "nested".into(),
+            };
+            run_with_flow_context(nested_context.clone(), async {
+                let retrieved_nested = get_flow_context().unwrap();
+                assert_eq!(retrieved_nested, nested_context);
+            })
+            .await;
+
+            // Context is restored after nested scope
+            let retrieved_context_after = get_flow_context().unwrap();
+            assert_eq!(retrieved_context_after, my_context);
+        })
+        .await;
+
+        assert!(get_flow_context().is_none());
     }
 }

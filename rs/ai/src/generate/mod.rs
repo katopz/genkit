@@ -27,7 +27,7 @@ pub mod response;
 pub use self::chunk::GenerateResponseChunk;
 pub use self::response::GenerateResponse;
 
-use crate::document::{Document, Part, ToolRequestPart, ToolResponsePart};
+use crate::document::{Document, Part, ToolRequest, ToolRequestPart, ToolResponsePart};
 use crate::generate::action::ModelMiddleware;
 use crate::message::{MessageData, Role};
 use crate::model::GenerateRequest;
@@ -45,11 +45,12 @@ use std::fmt;
 use std::marker::PhantomData;
 use std::pin::Pin;
 use std::sync::Arc;
+use strum_macros::EnumString;
 use tokio::sync::mpsc;
 use tokio_stream::wrappers::ReceiverStream;
 
 /// Specifies how tools should be called by the model.
-#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, PartialEq, Eq)]
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, PartialEq, Eq, EnumString)]
 #[serde(rename_all = "camelCase")]
 pub enum ToolChoice {
     Auto,
@@ -310,7 +311,7 @@ where
         .ok_or_else(|| Error::new_internal("Model not specified".to_string()))?;
 
     let model_name = match model_ref {
-        crate::model::Model::Reference(r) => r.name.clone(),
+        crate::model::Model::Reference(r) => r.clone(),
         crate::model::Model::Name(n) => n.clone(),
     };
     let action_key = format!("/background-model/{}", model_name);
@@ -360,12 +361,15 @@ pub async fn to_generate_request<O>(
     }
 
     let resolved_tools = tool::resolve_tools(registry, options.tools.as_deref()).await?;
-    let tool_definitions = if !resolved_tools.is_empty() {
+    let tools = if !resolved_tools.is_empty() {
         Some(
             resolved_tools
                 .iter()
                 .map(|t| tool::to_tool_definition(t.as_ref()))
-                .collect::<Result<Vec<_>>>()?,
+                .collect::<Result<Vec<_>>>()?
+                .into_iter()
+                .map(ToolRequest::from)
+                .collect(),
         )
     } else {
         None
@@ -374,10 +378,16 @@ pub async fn to_generate_request<O>(
     Ok(GenerateRequest {
         messages,
         config: options.config.clone(),
-        tools: tool_definitions,
-        output: options.output.clone(),
-        docs: options.docs.clone(),
-        tool_choice: options.tool_choice.clone(),
+        tools,
+        output: options
+            .output
+            .as_ref()
+            .map(|o| o.format.as_deref().unwrap_or_default().to_string()),
+        docs: options
+            .docs
+            .as_ref()
+            .map(|docs| docs.iter().flat_map(|d| d.content.clone()).collect()),
+        tool_choice: options.tool_choice.as_ref().map(|tc| format!("{:?}", *tc)),
         max_turns: options.max_turns,
         return_tool_requests: options.return_tool_requests,
         // The `resume` field is handled before this stage and is not part of the final model request.

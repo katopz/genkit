@@ -265,6 +265,40 @@ impl<S: Serialize + DeserializeOwned + Clone + Send + Sync + 'static> Chat<S> {
         generate_stream(&self.session.registry, generate_options)
     }
 
+    /// Adds a "preamble" message to the beginning of the chat history.
+    /// Preamble messages are typically system messages that set the context for the model.
+    pub async fn add_preamble(&mut self, message: &MessageData) -> Result<()> {
+        let mut state = self.state.lock().await;
+        // Mark the message as a preamble message.
+        let mut preamble_message = message.clone();
+        let mut metadata = preamble_message.metadata.unwrap_or_default();
+        metadata.insert("preamble".to_string(), Value::Bool(true));
+        preamble_message.metadata = Some(metadata);
+
+        // Insert the preamble at the beginning of the base request messages.
+        state.request_base.messages.insert(0, preamble_message);
+        // Also update the main message history.
+        state.messages.insert(0, message.clone());
+        Ok(())
+    }
+
+    /// Retrieves the preamble messages from the chat's history.
+    pub async fn preamble(&self) -> Vec<MessageData> {
+        let state = self.state.lock().await;
+        state
+            .messages
+            .iter()
+            .filter(|m| {
+                m.metadata
+                    .as_ref()
+                    .and_then(|meta| meta.get("preamble"))
+                    .and_then(|v| v.as_bool())
+                    .unwrap_or(false)
+            })
+            .cloned()
+            .collect()
+    }
+
     /// Gets the current list of messages in the chat history.
     pub async fn messages(&self) -> Vec<MessageData> {
         self.state.lock().await.messages.clone()
