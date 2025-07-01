@@ -23,6 +23,7 @@ use crate::generate::GenerateResponseChunk;
 use crate::message::Message;
 use schemars::Schema;
 use serde_json::Value;
+use std::sync::Arc;
 
 /// A struct that implements the `Format` trait for JSON array data.
 #[derive(Debug)]
@@ -69,7 +70,7 @@ pub fn array_formatter() -> Formatter {
             constrained: Some(true),
             ..Default::default()
         },
-        handler: Box::new(|schema: Option<&Schema>| {
+        handler: Arc::new(|schema: Option<&Schema>| {
             let mut instructions: Option<String> = None;
             if let Some(s) = schema {
                 let is_array = s

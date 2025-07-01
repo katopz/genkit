@@ -22,6 +22,7 @@ use crate::generate::chunk::GenerateResponseChunk;
 use crate::message::Message;
 use schemars::Schema;
 use serde_json::Value;
+use std::sync::Arc;
 
 /// A struct that implements the `Format` trait for plain text.
 #[derive(Debug)]
@@ -47,7 +48,7 @@ pub fn text_formatter() -> Formatter {
             content_type: Some("text/plain".to_string()),
             ..Default::default()
         },
-        handler: Box::new(|_schema: Option<&Schema>| Box::new(TextFormat)),
+        handler: Arc::new(|_schema: Option<&Schema>| Box::new(TextFormat)),
     }
 }
 

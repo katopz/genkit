@@ -23,6 +23,7 @@ use crate::generate::GenerateResponseChunk;
 use crate::message::Message;
 use schemars::Schema;
 use serde_json::{self, Value};
+use std::sync::Arc;
 
 /// A struct that implements the `Format` trait for JSONL data.
 #[derive(Debug)]
@@ -86,7 +87,7 @@ pub fn jsonl_formatter() -> Formatter {
             content_type: Some("application/jsonl".to_string()),
             ..Default::default()
         },
-        handler: Box::new(|schema: Option<&Schema>| {
+        handler: Arc::new(|schema: Option<&Schema>| {
             let mut instructions: Option<String> = None;
             if let Some(s) = schema {
                 if let Some(schema_obj) = s.as_object() {

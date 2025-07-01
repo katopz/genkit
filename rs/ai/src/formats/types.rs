@@ -20,6 +20,7 @@
 use schemars::{JsonSchema, Schema};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
+use std::sync::Arc;
 
 // These will be replaced with actual types from other modules once they are ported.
 use crate::generate::GenerateResponseChunk;
@@ -70,7 +71,7 @@ pub trait Format {
 
 /// A type alias for the factory function that creates a `Format` trait object.
 pub type FormatHandler =
-    Box<dyn Fn(Option<&Schema>) -> Box<dyn Format + Send + Sync> + Send + Sync>;
+    Arc<dyn Fn(Option<&Schema>) -> Box<dyn Format + Send + Sync> + Send + Sync>;
 
 /// Represents a named output format handler.
 ///
@@ -82,6 +83,16 @@ pub struct Formatter {
     /// A factory function that, given an optional JSON schema, returns a
     /// boxed trait object that can handle the parsing for this format.
     pub handler: FormatHandler,
+}
+
+impl Clone for Formatter {
+    fn clone(&self) -> Self {
+        Self {
+            name: self.name.clone(),
+            config: self.config.clone(),
+            handler: self.handler.clone(),
+        }
+    }
 }
 
 impl std::fmt::Debug for Formatter {

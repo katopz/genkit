@@ -33,10 +33,27 @@ use schemars::Schema;
 use serde_json::{json, Value};
 use std::collections::HashMap;
 use std::sync::Arc;
-use types::Formatter;
+use types::{FormatHandler, Formatter};
 
 // Re-export key public types for easier access.
 pub use self::types::{Format, FormatterConfig};
+
+/// Defines a new format and registers it with the given registry.
+pub fn define_format(
+    registry: &mut Registry,
+    name: impl Into<String>,
+    config: FormatterConfig,
+    handler: FormatHandler,
+) -> Formatter {
+    let name = name.into();
+    let formatter = Formatter {
+        name: name.clone(),
+        config,
+        handler,
+    };
+    registry.register_value("format", &name, Box::new(formatter.clone()));
+    formatter
+}
 
 /// Returns a vector containing the default formatters.
 pub fn default_formatters() -> Vec<Formatter> {

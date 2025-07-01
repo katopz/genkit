@@ -21,6 +21,7 @@ use super::types::{Format, Formatter, FormatterConfig};
 use crate::message::Message;
 use schemars::Schema;
 use serde_json::Value;
+use std::sync::Arc;
 
 /// A struct that implements the `Format` trait for enum-like strings.
 #[derive(Debug)]
@@ -51,7 +52,7 @@ pub fn enum_formatter() -> Formatter {
             constrained: Some(true),
             ..Default::default()
         },
-        handler: Box::new(|schema: Option<&Schema>| {
+        handler: Arc::new(|schema: Option<&Schema>| {
             let mut instructions: Option<String> = None;
             if let Some(s) = schema {
                 if let Some(const_value) = s.as_object().and_then(|o| o.get("const")) {
@@ -76,7 +77,7 @@ pub fn enum_formatter() -> Formatter {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::document::Part;
+    use crate::{document::Part, MessageData, Role};
     use schemars::{self, JsonSchema};
     use serde::{Deserialize, Serialize};
     use serde_json::json;
@@ -93,8 +94,8 @@ mod tests {
         let formatter = enum_formatter();
         let handler = (formatter.handler)(None);
         let message = Message::new(
-            crate::message::MessageData {
-                role: crate::message::Role::Model,
+            MessageData {
+                role: Role::Model,
                 content: vec![Part {
                     text: Some("  \"VALUE1\"  ".to_string()),
                     ..Default::default()

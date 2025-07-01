@@ -24,6 +24,7 @@ use crate::generate::GenerateResponseChunk;
 use crate::message::Message;
 use schemars::Schema;
 use serde_json::{self, Value};
+use std::sync::Arc;
 
 /// A struct that implements the `Format` trait for JSON data.
 #[derive(Debug)]
@@ -60,7 +61,7 @@ pub fn json_formatter() -> Formatter {
             constrained: Some(true),
             default_instructions: Some(false),
         },
-        handler: Box::new(|schema: Option<&Schema>| {
+        handler: Arc::new(|schema: Option<&Schema>| {
             let instructions = schema.map(|s| {
                 format!(
                     "Output should be in JSON format and conform to the following schema:\n\n```\n{}\n```\n",

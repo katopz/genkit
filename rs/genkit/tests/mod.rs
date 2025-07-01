@@ -10,8 +10,8 @@ mod evaluate_test;
 #[cfg(test)]
 mod flow_test;
 
-// #[cfg(test)]
-// mod formats_test;
+#[cfg(test)]
+mod formats_test;
 
 // #[cfg(test)]
 // mod generate_test;

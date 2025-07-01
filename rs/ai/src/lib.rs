@@ -89,3 +89,12 @@ pub use self::tool::{
     ToolConfig, ToolDefinition,
 };
 pub use self::types::{to_tool_wire_format, LlmResponse, LlmStats, Tool, ToolCall};
+use genkit_core::registry::Registry;
+
+/// Configures the AI-related components on the given registry.
+///
+/// This function should be called to initialize the default AI plugins and
+/// components, such as formatters.
+pub fn configure_ai(registry: &mut Registry) {
+    self::formats::configure_formats(registry);
+}
