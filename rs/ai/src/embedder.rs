@@ -24,7 +24,7 @@ use genkit_core::error::{Error, Result};
 use genkit_core::registry::{ActionType, ErasedAction, Registry};
 use schemars::{self, JsonSchema};
 use serde::{de::DeserializeOwned, Deserialize, Serialize};
-use serde_json::Value;
+use serde_json::{json, Value};
 use std::any::Any;
 use std::collections::HashMap;
 use std::future::Future;
@@ -154,11 +154,23 @@ where
 // High-Level API (`embed`)
 //
 
+/// A serializable reference to an embedder, often used in plugin configurations.
+#[derive(Debug, Serialize, Deserialize, JsonSchema, Clone)]
+#[serde(rename_all = "camelCase")]
+pub struct EmbedderRef<C = Value> {
+    pub name: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub config: Option<C>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub version: Option<String>,
+}
+
 /// A reference to an embedder.
 #[derive(Clone)]
 pub enum EmbedderArgument<I = Value> {
     Name(String),
     Action(EmbedderAction<I>),
+    Ref(EmbedderRef<I>),
 }
 
 /// Parameters for the `embed` function.
@@ -171,26 +183,74 @@ pub struct EmbedParams<I = Value> {
 /// Generates embeddings for a given list of documents using a specified embedder.
 pub async fn embed<I>(registry: &Registry, params: EmbedParams<I>) -> Result<EmbeddingBatch>
 where
-    I: JsonSchema + DeserializeOwned + Serialize + Send + Sync + Clone + 'static,
+    I: Default + JsonSchema + DeserializeOwned + Serialize + Send + Sync + Clone + 'static,
 {
-    let embedder_action: Arc<dyn ErasedAction> = match params.embedder {
-        EmbedderArgument::Name(name) => registry
-            .lookup_action(&format!("/embedder/{}", name))
-            .await
-            .ok_or_else(|| Error::new_internal(format!("Embedder '{}' not found", name)))?,
-        EmbedderArgument::Action(action) => Arc::new(action),
+    let (embedder_action, final_options) = match params.embedder {
+        EmbedderArgument::Name(name) => {
+            let action = registry
+                .lookup_action(&format!("/embedder/{}", name))
+                .await
+                .ok_or_else(|| Error::new_internal(format!("Embedder '{}' not found", name)))?;
+            (action, params.options)
+        }
+        EmbedderArgument::Action(action) => {
+            (Arc::new(action) as Arc<dyn ErasedAction>, params.options)
+        }
+        EmbedderArgument::Ref(embedder_ref) => {
+            let action = registry
+                .lookup_action(&format!("/embedder/{}", embedder_ref.name))
+                .await
+                .ok_or_else(|| {
+                    Error::new_internal(format!("Embedder '{}' not found", embedder_ref.name))
+                })?;
+
+            let mut merged_opts = serde_json::to_value(embedder_ref.config.unwrap_or_default())
+                .map_err(|e| Error::new_internal(e.to_string()))?
+                .as_object()
+                .ok_or_else(|| Error::new_internal("Invalid config format".to_string()))?
+                .clone();
+
+            let params_opts_val = serde_json::to_value(params.options.unwrap_or_default())
+                .map_err(|e| Error::new_internal(e.to_string()))?;
+            if let Some(params_opts) = params_opts_val.as_object() {
+                for (k, v) in params_opts {
+                    merged_opts.insert(k.clone(), v.clone());
+                }
+            }
+
+            if let Some(version) = embedder_ref.version {
+                merged_opts.insert("version".to_string(), json!(version));
+            }
+
+            let final_opts_typed: I = serde_json::from_value(Value::Object(merged_opts))
+                .map_err(|e| Error::new_internal(e.to_string()))?;
+
+            (action, Some(final_opts_typed))
+        }
     };
 
     let request = EmbedRequest {
         input: params.content,
-        options: params.options,
+        options: final_options,
     };
 
     let request_value = serde_json::to_value(request)
         .map_err(|e| Error::new_internal(format!("Failed to serialize embed request: {}", e)))?;
+
     let response_value = embedder_action.run_http_json(request_value, None).await?;
-    let response: EmbedResponse = serde_json::from_value(response_value)
+
+    let mut response_obj = response_value
+        .as_object()
+        .ok_or_else(|| Error::new_internal("Expected object response".to_string()))?
+        .clone();
+
+    let final_response_value = response_obj
+        .remove("result")
+        .ok_or_else(|| Error::new_internal("Response missing 'result' field".to_string()))?;
+
+    let response: EmbedResponse = serde_json::from_value(final_response_value)
         .map_err(|e| Error::new_internal(format!("Failed to deserialize embed response: {}", e)))?;
+
     Ok(response.embeddings)
 }
 
@@ -198,19 +258,11 @@ where
 // Reference Helpers
 //
 
-/// A serializable reference to an embedder, often used in plugin configurations.
-#[derive(Debug, Serialize, Deserialize, JsonSchema, Clone)]
-#[serde(rename_all = "camelCase")]
-pub struct EmbedderRef<C = Value> {
-    pub name: String,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub config: Option<C>,
-}
-
 /// Helper to create an `EmbedderRef`.
 pub fn embedder_ref<C>(name: &str) -> EmbedderRef<C> {
     EmbedderRef {
         name: name.to_string(),
         config: None,
+        version: None,
     }
 }
