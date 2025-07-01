@@ -17,13 +17,16 @@
 //! This module provides the core structures and functions for evaluating
 //! generative models and AI flows. It is the Rust equivalent of `evaluator.ts`.
 
+use async_trait::async_trait;
 use genkit_core::action::{Action, ActionBuilder};
 use genkit_core::error::{Error, Result};
-use genkit_core::registry::{ActionType, Registry};
+use genkit_core::registry::{ActionType, ErasedAction, Registry};
 use schemars::{self, JsonSchema};
 use serde::{de::DeserializeOwned, Deserialize, Serialize};
 use serde_json::Value;
+use std::any::Any;
 use std::future::Future;
+use std::ops::Deref;
 use std::pin::Pin;
 use std::sync::{Arc, Mutex};
 use uuid::Uuid;
@@ -121,8 +124,51 @@ pub type EvaluatorFn = dyn Fn(BaseEvalDataPoint) -> Box<dyn Future<Output = Resu
     + Send
     + Sync;
 
-/// A type alias for an evaluator `Action`.
-pub type EvaluatorAction<I = Value> = Action<EvalRequest<I>, EvalResponses, ()>;
+/// A wrapper for an evaluator `Action`.
+#[derive(Clone)]
+pub struct EvaluatorAction<I = Value>(pub Action<EvalRequest<I>, EvalResponses, ()>);
+
+impl<I: 'static> Deref for EvaluatorAction<I> {
+    type Target = Action<EvalRequest<I>, EvalResponses, ()>;
+
+    fn deref(&self) -> &Self::Target {
+        &self.0
+    }
+}
+
+#[async_trait]
+impl<I> ErasedAction for EvaluatorAction<I>
+where
+    I: JsonSchema + DeserializeOwned + Send + Sync + Clone + 'static,
+{
+    async fn run_http_json(
+        &self,
+        input: Value,
+        context: Option<genkit_core::context::ActionContext>,
+    ) -> Result<Value> {
+        self.0.run_http_json(input, context).await
+    }
+
+    fn stream_http_json(
+        &self,
+        input: Value,
+        context: Option<genkit_core::context::ActionContext>,
+    ) -> Result<genkit_core::action::StreamingResponse<Value, Value>> {
+        self.0.stream_http_json(input, context)
+    }
+
+    fn name(&self) -> &str {
+        self.0.name()
+    }
+
+    fn metadata(&self) -> &genkit_core::action::ActionMetadata {
+        self.0.metadata()
+    }
+
+    fn as_any(&self) -> &dyn Any {
+        self
+    }
+}
 
 /// Descriptive information about an evaluator.
 #[derive(Debug, Serialize, Deserialize, JsonSchema, Default, Clone)]
@@ -137,14 +183,18 @@ pub struct EvaluatorInfo {
 //
 
 /// Defines a new evaluator and registers it.
-pub fn define_evaluator<I, F, Fut>(name: &str, runner: F) -> Arc<EvaluatorAction<I>>
+pub fn define_evaluator<I, F, Fut>(
+    registry: &mut Registry,
+    name: &str,
+    runner: F,
+) -> EvaluatorAction<I>
 where
-    I: JsonSchema + DeserializeOwned + Send + Sync + 'static,
+    I: JsonSchema + DeserializeOwned + Send + Sync + Clone + 'static,
     F: FnMut(BaseEvalDataPoint) -> Fut + Send + Sync + 'static,
     Fut: Future<Output = Result<EvalResponse>> + Send + 'static,
 {
     let runner = Arc::new(Mutex::new(runner));
-    ActionBuilder::new(
+    let action = ActionBuilder::new(
         ActionType::Evaluator,
         name.to_string(),
         move |req: EvalRequest<I>, _context| {
@@ -185,8 +235,12 @@ where
             }
         },
     )
-    .build()
-    .into()
+    .build();
+    let evaluator_action = EvaluatorAction(action);
+    registry
+        .register_action(name.to_string(), evaluator_action.clone())
+        .expect("Failed to register evaluator");
+    evaluator_action
 }
 
 //

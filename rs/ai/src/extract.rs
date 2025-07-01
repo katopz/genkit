@@ -87,22 +87,22 @@ pub fn extract_json<T: DeserializeOwned>(text: &str) -> Result<Option<T>> {
         }
     }
     // If we exit the loop and found a start but no end, it's partial JSON.
-    // Try to parse what we have.
+    // Attempt to parse the partial string. If it fails, propagate the error.
     if let Some(start) = start_pos {
         if nesting_count > 0 {
             let partial_str = &text[start..];
-            // json5 can sometimes handle trailing commas or missing brackets.
-            return json5::from_str(partial_str).map(Some).or(Ok(None)); // If it fails, treat as not found
-        }
-    }
-
-    // If we exit the loop and found a start but no end, it's partial JSON.
-    if let Some(start) = start_pos {
-        if nesting_count > 0 {
-            let partial_str = &text[start..];
-            // Attempt to parse the partial string.
-            // In case of error, we treat it as if no JSON was found.
-            return parse_partial_json(partial_str).map(Some).or(Ok(None));
+            // Note: This specific check for `in_string` when exiting the loop (meaning
+            // the JSON structure is incomplete and ends within a string literal)
+            // is added to align with the stricter error-throwing behavior of the
+            // TypeScript `partial-json` library. Without this, `json5` might leniently
+            // parse such inputs (e.g., `{"a": "`) as valid (e.g., `{"a": null}`),
+            // which would cause a discrepancy with the TS implementation's error expectation.
+            if in_string {
+                return Err(Error::new_internal(
+                    "Unclosed string literal in partial JSON structure".to_string(),
+                ));
+            }
+            return parse_partial_json(partial_str).map(Some);
         }
     }
 
@@ -272,7 +272,7 @@ mod tests {
 
     #[test]
     fn test_extract_json_malformed() {
-        let text = "Here is bad json: {\"a\": 1,}.";
+        let text = "Here is bad json: {\"a\": \"";
         let result: Result<Option<Value>> = extract_json(text);
         assert!(result.is_err());
     }

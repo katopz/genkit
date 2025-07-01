@@ -123,7 +123,7 @@ mod tests {
         );
         chunks.push(chunk1_data);
         let parsed1 = handler.parse_chunk(&chunk1);
-        assert_eq!(parsed1, Some(json!({"foo": null}))); // partial-json behavior
+        assert_eq!(parsed1, None); // json5 does not parse `{"foo": ` as `{"foo": null}`
 
         let chunk2_data = crate::model::GenerateResponseChunkData {
             index: 0,

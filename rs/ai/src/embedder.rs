@@ -132,13 +132,22 @@ pub struct EmbedderInfo {
 //
 
 /// Defines a new embedder and registers it.
-pub fn define_embedder<I, F, Fut>(name: &str, runner: F) -> EmbedderAction<I>
+pub fn define_embedder<I, F, Fut>(
+    registry: &mut Registry,
+    name: &str,
+    runner: F,
+) -> EmbedderAction<I>
 where
     I: JsonSchema + DeserializeOwned + Send + Sync + Clone + 'static,
     F: Fn(EmbedRequest<I>, genkit_core::action::ActionFnArg<()>) -> Fut + Send + Sync + 'static,
     Fut: Future<Output = Result<EmbedResponse>> + Send + 'static,
 {
-    EmbedderAction(ActionBuilder::new(ActionType::Embedder, name.to_string(), runner).build())
+    let action = ActionBuilder::new(ActionType::Embedder, name.to_string(), runner).build();
+    let embedder_action = EmbedderAction(action);
+    registry
+        .register_action(name.to_string(), embedder_action.clone())
+        .expect("Failed to register embedder");
+    embedder_action
 }
 
 //

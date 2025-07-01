@@ -238,9 +238,13 @@ pub struct ToolConfig<I = (), O = ()> {
 }
 
 /// Defines a new tool and registers it as a Genkit action.
-pub fn define_tool<I, O, F, Fut>(config: ToolConfig<I, O>, runner: F) -> ToolAction<I, O, ()>
+pub fn define_tool<I, O, F, Fut>(
+    registry: &mut Registry,
+    config: ToolConfig<I, O>,
+    runner: F,
+) -> ToolAction<I, O, ()>
 where
-    I: JsonSchema + Serialize + DeserializeOwned + Send + Sync + 'static,
+    I: JsonSchema + Serialize + DeserializeOwned + Send + Sync + Clone + 'static,
     O: JsonSchema + Serialize + DeserializeOwned + Send + Sync + 'static,
     F: Fn(I, ToolFnOptions) -> Fut + Send + Sync + Clone + 'static,
     Fut: Future<Output = Result<O>> + Send + 'static,
@@ -268,19 +272,26 @@ where
     .with_description(config.description)
     .build();
 
-    ToolAction(action)
+    let tool_action = ToolAction(action);
+    registry
+        .register_action(config.name, tool_action.clone())
+        .unwrap();
+    tool_action
 }
 
 /// Configuration for an interrupt.
 pub type InterruptConfig<I, O> = ToolConfig<I, O>;
 
 /// Defines a tool that interrupts the flow to wait for user input.
-pub fn define_interrupt<I, O>(config: InterruptConfig<I, O>) -> ToolAction<I, O, ()>
+pub fn define_interrupt<I, O>(
+    registry: &mut Registry,
+    config: InterruptConfig<I, O>,
+) -> ToolAction<I, O, ()>
 where
-    I: JsonSchema + Serialize + DeserializeOwned + Send + Sync + 'static,
+    I: JsonSchema + Serialize + DeserializeOwned + Send + Sync + Clone + 'static,
     O: JsonSchema + Serialize + DeserializeOwned + Send + Sync + 'static,
 {
-    define_tool(config, |_, ctx: ToolFnOptions| async move {
+    define_tool(registry, config, |_, ctx: ToolFnOptions| async move {
         Err((ctx.interrupt)(None))
     })
 }

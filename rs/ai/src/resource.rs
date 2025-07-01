@@ -70,7 +70,11 @@ pub type ResourceAction = Action<ResourceInput, ResourceOutput, ()>;
 //
 
 /// Defines a resource.
-pub fn define_resource<F, Fut>(opts: ResourceOptions, runner: F) -> Result<Arc<ResourceAction>>
+pub fn define_resource<F, Fut>(
+    registry: &mut Registry,
+    opts: ResourceOptions,
+    runner: F,
+) -> Result<Arc<ResourceAction>>
 where
     F: Fn(ResourceInput, ActionContext) -> Fut + Send + Sync + 'static,
     Fut: Future<Output = Result<ResourceOutput>> + Send + 'static,
@@ -94,7 +98,7 @@ where
 
     let action = ActionBuilder::new(
         ActionType::Util, // Changed from Resource to Util
-        name,
+        name.clone(),
         move |input: ResourceInput, args: genkit_core::action::ActionFnArg<()>| {
             // Handle optional context
             runner(input, args.context.unwrap_or_default())
@@ -103,7 +107,9 @@ where
     .with_metadata(metadata)
     .build();
 
-    Ok(Arc::new(action))
+    let resource_action = Arc::new(action);
+    registry.register_action(name, (*resource_action).clone())?;
+    Ok(resource_action)
 }
 
 //
