@@ -12,16 +12,15 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use futures_util::StreamExt;
-use genkit::model::{Candidate, Message, Role};
+#[allow(clippy::duplicate_mod)]
+#[path = "helpers.rs"]
+mod helpers;
 
-use genkit::{FinishReason, Part};
+use futures_util::StreamExt;
+use genkit::model::Message;
 use genkit_ai::formats::types::FormatHandler;
 use genkit_ai::generate::{generate, generate_stream, OutputOptions};
-use genkit_ai::model::{DefineModelOptions, ModelInfoSupports};
-use genkit_ai::{
-    define_model, GenerateOptions, GenerateResponseChunkData, GenerateResponseData, MessageData,
-};
+use genkit_ai::GenerateOptions;
 use genkit_core::registry::Registry;
 use rstest::*;
 use serde_json::{json, Value};
@@ -38,74 +37,6 @@ impl genkit_ai::formats::Format for BananaFormat {
     fn instructions(&self) -> Option<String> {
         Some("Output should be in banana format".to_string())
     }
-}
-
-// Helper to define an echo model for testing.
-fn define_echo_model(registry: &mut Registry, constrained_support: &str) {
-    let supports = if constrained_support == "all" {
-        Some(ModelInfoSupports {
-            output: Some(vec!["banana".to_string()]),
-            ..Default::default()
-        })
-    } else {
-        Some(ModelInfoSupports {
-            output: Some(vec![]),
-            ..Default::default()
-        })
-    };
-    let model_opts = DefineModelOptions {
-        name: "echoModel".to_string(),
-        label: Some("Echo Model".to_string()),
-        supports,
-        ..Default::default()
-    };
-    define_model(registry, model_opts, |req, streaming_callback| async move {
-        let last_msg_text = req.messages.last().cloned().unwrap_or_default();
-
-        // If a streaming callback is provided, we send down the countdown chunks.
-        if let Some(cb) = streaming_callback {
-            let chunks_data = vec![
-                GenerateResponseChunkData {
-                    index: 0,
-                    content: vec![genkit::model::Part::text("3")],
-                    ..Default::default()
-                },
-                GenerateResponseChunkData {
-                    index: 0,
-                    content: vec![genkit::model::Part::text("2")],
-                    ..Default::default()
-                },
-                GenerateResponseChunkData {
-                    index: 0,
-                    content: vec![genkit::model::Part::text("1")],
-                    ..Default::default()
-                },
-            ];
-
-            for data in chunks_data {
-                cb(data);
-            }
-        }
-
-        // Both streaming and non-streaming calls return a final response.
-        let text = format!(
-            "Echo: {}",
-            Message::<String>::new(last_msg_text, None).text()
-        );
-        Ok(GenerateResponseData {
-            candidates: vec![Candidate {
-                index: 0,
-                finish_reason: Some(FinishReason::Stop),
-                message: MessageData {
-                    role: Role::Model,
-                    content: vec![Part::text(text)],
-                    metadata: None,
-                },
-                ..Default::default()
-            }],
-            ..Default::default()
-        })
-    });
 }
 
 #[fixture]
@@ -129,7 +60,7 @@ fn registry() -> Registry {
 #[rstest]
 #[tokio::test]
 async fn test_custom_format_native_constrained(mut registry: Registry) {
-    define_echo_model(&mut registry, "all");
+    helpers::define_echo_model(&mut registry, "all");
 
     let response = generate(
         &registry,
@@ -173,7 +104,7 @@ async fn test_custom_format_native_constrained(mut registry: Registry) {
 #[rstest]
 #[tokio::test]
 async fn test_custom_format_simulated_constrained(mut registry: Registry) {
-    define_echo_model(&mut registry, "none");
+    helpers::define_echo_model(&mut registry, "none");
 
     let response = generate(
         &registry,
@@ -196,7 +127,7 @@ async fn test_custom_format_simulated_constrained(mut registry: Registry) {
 #[rstest]
 #[tokio::test]
 async fn test_override_format_options(mut registry: Registry) {
-    define_echo_model(&mut registry, "all");
+    helpers::define_echo_model(&mut registry, "none");
     let response = generate(
         &registry,
         GenerateOptions::<serde_json::Value> {

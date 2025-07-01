@@ -36,7 +36,7 @@ fn stringify(input: &Value) -> String {
 pub fn vertex_evaluators(
     factory: &EvaluatorFactory,
     metrics: &[VertexAIEvaluationMetric],
-) -> Vec<EvaluatorAction> {
+) -> Vec<EvaluatorAction<BaseEvalDataPoint>> {
     metrics
         .iter()
         .map(|metric| {
@@ -119,7 +119,10 @@ struct BleuResponse {
     bleu_results: BleuResults,
 }
 
-fn create_bleu_evaluator(factory: &EvaluatorFactory, metric_spec: Value) -> EvaluatorAction {
+fn create_bleu_evaluator(
+    factory: &EvaluatorFactory,
+    metric_spec: Value,
+) -> EvaluatorAction<BaseEvalDataPoint> {
     factory.create(
         VertexAIEvaluationMetricType::Bleu,
         "BLEU",
@@ -174,7 +177,10 @@ struct RougeResponse {
     rouge_results: RougeResults,
 }
 
-fn create_rouge_evaluator(factory: &EvaluatorFactory, metric_spec: Value) -> EvaluatorAction {
+fn create_rouge_evaluator(
+    factory: &EvaluatorFactory,
+    metric_spec: Value,
+) -> EvaluatorAction<BaseEvalDataPoint> {
     factory.create(
         VertexAIEvaluationMetricType::Rouge,
         "ROUGE",
@@ -216,7 +222,10 @@ struct FluencyResponse {
     fluency_result: PointwiseResult,
 }
 
-fn create_fluency_evaluator(factory: &EvaluatorFactory, metric_spec: Value) -> EvaluatorAction {
+fn create_fluency_evaluator(
+    factory: &EvaluatorFactory,
+    metric_spec: Value,
+) -> EvaluatorAction<BaseEvalDataPoint> {
     factory.create(
         VertexAIEvaluationMetricType::Fluency,
         "Fluency",
@@ -257,7 +266,10 @@ struct SafetyResponse {
     safety_result: PointwiseResult,
 }
 
-fn create_safety_evaluator(factory: &EvaluatorFactory, metric_spec: Value) -> EvaluatorAction {
+fn create_safety_evaluator(
+    factory: &EvaluatorFactory,
+    metric_spec: Value,
+) -> EvaluatorAction<BaseEvalDataPoint> {
     factory.create(
         VertexAIEvaluationMetricType::Safety,
         "Safety",
@@ -301,7 +313,7 @@ struct GroundednessResponse {
 fn create_groundedness_evaluator(
     factory: &EvaluatorFactory,
     metric_spec: Value,
-) -> EvaluatorAction {
+) -> EvaluatorAction<BaseEvalDataPoint> {
     factory.create(
         VertexAIEvaluationMetricType::Groundedness,
         "Groundedness",
@@ -352,7 +364,7 @@ struct SummarizationQualityResponse {
 fn create_summarization_quality_evaluator(
     factory: &EvaluatorFactory,
     metric_spec: Value,
-) -> EvaluatorAction {
+) -> EvaluatorAction<BaseEvalDataPoint> {
     factory.create(
         VertexAIEvaluationMetricType::SummarizationQuality,
         "Summarization Quality",
@@ -400,7 +412,7 @@ struct SummarizationHelpfulnessResponse {
 fn create_summarization_helpfulness_evaluator(
     factory: &EvaluatorFactory,
     metric_spec: Value,
-) -> EvaluatorAction {
+) -> EvaluatorAction<BaseEvalDataPoint> {
     factory.create(
         VertexAIEvaluationMetricType::SummarizationHelpfulness,
         "Summarization Helpfulness",
@@ -448,7 +460,7 @@ struct SummarizationVerbosityResponse {
 fn create_summarization_verbosity_evaluator(
     factory: &EvaluatorFactory,
     metric_spec: Value,
-) -> EvaluatorAction {
+) -> EvaluatorAction<BaseEvalDataPoint> {
     factory.create(
         VertexAIEvaluationMetricType::SummarizationVerbosity,
         "Summarization Verbosity",

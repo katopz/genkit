@@ -25,8 +25,7 @@ use crate::modelgarden::openai_compatibility::{
 };
 use crate::Result;
 use genkit_ai::model::{
-    define_model, model_ref, GenerateResponse, GenerateResponseData, ModelAction, ModelInfo,
-    ModelInfoSupports, ModelRef,
+    define_model, model_ref, GenerateResponse, ModelAction, ModelInfo, ModelInfoSupports, ModelRef,
 };
 use genkit_core::Registry;
 use reqwest::header::{HeaderMap, AUTHORIZATION, CONTENT_TYPE};
@@ -100,11 +99,11 @@ async fn mistral_runner(
         .unwrap_or(&model_name)
         .to_string();
 
-    let messages = to_openai_messages(&req.messages)?;
+    let messages = to_openai_messages(&req.messages);
     let tools = req
         .tools
         .as_ref()
-        .map(|t| t.iter().map(to_openai_tool).collect());
+        .map(|requests| requests.iter().map(to_openai_tool).collect());
 
     let mistral_req = CreateChatCompletionRequest {
         model: version,
@@ -130,14 +129,11 @@ async fn mistral_runner(
     let response_data = response.json::<ChatCompletionResponse>().await?;
 
     Ok(GenerateResponse {
-        data: GenerateResponseData {
-            candidates: response_data
-                .choices
-                .into_iter()
-                .map(from_openai_choice)
-                .collect(),
-            ..Default::default()
-        },
+        candidates: response_data
+            .choices
+            .into_iter()
+            .map(from_openai_choice)
+            .collect(),
         ..Default::default()
     })
 }

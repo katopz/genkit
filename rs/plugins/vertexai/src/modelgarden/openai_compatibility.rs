@@ -18,10 +18,10 @@
 //! with models in the Vertex AI Model Garden that expose an OpenAI-compatible API.
 
 use genkit_ai::model::{
-    define_model, CandidateData, FinishReason, GenerateRequest, GenerateResponse,
-    GenerateResponseData, ModelAction, ModelRef,
+    define_model, CandidateData, FinishReason, GenerateRequest, GenerateResponse, ModelAction,
+    ModelRef,
 };
-use genkit_ai::{MessageData, Part, Role, ToolDefinition};
+use genkit_ai::{document::ToolRequest, MessageData, Part, Role};
 use genkit_core::Registry;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
@@ -132,13 +132,16 @@ fn to_openai_role(role: Role) -> String {
     }
 }
 
-pub fn to_openai_tool(tool: &ToolDefinition) -> ChatCompletionTool {
+pub fn to_openai_tool(tool: &ToolRequest) -> ChatCompletionTool {
     ChatCompletionTool {
         r#type: "function".to_string(),
         function: FunctionDefinition {
             name: tool.name.clone(),
-            description: Some(tool.description.clone()),
-            parameters: tool.input_schema.clone().unwrap_or(serde_json::json!({})),
+            description: None,
+            parameters: tool
+                .input
+                .clone()
+                .unwrap_or(serde_json::json!({"type": "object", "properties": {}})),
         },
     }
 }
@@ -255,11 +258,8 @@ pub fn openai_compatible_model(
                 .collect();
 
             Ok(GenerateResponse {
-                data: GenerateResponseData {
-                    candidates,
-                    usage: None, // Would be mapped from response.usage
-                    ..Default::default()
-                },
+                candidates,
+                usage: None, // Would be mapped from response.usage
                 ..Default::default()
             })
         }

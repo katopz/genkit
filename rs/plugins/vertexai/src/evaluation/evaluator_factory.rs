@@ -47,7 +47,7 @@ impl EvaluatorFactory {
         _definition: &'static str,
         to_request: ToRequest,
         response_handler: ResponseHandler,
-    ) -> EvaluatorAction
+    ) -> EvaluatorAction<BaseEvalDataPoint>
     where
         Req: Serialize + Send + Sync + 'static,
         Resp: DeserializeOwned + Send + Sync + 'static,
@@ -58,9 +58,9 @@ impl EvaluatorFactory {
         let to_request = Arc::new(to_request);
         let response_handler = Arc::new(response_handler);
         let metric_name = metric.to_string();
-        let registry = Registry::new();
+        let mut registry = Registry::new();
 
-        (*define_evaluator(
+        define_evaluator(
             &mut registry,
             &format!("vertexai/{}", metric_name.to_lowercase()),
             move |datapoint: BaseEvalDataPoint| {
@@ -82,8 +82,7 @@ impl EvaluatorFactory {
                     })
                 }
             },
-        ))
-        .clone()
+        )
     }
 
     /// Calls the `evaluateInstances` endpoint of the Vertex AI API.

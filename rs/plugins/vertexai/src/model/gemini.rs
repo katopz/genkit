@@ -19,14 +19,13 @@
 
 use crate::common::get_derived_params;
 use crate::{context_caching, Error, Result, VertexAIPluginOptions};
-use genkit_ai::tool;
+
 use genkit_ai::{
     message::Role,
     model::{
         define_model, CandidateData, FinishReason, GenerateRequest, GenerateResponseData,
         GenerationUsage, ModelAction,
     },
-    tool::ToolDefinition,
     ToolRequest,
 };
 use genkit_core::Registry;
@@ -268,17 +267,7 @@ fn to_vertex_request(req: &GenerateRequest) -> Result<VertexGeminiRequest> {
         })
         .collect::<Result<Vec<VertexContent>>>()?;
 
-    let tools = req.tools.as_ref().map(|tools| {
-        vec![VertexTool {
-            function_declarations: tools
-                .iter()
-                .map(|t| tool::to_tool_definition(t.as_ref()))
-                .collect::<Result<Vec<_>>>()?
-                .into_iter()
-                .map(ToolRequest::from)
-                .collect(),
-        }]
-    });
+    let tools = None;
 
     let generation_config = req
         .config

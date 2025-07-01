@@ -22,8 +22,7 @@ use crate::predict::predict_model;
 use crate::Result;
 use genkit_ai::{
     model::{
-        define_model, CandidateData, FinishReason, GenerateRequest, GenerateResponse,
-        GenerateResponseData, ModelAction,
+        define_model, CandidateData, FinishReason, GenerateRequest, GenerateResponse, ModelAction,
     },
     Part,
 };
@@ -121,10 +120,7 @@ async fn imagen_runner(
     };
 
     Ok(GenerateResponse {
-        data: GenerateResponseData {
-            candidates: vec![candidate],
-            ..Default::default()
-        },
+        candidates: vec![candidate],
         ..Default::default()
     })
 }

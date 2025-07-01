@@ -18,10 +18,7 @@
 //! expose an OpenAI-compatible API, such as various versions of Llama.
 
 use crate::common::VertexAIPluginOptions;
-use genkit_ai::{
-    model::{model_ref, ModelAction, ModelInfo, ModelInfoSupports, ModelRef},
-    GenerateRequest,
-};
+use genkit_ai::model::{model_ref, GenerateResponseChunkData, ModelAction, ModelInfo, ModelRef};
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
@@ -39,18 +36,30 @@ pub struct ModelGardenModelConfig {
 
 /// A reference to the Llama 3.1 model in the Model Garden.
 pub fn llama3_1() -> ModelRef<ModelGardenModelConfig> {
-    model_ref("vertexai/llama-3.1")
+    model_ref(ModelInfo {
+        name: "vertexai/llama-3.1".to_string(),
+        label: "Vertex AI Llama 3.1".to_string(),
+        ..Default::default()
+    })
 }
 
 /// A reference to the Llama 3.2 model in the Model Garden.
 pub fn llama3_2() -> ModelRef<ModelGardenModelConfig> {
-    model_ref("vertexai/llama-3.2")
+    model_ref(ModelInfo {
+        name: "vertexai/llama-3.2".to_string(),
+        label: "Vertex AI Llama 3.2".to_string(),
+        ..Default::default()
+    })
 }
 
 /// A reference to the Llama 3 model in the Model Garden (deprecated in favor of `llama3_1`).
 #[deprecated(since = "0.1.0", note = "Please use `llama3_1` instead")]
 pub fn llama3() -> ModelRef<ModelGardenModelConfig> {
-    model_ref("vertexai/llama3-405b")
+    model_ref(ModelInfo {
+        name: "vertexai/llama3-405b".to_string(),
+        label: "Vertex AI Llama3".to_string(),
+        ..Default::default()
+    })
 }
 
 /// Defines a `ModelAction` for a Model Garden model that is compatible with the OpenAI API.
@@ -62,12 +71,12 @@ pub fn model_garden_openai_compatible_model(
     options: &VertexAIPluginOptions,
     base_url_template: Option<String>,
 ) -> ModelAction {
-    use super::openai_compatibility::{
-        from_openai_choice, to_openai_messages, to_openai_tool, ChatCompletionResponse,
-        CreateChatCompletionRequest,
+    use super::openai_compatibility::openai_types::{
+        ChatCompletionResponse, CreateChatCompletionRequest,
     };
-    use crate::Result;
-    use genkit_ai::model::{define_model, GenerateResponse, GenerateResponseData};
+    use super::openai_compatibility::{from_openai_choice, to_openai_messages, to_openai_tool};
+
+    use genkit_ai::model::{define_model, GenerateResponse};
     use genkit_core::Registry;
     use reqwest::header::{HeaderMap, AUTHORIZATION, CONTENT_TYPE};
 
@@ -78,90 +87,98 @@ pub fn model_garden_openai_compatible_model(
             .to_string()
     });
 
-    let runner = move |req: genkit_ai::model::GenerateRequest, _| -> Result<GenerateResponse> {
-        let model_name = model_name.clone();
-        let opts = opts.clone();
-        let template = template.clone();
-        async move {
-            let config: ModelGardenModelConfig = req
-                .config
-                .map(|v| serde_json::from_value(v).unwrap())
-                .unwrap_or_default();
-            let params = crate::common::get_derived_params(&opts).await?;
-            let location = config
-                .location
-                .as_ref()
-                .or(params.location.as_ref())
-                .ok_or_else(|| {
-                    genkit_core::error::Error::new_internal("Model Garden location is required.")
-                })?
-                .clone();
-            let base_url = template
-                .replace("{location}", &location)
-                .replace("{projectId}", &params.project_id);
-            let url = format!("{}/chat/completions", base_url);
-            let token = params
-                .token_provider
-                .token(&["https://www.googleapis.com/auth/cloud-platform"])
-                .await?;
-            let mut headers = HeaderMap::new();
-            headers.insert(CONTENT_TYPE, "application/json".parse().unwrap());
-            headers.insert(
-                AUTHORIZATION,
-                format!("Bearer {}", token.as_str()).parse().unwrap(),
-            );
-            let client = reqwest::Client::new();
-            let messages = to_openai_messages(&req.messages)?;
-            let tools = req
-                .tools
-                .as_ref()
-                .map(|t| t.iter().map(to_openai_tool).collect());
-            let openai_req = CreateChatCompletionRequest {
-                model: model_name.clone(),
-                messages,
-                tools,
-            };
-            let response = client
-                .post(&url)
-                .headers(headers)
-                .json(&openai_req)
-                .send()
-                .await?;
-            if !response.status().is_success() {
-                return Err(crate::Error::VertexAI(format!(
-                    "API request failed with status {}: {}",
-                    response.status(),
-                    response.text().await?
-                ))
-                .into());
-            }
-            let response_data = response.json::<ChatCompletionResponse>().await?;
-            Ok(GenerateResponse {
-                data: GenerateResponseData {
+    let runner =
+        move |req: genkit_ai::model::GenerateRequest,
+              _cb: Option<Box<dyn Fn(GenerateResponseChunkData) + Send + Sync>>| {
+            let model_name = model_name.clone();
+            let opts = opts.clone();
+            let template = template.clone();
+            async move {
+                let config: ModelGardenModelConfig = req
+                    .config
+                    .as_ref()
+                    .map(|v| serde_json::from_value(v.clone()).unwrap())
+                    .unwrap_or_default();
+                let params = crate::common::get_derived_params(&opts)
+                    .await
+                    .map_err(|e| genkit_core::error::Error::new_internal(e.to_string()))?;
+                let location = config
+                    .location
+                    .as_ref()
+                    .or(Some(&params.location))
+                    .ok_or_else(|| {
+                        genkit_core::error::Error::new_internal(
+                            "Model Garden location is required.",
+                        )
+                    })?
+                    .clone();
+                let base_url = template
+                    .replace("{location}", &location)
+                    .replace("{projectId}", &params.project_id);
+                let url = format!("{}/chat/completions", base_url);
+                let token = params
+                    .token_provider
+                    .token(&["https://www.googleapis.com/auth/cloud-platform"])
+                    .await
+                    .map_err(|e| genkit_core::error::Error::new_internal(e.to_string()))?;
+                let mut headers = HeaderMap::new();
+                headers.insert(CONTENT_TYPE, "application/json".parse().unwrap());
+                headers.insert(
+                    AUTHORIZATION,
+                    format!("Bearer {}", token.as_str()).parse().unwrap(),
+                );
+                let client = reqwest::Client::new();
+                let messages = to_openai_messages(&req.messages);
+                let tools = req
+                    .tools
+                    .as_ref()
+                    .map(|t| t.iter().map(to_openai_tool).collect());
+                let openai_req = CreateChatCompletionRequest {
+                    model: model_name.clone(),
+                    messages,
+                    tools,
+                };
+                let response = client
+                    .post(&url)
+                    .headers(headers)
+                    .json(&openai_req)
+                    .send()
+                    .await
+                    .map_err(|e| genkit_core::error::Error::new_internal(e.to_string()))?;
+                if !response.status().is_success() {
+                    let status = response.status();
+                    let err_text = response.text().await.unwrap_or_else(|e| e.to_string());
+                    return Err(genkit_core::error::Error::new_internal(format!(
+                        "API request failed with status {}: {}",
+                        status, err_text
+                    )));
+                }
+                let response_data = response
+                    .json::<ChatCompletionResponse>()
+                    .await
+                    .map_err(|e| genkit_core::error::Error::new_internal(e.to_string()))?;
+                Ok(GenerateResponse {
                     candidates: response_data
                         .choices
                         .into_iter()
                         .map(from_openai_choice)
                         .collect(),
                     ..Default::default()
-                },
-                ..Default::default()
-            })
-        }
-    };
+                })
+            }
+        };
     let mut registry = Registry::default();
-    let model_info = model_ref.info.clone().unwrap_or_default();
     define_model(
         &mut registry,
         genkit_ai::model::DefineModelOptions {
-            name: model_ref.name,
-            label: model_info.label,
-            supports: model_info.supports,
-            versions: model_info.versions,
+            name: model_ref.name.clone(),
+            label: Some(model_ref.info.label.clone()),
+            supports: model_ref.info.supports.clone(),
+            versions: model_ref.info.versions.clone(),
             config_schema: Some(
                 serde_json::to_value(schemars::schema_for!(ModelGardenModelConfig)).unwrap(),
             ),
         },
-        move |req, cb| Box::pin(runner(req, cb)),
+        move |req, cb| runner(req, cb),
     )
 }
