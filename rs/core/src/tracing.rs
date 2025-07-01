@@ -74,7 +74,7 @@ static TELEMETRY_INIT: OnceCell<()> = OnceCell::new();
 static GENKIT_TRACER_PROVIDER: OnceCell<SdkTracerProvider> = OnceCell::new();
 
 /// The OpenTelemetry trace context, containing Trace and Span IDs.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Default)]
 pub struct TraceContext {
     pub trace_id: String,
     pub span_id: String,

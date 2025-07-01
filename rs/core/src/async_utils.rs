@@ -43,6 +43,7 @@ impl fmt::Display for ChannelError {
 }
 
 /// The state shared between a `Channel` and its `ChannelStream`.
+#[derive(Default)]
 struct ChannelState<T> {
     buffer: VecDeque<T>,
     closed: bool,
@@ -53,6 +54,7 @@ struct ChannelState<T> {
 /// A handle to send data into a channel, which can be consumed by a `ChannelStream`.
 ///
 /// This is useful for bridging callback-based or imperative code with async streams.
+#[derive(Default)]
 pub struct Channel<T: Send> {
     state: Arc<Mutex<ChannelState<T>>>,
 }
