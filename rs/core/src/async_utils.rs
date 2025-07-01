@@ -2,6 +2,7 @@
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
+// You may notuse this file except in compliance with the License.
 // You may obtain a copy of the License at
 //
 //     http://www.apache.org/licenses/LICENSE-2.0
@@ -31,7 +32,7 @@ use thiserror::Error;
 // SECTION: Channel
 
 /// An error that can be sent through a `Channel`.
-#[derive(Debug, Clone, Error)]
+#[derive(Debug, Clone, Error, PartialEq)]
 pub struct ChannelError {
     message: String,
 }
@@ -91,16 +92,19 @@ impl<T: Send> Channel<T> {
     /// Sends a value into the channel.
     ///
     /// This will wake up the stream if it is waiting for data.
-    /// If the channel is closed, this operation has no effect.
-    pub fn send(&self, value: T) {
+    /// Returns an `Err` if the channel is closed.
+    pub fn send(&self, value: T) -> Result<(), ChannelError> {
         let mut state = self.state.lock().unwrap();
         if state.closed {
-            return;
+            return Err(ChannelError {
+                message: "Tried to send on a closed channel.".to_string(),
+            });
         }
         state.buffer.push_back(value);
         if let Some(waker) = state.waker.take() {
             waker.wake();
         }
+        Ok(())
     }
 
     /// Closes the channel.
@@ -278,8 +282,8 @@ mod tests {
     async fn test_channel_simple_send_and_close() {
         let (tx, mut rx) = channel::<i32>();
 
-        tx.send(1);
-        tx.send(2);
+        tx.send(1).unwrap();
+        tx.send(2).unwrap();
         tx.close();
 
         assert_eq!(rx.try_next().await.unwrap(), Some(1));
@@ -293,7 +297,7 @@ mod tests {
 
         let handle = tokio::spawn(async move {
             sleep(Duration::from_millis(10)).await;
-            tx.send(100);
+            tx.send(100).unwrap();
             tx.close();
         });
 
@@ -306,7 +310,7 @@ mod tests {
     async fn test_channel_error() {
         let (tx, mut rx) = channel::<i32>();
 
-        tx.send(1);
+        tx.send(1).unwrap();
         tx.error("something went wrong");
 
         assert_eq!(rx.try_next().await.unwrap(), Some(1));
@@ -321,6 +325,21 @@ mod tests {
 
         tx.close();
 
+        assert_eq!(rx.try_next().await.unwrap(), None);
+    }
+
+    #[tokio::test]
+    async fn test_send_on_closed_channel() {
+        let (tx, mut rx) = channel::<i32>();
+        tx.close();
+        let result = tx.send(42);
+        assert!(result.is_err());
+        let err = result.unwrap_err();
+        assert_eq!(
+            err.to_string(),
+            "ChannelError: Tried to send on a closed channel."
+        );
+        // Make sure nothing was actually sent.
         assert_eq!(rx.try_next().await.unwrap(), None);
     }
 }

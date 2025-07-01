@@ -82,6 +82,7 @@ use std::sync::Arc;
 /// The main entry point for the Genkit framework.
 pub struct Genkit {
     registry: Registry,
+    context: Option<ActionContext>,
 }
 
 /// Options for Genkit initialization.
@@ -89,6 +90,7 @@ pub struct Genkit {
 pub struct GenkitOptions {
     pub plugins: Vec<Arc<dyn Plugin>>,
     pub default_model: Option<String>,
+    pub context: Option<ActionContext>,
 }
 
 /// Options for creating a new session.
@@ -109,13 +111,20 @@ impl Genkit {
         for plugin in options.plugins {
             plugin.initialize(&mut registry).await?;
         }
-        let instance = Arc::new(Self { registry });
+        let instance = Arc::new(Self {
+            registry,
+            context: options.context,
+        });
         Ok(instance)
     }
 
     /// Returns a reference to the underlying registry.
     pub fn registry(&self) -> &Registry {
         &self.registry
+    }
+
+    pub fn context(&self) -> Option<&ActionContext> {
+        self.context.as_ref()
     }
 
     /// Creates a new, empty session.

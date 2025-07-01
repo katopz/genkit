@@ -4,11 +4,11 @@ mod chat_test;
 #[cfg(test)]
 mod embed_test;
 
-// #[cfg(test)]
-// mod evaluate_test;
+#[cfg(test)]
+mod evaluate_test;
 
-// #[cfg(test)]
-// mod flow_test;
+#[cfg(test)]
+mod flow_test;
 
 // #[cfg(test)]
 // mod formats_test;

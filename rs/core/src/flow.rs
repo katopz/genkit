@@ -22,12 +22,13 @@
 use crate::action::{Action, ActionBuilder, ActionFnArg};
 use crate::context::{run_with_flow_context, FlowContext};
 use crate::error::Result;
-use crate::registry::ActionType;
+use crate::registry::{ActionType, Registry};
 use crate::tracing as genkit_tracing;
 
 use schemars::JsonSchema;
 use serde::{de::DeserializeOwned, Serialize};
 use std::future::Future;
+use std::sync::Arc;
 
 /// A `Flow` is a specialized `Action` designed for orchestrating multiple steps.
 ///
@@ -46,16 +47,22 @@ pub type Flow<I, O, S> = Action<I, O, S>;
 /// # Returns
 ///
 /// An `Action` instance representing the defined flow.
-pub fn define_flow<I, O, S, F, Fut>(name: impl Into<String>, func: F) -> Flow<I, O, S>
+pub fn define_flow<I, O, S, F, Fut>(
+    registry: &mut Registry,
+    name: impl Into<String>,
+    func: F,
+) -> Flow<I, O, S>
 where
-    I: DeserializeOwned + JsonSchema + Send + Sync + 'static,
+    I: DeserializeOwned + JsonSchema + Send + Sync + Clone + 'static,
     O: Serialize + JsonSchema + Send + Sync + 'static,
-    S: Serialize + JsonSchema + Send + Sync + 'static,
-    F: Fn(I, ActionFnArg<S>) -> Fut + Send + Sync + Clone + 'static,
+    S: Serialize + JsonSchema + Send + Sync + Clone + 'static,
+    F: Fn(I, ActionFnArg<S>) -> Fut + Send + Sync + 'static,
     Fut: Future<Output = Result<O>> + Send,
+    Action<I, O, S>: crate::registry::ErasedAction + 'static,
 {
     let name = name.into();
     let flow_name = name.clone();
+    let func = Arc::new(func);
     let wrapped_func = move |input: I, args: ActionFnArg<S>| {
         let func = func.clone();
         let flow_name = flow_name.clone();
@@ -63,10 +70,14 @@ where
             let flow_context = FlowContext {
                 flow_id: format!("{}-{}", flow_name, args.trace.trace_id),
             };
-            run_with_flow_context(flow_context, func(input, args)).await
+            run_with_flow_context(flow_context, (*func)(input, args)).await
         }
     };
-    ActionBuilder::new(ActionType::Flow, name, wrapped_func).build()
+    let action = ActionBuilder::new(ActionType::Flow, name.clone(), wrapped_func).build();
+    registry
+        .register_action(name, action.clone())
+        .expect("Failed to register flow");
+    action
 }
 
 /// Executes a given function as a distinct step within a flow.
@@ -104,27 +115,30 @@ where
 mod tests {
     use super::*;
     use crate::async_utils::channel;
+    use crate::registry::Registry;
     use crate::tracing::TraceContext;
     use serde::Deserialize;
     use tokio_util::sync::CancellationToken;
 
-    #[derive(Serialize, Deserialize, JsonSchema, Debug, PartialEq)]
+    #[derive(Serialize, Deserialize, JsonSchema, Debug, PartialEq, Clone)]
     struct MyInput {
         name: String,
     }
 
-    #[derive(Serialize, Deserialize, JsonSchema, Debug, PartialEq)]
+    #[derive(Serialize, Deserialize, JsonSchema, Debug, PartialEq, Clone)]
     struct MyOutput {
         message: String,
     }
 
-    #[derive(Serialize, Deserialize, JsonSchema, Debug, PartialEq)]
+    #[derive(Serialize, Deserialize, JsonSchema, Debug, PartialEq, Clone)]
     struct MyStreamChunk {}
 
     #[tokio::test]
     async fn test_define_and_run_flow() {
+        let mut registry = Registry::default();
         // Define a flow with two instrumented steps.
         let my_flow = define_flow(
+            &mut registry,
             "testFlow",
             |input: MyInput, _args: ActionFnArg<MyStreamChunk>| async move {
                 let upper_name = run("step1: uppercase", || async {

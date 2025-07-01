@@ -55,6 +55,7 @@ async fn genkit_instance() -> Arc<Genkit> {
     Genkit::init(GenkitOptions {
         plugins: vec![echo_plugin],
         default_model: Some("echoModel".to_string()),
+        context: None,
     })
     .await
     .unwrap()

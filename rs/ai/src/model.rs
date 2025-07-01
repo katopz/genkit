@@ -405,7 +405,7 @@ where
             async move {
                 if args.streaming_requested {
                     let callback = Some(Box::new(move |chunk| {
-                        args.chunk_sender.send(chunk);
+                        let _ = args.chunk_sender.send(chunk);
                     })
                         as Box<dyn Fn(GenerateResponseChunkData) + Send + Sync>);
                     // TODO: Apply middleware to streaming requests.
