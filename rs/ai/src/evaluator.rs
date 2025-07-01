@@ -27,8 +27,7 @@ use serde_json::Value;
 use std::any::Any;
 use std::future::Future;
 use std::ops::Deref;
-use std::pin::Pin;
-use std::sync::{Arc, Mutex};
+use std::sync::Arc;
 use uuid::Uuid;
 
 //
@@ -190,20 +189,18 @@ pub fn define_evaluator<I, F, Fut>(
 ) -> EvaluatorAction<I>
 where
     I: JsonSchema + DeserializeOwned + Send + Sync + Clone + 'static,
-    F: FnMut(BaseEvalDataPoint) -> Fut + Send + Sync + 'static,
+    F: Fn(BaseEvalDataPoint) -> Fut + Send + Sync + 'static,
     Fut: Future<Output = Result<EvalResponse>> + Send + 'static,
 {
-    let runner = Arc::new(Mutex::new(runner));
+    let runner_arc = Arc::new(runner);
     let action = ActionBuilder::new(
         ActionType::Evaluator,
         name.to_string(),
         move |req: EvalRequest<I>, _context| {
-            let runner_clone = runner.clone();
-            let eval_futures = req
-                .dataset
-                .into_iter()
-                .map(|dp| {
-                    let runner_clone_inner = runner_clone.clone();
+            let runner = runner_arc.clone();
+            async move {
+                let futures = req.dataset.into_iter().map(|dp| {
+                    let runner = runner.clone();
                     let test_case_id = dp
                         .test_case_id
                         .unwrap_or_else(|| Uuid::new_v4().to_string());
@@ -214,24 +211,12 @@ where
                         context: dp.context,
                         reference: dp.reference,
                     };
-                    // Synchronously acquire lock, call runner, and drop lock.
-                    let inner_fut = {
-                        let mut runner_guard = runner_clone_inner.lock().unwrap();
-                        (runner_guard)(eval_dp)
-                    }; // `runner_guard` is dropped here.
-
-                    // Explicitly Box::pin the async move block
-                    Box::pin(inner_fut)
-                        as Pin<Box<dyn Future<Output = Result<EvalResponse>> + Send>>
-                })
-                .collect::<Vec<_>>();
-
-            async move {
-                let results = futures_util::future::join_all(eval_futures).await;
-                // Note: This basic version doesn't handle individual errors well.
-                let successful_results: Vec<EvalResponse> =
-                    results.into_iter().filter_map(Result::ok).collect();
-                Ok(successful_results)
+                    runner(eval_dp)
+                });
+                let results: Vec<Result<EvalResponse>> =
+                    futures_util::future::join_all(futures).await;
+                // Collect successful responses or return the first error.
+                results.into_iter().collect::<Result<Vec<_>>>()
             }
         },
     )
@@ -283,7 +268,12 @@ pub async fn evaluate(registry: &Registry, params: EvaluatorParams) -> Result<Ev
     let request_value = serde_json::to_value(request)
         .map_err(|e| Error::new_internal(format!("Failed to serialize eval request: {}", e)))?;
     let response_value = evaluator_action.run_http_json(request_value, None).await?;
-    let response: EvalResponses = serde_json::from_value(response_value)
+
+    let result_field = response_value.get("result").ok_or_else(|| {
+        Error::new_internal("Evaluator action response is missing 'result' field".to_string())
+    })?;
+
+    let response: EvalResponses = serde_json::from_value(result_field.clone())
         .map_err(|e| Error::new_internal(format!("Failed to deserialize eval response: {}", e)))?;
     Ok(response)
 }
