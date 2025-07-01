@@ -18,11 +18,21 @@
 //! or post-process responses.
 
 use crate::document::Document;
-use crate::formats::inject_instructions;
-use crate::model::{MessageData, ModelInfoSupports, ModelMiddleware, Part};
+use crate::model::{GenerateResponseData, MessageData, ModelInfoSupports, ModelMiddleware, Part};
 use crate::GenerateRequest;
 use base64::Engine;
+use genkit_core::error::Error;
+use std::future::Future;
+use std::pin::Pin;
 use std::sync::Arc;
+
+/// A boxed, pinned future.
+pub type BoxFuture<'a, T> = Pin<Box<dyn Future<Output = T> + Send + 'a>>;
+
+/// The `next` function passed to a `ModelMiddleware`.
+pub type ModelMiddlewareNext<'a> = Box<
+    dyn Fn(GenerateRequest) -> BoxFuture<'a, Result<GenerateResponseData, Error>> + Send + Sync,
+>;
 
 /// Preprocess a GenerateRequest to download referenced http(s) media URLs and
 /// inline them as data URIs.
@@ -30,7 +40,7 @@ pub fn download_request_media(
     max_bytes: Option<usize>,
     filter: Option<fn(&Part) -> bool>,
 ) -> ModelMiddleware {
-    Arc::new(move |req: GenerateRequest, next: ModelMiddlewareNext| {
+    Arc::new(move |req: GenerateRequest, next: ModelMiddlewareNext<'_>| {
         let max_bytes = max_bytes;
         let filter = filter;
         Box::pin(async move {
@@ -109,7 +119,7 @@ pub fn download_request_media(
 
 /// Validates that a GenerateRequest does not include unsupported features.
 pub fn validate_support(name: String, supports: ModelInfoSupports) -> ModelMiddleware {
-    Arc::new(move |req: GenerateRequest, next: ModelMiddlewareNext| {
+    Arc::new(move |req: GenerateRequest, next: ModelMiddlewareNext<'_>| {
         let name = name.clone();
         let supports = supports.clone();
         Box::pin(async move {
@@ -165,43 +175,45 @@ pub fn simulate_system_prompt(options: Option<SimulateSystemPromptOptions>) -> M
         .acknowledgement
         .unwrap_or_else(|| "Understood.".to_string());
 
-    Arc::new(move |mut req: GenerateRequest, next: ModelMiddlewareNext| {
-        let preface = preface.clone();
-        let acknowledgement = acknowledgement.clone();
-        Box::pin(async move {
-            if let Some(pos) = req
-                .messages
-                .iter()
-                .position(|m| m.role == crate::message::Role::System)
-            {
-                let system_message = req.messages.remove(pos);
-                let mut user_content = vec![Part {
-                    text: Some(preface),
-                    ..Default::default()
-                }];
-                user_content.extend(system_message.content);
-
-                let user_message = MessageData {
-                    role: crate::message::Role::User,
-                    content: user_content,
-                    metadata: None,
-                };
-                let model_message = MessageData {
-                    role: crate::message::Role::Model,
-                    content: vec![Part {
-                        text: Some(acknowledgement),
+    Arc::new(
+        move |mut req: GenerateRequest, next: ModelMiddlewareNext<'_>| {
+            let preface = preface.clone();
+            let acknowledgement = acknowledgement.clone();
+            Box::pin(async move {
+                if let Some(pos) = req
+                    .messages
+                    .iter()
+                    .position(|m| m.role == crate::message::Role::System)
+                {
+                    let system_message = req.messages.remove(pos);
+                    let mut user_content = vec![Part {
+                        text: Some(preface),
                         ..Default::default()
-                    }],
-                    metadata: None,
-                };
+                    }];
+                    user_content.extend(system_message.content);
 
-                req.messages
-                    .splice(pos..pos, vec![user_message, model_message]);
-            }
+                    let user_message = MessageData {
+                        role: crate::message::Role::User,
+                        content: user_content,
+                        metadata: None,
+                    };
+                    let model_message = MessageData {
+                        role: crate::message::Role::Model,
+                        content: vec![Part {
+                            text: Some(acknowledgement),
+                            ..Default::default()
+                        }],
+                        metadata: None,
+                    };
 
-            next(req).await
-        })
-    })
+                    req.messages
+                        .splice(pos..pos, vec![user_message, model_message]);
+                }
+
+                next(req).await
+            })
+        },
+    )
 }
 
 #[derive(Default, Clone)]
@@ -243,71 +255,77 @@ fn default_item_template(
 /// Injects retrieved documents as context into the last user message.
 pub fn augment_with_context(options: Option<AugmentWithContextOptions>) -> ModelMiddleware {
     let opts = options.unwrap_or_default();
-    Arc::new(move |mut req: GenerateRequest, next: ModelMiddlewareNext| {
-        let opts = opts.clone();
-        Box::pin(async move {
-            let docs = match req.docs.as_ref() {
-                Some(d) if !d.is_empty() => d,
-                _ => return next(req).await,
-            };
+    Arc::new(
+        move |mut req: GenerateRequest, next: ModelMiddlewareNext<'_>| {
+            let opts = opts.clone();
+            Box::pin(async move {
+                let docs = match req.docs.as_ref() {
+                    Some(d) if !d.is_empty() => d,
+                    _ => return next(req).await,
+                };
 
-            if let Some(user_message) = req
-                .messages
-                .iter_mut()
-                .rfind(|m| m.role == crate::message::Role::User)
-            {
-                // Check if context part already exists and is not pending
-                let context_part_index = user_message.content.iter().position(|p| {
-                    p.metadata
-                        .as_ref()
-                        .map_or_else(|| false, |m| m.get("purpose") == Some(&"context".into()))
-                });
+                if let Some(user_message) = req
+                    .messages
+                    .iter_mut()
+                    .rfind(|m| m.role == crate::message::Role::User)
+                {
+                    // Check if context part already exists and is not pending
+                    let context_part_index = user_message.content.iter().position(|p| {
+                        p.metadata
+                            .as_ref()
+                            .map_or_else(|| false, |m| m.get("purpose") == Some(&"context".into()))
+                    });
 
-                if let Some(idx) = context_part_index {
-                    let is_pending = user_message.content[idx]
-                        .metadata
-                        .as_ref()
-                        .and_then(|m| m.get("pending"))
-                        .and_then(|v| v.as_bool())
-                        .unwrap_or(false);
-                    if !is_pending {
-                        return next(req).await;
+                    if let Some(idx) = context_part_index {
+                        let is_pending = user_message.content[idx]
+                            .metadata
+                            .as_ref()
+                            .and_then(|m| m.get("pending"))
+                            .and_then(|v| v.as_bool())
+                            .unwrap_or(false);
+                        if !is_pending {
+                            return next(req).await;
+                        }
+                    }
+
+                    let preface = opts
+                        .preface
+                        .clone()
+                        .unwrap_or_else(|| CONTEXT_PREFACE.to_string());
+                    let mut context_text = preface;
+                    for (i, doc_data) in docs.iter().enumerate() {
+                        context_text.push_str(&default_item_template(
+                            &Document::from_part(doc_data.clone(), None),
+                            i,
+                            &opts,
+                        ));
+                    }
+                    context_text.push('\n');
+
+                    let mut context_metadata = std::collections::HashMap::new();
+                    context_metadata.insert(
+                        "purpose".to_string(),
+                        serde_json::Value::String("context".to_string()),
+                    );
+                    let new_part = Part {
+                        text: Some(context_text),
+                        metadata: Some(context_metadata),
+                        ..Default::default()
+                    };
+
+                    if let Some(idx) = context_part_index {
+                        // Replace pending part
+                        user_message.content[idx] = new_part;
+                    } else {
+                        // Append new part
+                        user_message.content.push(new_part);
                     }
                 }
 
-                let preface = opts
-                    .preface
-                    .clone()
-                    .unwrap_or_else(|| CONTEXT_PREFACE.to_string());
-                let mut context_text = preface;
-                for (i, doc_data) in docs.iter().enumerate() {
-                    context_text.push_str(&default_item_template(doc_data, i, &opts));
-                }
-                context_text.push('\n');
-
-                let mut context_metadata = std::collections::HashMap::new();
-                context_metadata.insert(
-                    "purpose".to_string(),
-                    serde_json::Value::String("context".to_string()),
-                );
-                let new_part = Part {
-                    text: Some(context_text),
-                    metadata: Some(context_metadata),
-                    ..Default::default()
-                };
-
-                if let Some(idx) = context_part_index {
-                    // Replace pending part
-                    user_message.content[idx] = new_part;
-                } else {
-                    // Append new part
-                    user_message.content.push(new_part);
-                }
-            }
-
-            next(req).await
-        })
-    })
+                next(req).await
+            })
+        },
+    )
 }
 
 pub type InstructionsRenderer = Box<dyn Fn(&serde_json::Value) -> String + Send + Sync>;
@@ -332,27 +350,31 @@ pub fn simulate_constrained_generation(
     // A simpler approach for now is to not support custom renderers.
     let _ = options; // Mark as used.
 
-    Arc::new(move |mut req: GenerateRequest, next: ModelMiddlewareNext| {
-        Box::pin(async move {
-            let mut instructions: Option<String> = None;
-            if let Some(output) = &req.output {
-                if output.constrained == Some(true) {
-                    if let Some(schema) = &output.schema {
-                        instructions = Some(default_constrained_generation_instructions(schema));
-                    }
-                }
-            }
-            if let Some(instr) = instructions {
-                req.messages = inject_instructions(&req.messages, Some(instr));
-                if let Some(output) = req.output.as_mut() {
-                    output.constrained = Some(false);
-                    output.format = None;
-                    output.content_type = None;
-                    output.schema = None;
-                }
-            }
+    Arc::new(
+        move |mut req: GenerateRequest, next: ModelMiddlewareNext<'_>| {
+            Box::pin(async move {
+                let mut instructions: Option<String> = None;
+                // TODO
+                // if let Some(output) = &req.output {
+                //     if output.constrained == Some(true) {
+                //         if let Some(schema) = &output.schema {
+                //             instructions =
+                //                 Some(default_constrained_generation_instructions(schema));
+                //         }
+                //     }
+                // }
+                // if let Some(instr) = instructions {
+                //     req.messages = inject_instructions(&req.messages, Some(instr));
+                //     if let Some(output) = req.output.as_mut() {
+                //         output.constrained = Some(false);
+                //         output.format = None;
+                //         output.content_type = None;
+                //         output.schema = None;
+                //     }
+                // }
 
-            next(req).await
-        })
-    })
+                next(req).await
+            })
+        },
+    )
 }

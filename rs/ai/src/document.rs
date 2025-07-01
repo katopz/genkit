@@ -124,8 +124,13 @@ pub struct Document {
 impl Document {
     /// Creates a new `Document` from a text string.
     pub fn from_text(text: impl Into<String>, metadata: Option<HashMap<String, Value>>) -> Self {
+        Document::from_part(Part::text(text), metadata)
+    }
+
+    /// Creates a new `Document` from a part.
+    pub fn from_part(part: Part, metadata: Option<HashMap<String, Value>>) -> Self {
         Document {
-            content: vec![Part::text(text)],
+            content: vec![part],
             metadata,
         }
     }
