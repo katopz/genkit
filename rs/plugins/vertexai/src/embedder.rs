@@ -18,6 +18,7 @@
 
 use crate::{common::VertexAIPluginOptions, predict::predict_model, Error};
 use genkit_ai::embedder::{define_embedder, EmbedRequest, EmbedResponse, Embedding};
+use genkit_core::Registry;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
@@ -53,7 +54,9 @@ pub fn define_vertex_ai_embedder(
 ) -> genkit_ai::embedder::EmbedderAction<VertexEmbeddingConfig> {
     let model_id = model_name.to_string();
     let opts = options.clone();
+    let mut regitry = Registry::new();
     define_embedder(
+        &mut regitry,
         &format!("vertexai/{}", model_name),
         move |req: EmbedRequest<VertexEmbeddingConfig>, _| {
             let model_id = model_id.clone();

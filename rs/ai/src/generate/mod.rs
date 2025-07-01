@@ -312,6 +312,7 @@ where
         + 'static
         + std::fmt::Debug,
 {
+    println!("[generate] options.output: {:?}", options.output);
     let model_ref = options
         .model
         .as_ref()

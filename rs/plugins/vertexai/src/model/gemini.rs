@@ -29,6 +29,7 @@ use genkit_ai::{
     tool::ToolDefinition,
     ToolRequest,
 };
+use genkit_core::Registry;
 use reqwest::header::{HeaderMap, AUTHORIZATION, CONTENT_TYPE};
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
@@ -477,7 +478,8 @@ pub fn define_gemini_model(model_name: &str, options: &VertexAIPluginOptions) ->
         ..Default::default()
     };
 
-    define_model(model_options, move |req, _| {
+    let mut registry = Registry::new();
+    define_model(&mut registry, model_options, move |req, _| {
         let model_id_clone = model_id.clone();
         let opts_clone = opts.clone();
         Box::pin(async move {

@@ -101,31 +101,15 @@ pub fn resolve_instructions(
     schema: Option<&Schema>,
     instructions_option: Option<&Value>,
 ) -> Option<String> {
-    println!(
-        "[resolve_instructions] format: {:?}",
-        format.map(|f| &f.name)
-    );
-    println!("[resolve_instructions] schema: {:?}", schema.is_some());
-    println!(
-        "[resolve_instructions] instructions_option: {:?}",
-        instructions_option
-    );
     if let Some(Value::String(s)) = instructions_option {
-        println!("[resolve_instructions] user provided instructions");
         return Some(s.clone()); // user provided instructions
     }
     if let Some(Value::Bool(false)) = instructions_option {
-        println!("[resolve_instructions] user says no instructions");
         return None; // user says no instructions
     }
     let format = format?;
     let handler = (format.handler)(schema);
-    let instructions = handler.instructions();
-    println!(
-        "[resolve_instructions] resolved instructions: {:?}",
-        instructions
-    );
-    instructions
+    handler.instructions()
 }
 
 /// Injects formatting instructions into the message list.

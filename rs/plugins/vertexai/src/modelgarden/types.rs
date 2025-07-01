@@ -26,7 +26,7 @@ use serde::Deserialize;
 pub struct ModelGardenOptions {
     /// A list of Model Garden models to register.
     #[serde(default)]
-    pub models: Vec<ModelRef>,
+    pub models: Vec<ModelRef<serde_json::Value>>,
     /// A template for the OpenAI-compatible base URL.
     ///
     /// This is used for models that expose an OpenAI-compatible endpoint.

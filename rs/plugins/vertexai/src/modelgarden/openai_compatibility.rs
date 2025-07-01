@@ -18,10 +18,11 @@
 //! with models in the Vertex AI Model Garden that expose an OpenAI-compatible API.
 
 use genkit_ai::model::{
-    define_model, CandidateData, FinishReason, GenerateRequest, GenerateResponseData, ModelAction,
-    ModelRef, Role, ToolDefinition,
+    define_model, CandidateData, FinishReason, GenerateRequest, GenerateResponse,
+    GenerateResponseData, ModelAction, ModelRef,
 };
-use genkit_ai::Part;
+use genkit_ai::{MessageData, Part, Role, ToolDefinition};
+use genkit_core::Registry;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
@@ -31,7 +32,7 @@ use serde::{Deserialize, Serialize};
 // actual types from the chosen crate.
 
 // Placeholder structs - these would come from the `async-openai` crate.
-mod openai_types {
+pub mod openai_types {
     use super::*;
     use serde_json::Value;
 
@@ -136,30 +137,34 @@ pub fn to_openai_tool(tool: &ToolDefinition) -> ChatCompletionTool {
         r#type: "function".to_string(),
         function: FunctionDefinition {
             name: tool.name.clone(),
-            description: tool.description.clone(),
+            description: Some(tool.description.clone()),
             parameters: tool.input_schema.clone().unwrap_or(serde_json::json!({})),
         },
     }
 }
 
 pub fn to_openai_messages(
-    messages: &[Part],
-    role: Role,
+    messages: &[MessageData],
 ) -> Vec<openai_types::ChatCompletionRequestMessage> {
     // This is a simplified conversion. A real implementation would need to handle
     // multi-part messages, tool calls, and tool responses correctly.
-    let content = messages
+    messages
         .iter()
-        .filter_map(|p| p.text.clone())
-        .collect::<Vec<String>>()
-        .join("\n");
-
-    vec![openai_types::ChatCompletionRequestMessage {
-        role: to_openai_role(role),
-        content,
-        tool_calls: None,
-        tool_call_id: None,
-    }]
+        .map(|m| {
+            let content = m
+                .content
+                .iter()
+                .filter_map(|p| p.text.clone())
+                .collect::<Vec<String>>()
+                .join("\n");
+            openai_types::ChatCompletionRequestMessage {
+                role: to_openai_role(m.role.clone()),
+                content,
+                tool_calls: None,
+                tool_call_id: None,
+            }
+        })
+        .collect()
 }
 
 pub fn from_openai_choice(choice: openai_types::ChatCompletionChoice) -> CandidateData {
@@ -191,7 +196,7 @@ pub fn from_openai_choice(choice: openai_types::ChatCompletionChoice) -> Candida
 
 /// Creates a `ModelAction` for an OpenAI-compatible model from the Model Garden.
 pub fn openai_compatible_model(
-    model_ref: ModelRef,
+    model_ref: ModelRef<serde_json::Value>,
     // The factory would produce a configured OpenAI client.
     // _client_factory: fn() -> T, where T is an OpenAI client.
 ) -> ModelAction {
@@ -204,11 +209,7 @@ pub fn openai_compatible_model(
             // let client = client_factory();
 
             // 2. Convert Genkit request to OpenAI request.
-            let messages: Vec<ChatCompletionRequestMessage> = req
-                .messages
-                .iter()
-                .flat_map(|m| to_openai_messages(&m.content, m.role))
-                .collect();
+            let messages: Vec<ChatCompletionRequestMessage> = to_openai_messages(&req.messages);
 
             let tools = req
                 .tools
@@ -243,8 +244,8 @@ pub fn openai_compatible_model(
                     "total_tokens": 21
                 }
             }"#;
-            let response: ChatCompletionResponse =
-                serde_json::from_str(mock_response_json).unwrap();
+            let response: ChatCompletionResponse = serde_json::from_str(mock_response_json)
+                .map_err(|e| genkit_core::error::Error::new_internal(e.to_string()))?;
 
             // 4. Convert OpenAI response to Genkit response.
             let candidates = response
@@ -253,15 +254,20 @@ pub fn openai_compatible_model(
                 .map(from_openai_choice)
                 .collect();
 
-            Ok(GenerateResponseData {
-                candidates,
-                usage: None, // Would be mapped from response.usage
+            Ok(GenerateResponse {
+                data: GenerateResponseData {
+                    candidates,
+                    usage: None, // Would be mapped from response.usage
+                    ..Default::default()
+                },
                 ..Default::default()
             })
         }
     };
 
+    let mut registry = Registry::default();
     define_model(
+        &mut registry,
         genkit_ai::model::DefineModelOptions {
             name: model_ref.name.clone(),
             ..Default::default()

@@ -24,6 +24,7 @@ use genkit_ai::model::{
     ModelAction, ModelInfo, ModelInfoSupports, ModelRef,
 };
 use genkit_ai::{Part, Role};
+use genkit_core::Registry;
 use reqwest::header::{HeaderMap, AUTHORIZATION, CONTENT_TYPE};
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
@@ -239,13 +240,14 @@ pub fn define_anthropic_model(
 
     let model_options = genkit_ai::model::DefineModelOptions {
         name: model_ref.name,
-        label: model_ref.info.label,
+        label: Some(model_ref.info.label),
         supports: model_ref.info.supports,
         versions: model_ref.info.versions,
         config_schema: Some(serde_json::from_str("{}").unwrap()),
     };
 
-    define_model(model_options, move |req, _| {
+    let mut registry = Registry::default();
+    define_model(&mut registry, model_options, move |req, _| {
         let model_id = model_id.clone();
         let opts = opts.clone();
         async move {
@@ -259,16 +261,16 @@ pub fn define_anthropic_model(
 // Helper functions to create model references
 pub fn claude_3_5_sonnet() -> ModelRef<AnthropicConfig> {
     model_ref(ModelInfo {
-        name: "vertexai/claude-3-5-sonnet-20240620",
+        name: "vertexai/claude-3-5-sonnet-20240620".to_owned(),
         label: "Claude 3.5 Sonnet".to_string(),
-        supports: ModelInfoSupports {
+        supports: Some(ModelInfoSupports {
             multiturn: Some(true),
             media: Some(true),
             tools: Some(true),
             system_role: Some(true),
             output: Some(vec!["text".to_string()]),
             ..Default::default()
-        },
+        }),
         ..Default::default()
     })
 }

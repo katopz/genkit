@@ -22,6 +22,7 @@ use crate::{Error, Result};
 use genkit_ai::evaluator::{
     define_evaluator, BaseEvalDataPoint, EvalResponse, EvaluatorAction, Score,
 };
+use genkit_core::Registry;
 use reqwest::header::{HeaderMap, AUTHORIZATION, CONTENT_TYPE};
 use serde::{de::DeserializeOwned, Serialize};
 use std::sync::Arc;
@@ -57,8 +58,10 @@ impl EvaluatorFactory {
         let to_request = Arc::new(to_request);
         let response_handler = Arc::new(response_handler);
         let metric_name = metric.to_string();
+        let registry = Registry::new();
 
         (*define_evaluator(
+            &mut registry,
             &format!("vertexai/{}", metric_name.to_lowercase()),
             move |datapoint: BaseEvalDataPoint| {
                 let factory_clone = factory.clone();

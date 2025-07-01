@@ -58,6 +58,18 @@ impl From<ToolDefinition> for ToolRequest {
     }
 }
 
+impl From<ToolRequest> for ToolDefinition {
+    fn from(def: ToolRequest) -> Self {
+        ToolDefinition {
+            name: def.name.clone(),
+            input_schema: def.input,
+            description: def.name.clone(),
+            output_schema: None,
+            metadata: None,
+        }
+    }
+}
+
 /// An error thrown to interrupt a tool's execution.
 /// The framework will catch this and return a response with an interrupt reason.
 #[derive(Debug, Error)]

@@ -22,13 +22,13 @@ use crate::predict::predict_model;
 use crate::Result;
 use genkit_ai::{
     model::{
-        define_model, CandidateData, FinishReason, GenerateRequest, GenerateResponseData,
-        ModelAction,
+        define_model, CandidateData, FinishReason, GenerateRequest, GenerateResponse,
+        GenerateResponseData, ModelAction,
     },
     Part,
 };
-use genkit_core::error::Error as CoreError;
-use schemars::JsonSchema;
+use genkit_core::{error::Error as CoreError, Registry};
+use schemars::{schema_for, JsonSchema};
 use serde::{Deserialize, Serialize};
 
 // Configuration for Imagen models.
@@ -64,29 +64,22 @@ async fn imagen_runner(
     req: GenerateRequest,
     model_id: String,
     options: VertexAIPluginOptions,
-) -> Result<GenerateResponseData> {
+) -> std::result::Result<GenerateResponse, CoreError> {
     let prompt = req
         .messages
         .last()
-        .ok_or_else(|| CoreError::new_internal("Imagen requires a prompt in the last message."))
-        .map_err(crate::Error::from)?
+        .ok_or_else(|| CoreError::new_internal("Imagen requires a prompt in the last message."))?
         .content
         .iter()
         .find_map(|p| p.text.as_deref())
-        .ok_or_else(|| CoreError::new_internal("Imagen prompt message must contain text."))
-        .map_err(crate::Error::from)?;
+        .ok_or_else(|| CoreError::new_internal("Imagen prompt message must contain text."))?;
 
     let config: ImagenConfig = req
         .config
         .as_ref()
         .map(|v| serde_json::from_value(v.clone()))
         .transpose()
-        .map_err(|e| {
-            crate::Error::from(CoreError::new_internal(format!(
-                "Failed to parse Imagen config: {}",
-                e
-            )))
-        })?
+        .map_err(|e| CoreError::new_internal(format!("Failed to parse Imagen config: {}", e)))?
         .unwrap_or_default();
 
     let parameters = VertexImagenParameters {
@@ -114,7 +107,7 @@ async fn imagen_runner(
                 ..Default::default()
             })
         })
-        .collect::<crate::Result<Vec<Part>>>()?;
+        .collect::<Result<Vec<Part>>>()?;
 
     let candidate = CandidateData {
         index: 0,
@@ -127,8 +120,11 @@ async fn imagen_runner(
         finish_message: None,
     };
 
-    Ok(GenerateResponseData {
-        candidates: vec![candidate],
+    Ok(GenerateResponse {
+        data: GenerateResponseData {
+            candidates: vec![candidate],
+            ..Default::default()
+        },
         ..Default::default()
     })
 }
@@ -140,31 +136,28 @@ pub fn define_imagen_model(model_name: &str, options: &VertexAIPluginOptions) ->
 
     let info = genkit_ai::model::ModelInfo {
         label: format!("Vertex AI - {}", model_name),
-        supports: genkit_ai::model::ModelInfoSupports {
+        supports: Some(genkit_ai::model::ModelInfoSupports {
             media: Some(true),
             multiturn: Some(false), // Imagen is not a chat model
             tools: Some(false),
             system_role: Some(false),
             ..Default::default()
-        },
+        }),
         ..Default::default()
     };
 
     let model_options = genkit_ai::model::DefineModelOptions {
         name: format!("vertexai/{}", model_name),
-        label: info.label,
+        label: Some(info.label),
         supports: info.supports,
-        config_schema: Some(ImagenConfig::default()),
+        config_schema: Some(serde_json::to_value(schema_for!(ImagenConfig)).unwrap()),
         versions: info.versions,
     };
 
-    define_model(model_options, move |req, _| {
+    let mut registry = Registry::default();
+    define_model(&mut registry, model_options, move |req, _| {
         let model_id_clone = model_id.clone();
         let opts_clone = opts.clone();
-        async move {
-            imagen_runner(req, model_id_clone, opts_clone)
-                .await
-                .map_err(|e| e.into())
-        }
+        Box::pin(async move { imagen_runner(req, model_id_clone, opts_clone).await })
     })
 }

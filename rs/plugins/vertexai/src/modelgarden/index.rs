@@ -87,12 +87,13 @@ impl Plugin for VertexAIModelGardenPlugin {
                 define_mistral_model(
                     typed_model_ref,
                     base_options,
-                    model_garden_options.open_ai_base_url_template.clone(),
+                    model_garden_options
+                        .open_ai_base_url_template
+                        .unwrap_or_default(),
                 )
             } else if is_llama_model(&model_ref.name) {
                 let config = model_ref
                     .config
-                    .as_ref()
                     .map(|v| serde_json::from_value(v.clone()))
                     .transpose()?;
                 let typed_model_ref = genkit_ai::ModelRef {
@@ -111,7 +112,7 @@ impl Plugin for VertexAIModelGardenPlugin {
                     model_ref.name
                 )));
             };
-            registry.register_action(Arc::new(action))?;
+            registry.register_action(model_ref.name.clone(), action)?;
         }
         Ok(())
     }
@@ -121,6 +122,3 @@ impl Plugin for VertexAIModelGardenPlugin {
 pub fn vertex_ai_model_garden(options: ModelGardenPluginOptions) -> Arc<dyn Plugin> {
     Arc::new(VertexAIModelGardenPlugin::new(options))
 }
-
-// Re-export model references for easy access
-pub use super::types::ModelGardenPluginOptions as PluginOptions;

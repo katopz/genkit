@@ -13,7 +13,7 @@
 // limitations under the License.
 
 use futures_util::StreamExt;
-use genkit::model::{Candidate, GenerateRequest, Message, Role};
+use genkit::model::{Candidate, Message, Role};
 
 use genkit::{FinishReason, Part};
 use genkit_ai::formats::types::FormatHandler;
@@ -59,57 +59,53 @@ fn define_echo_model(registry: &mut Registry, constrained_support: &str) {
         supports,
         ..Default::default()
     };
-    define_model(
-        registry,
-        model_opts,
-        |req: GenerateRequest, streaming_callback| async move {
-            let last_msg_text = req.messages.last().cloned().unwrap_or_default();
+    define_model(registry, model_opts, |req, streaming_callback| async move {
+        let last_msg_text = req.messages.last().cloned().unwrap_or_default();
 
-            // If a streaming callback is provided, we send down the countdown chunks.
-            if let Some(cb) = streaming_callback {
-                let chunks_data = vec![
-                    GenerateResponseChunkData {
-                        index: 0,
-                        content: vec![genkit::model::Part::text("3")],
-                        ..Default::default()
-                    },
-                    GenerateResponseChunkData {
-                        index: 0,
-                        content: vec![genkit::model::Part::text("2")],
-                        ..Default::default()
-                    },
-                    GenerateResponseChunkData {
-                        index: 0,
-                        content: vec![genkit::model::Part::text("1")],
-                        ..Default::default()
-                    },
-                ];
-
-                for data in chunks_data {
-                    cb(data);
-                }
-            }
-
-            // Both streaming and non-streaming calls return a final response.
-            let text = format!(
-                "Echo: {}",
-                Message::<String>::new(last_msg_text, None).text()
-            );
-            Ok(GenerateResponseData {
-                candidates: vec![Candidate {
+        // If a streaming callback is provided, we send down the countdown chunks.
+        if let Some(cb) = streaming_callback {
+            let chunks_data = vec![
+                GenerateResponseChunkData {
                     index: 0,
-                    finish_reason: Some(FinishReason::Stop),
-                    message: MessageData {
-                        role: Role::Model,
-                        content: vec![Part::text(text)],
-                        metadata: None,
-                    },
+                    content: vec![genkit::model::Part::text("3")],
                     ..Default::default()
-                }],
+                },
+                GenerateResponseChunkData {
+                    index: 0,
+                    content: vec![genkit::model::Part::text("2")],
+                    ..Default::default()
+                },
+                GenerateResponseChunkData {
+                    index: 0,
+                    content: vec![genkit::model::Part::text("1")],
+                    ..Default::default()
+                },
+            ];
+
+            for data in chunks_data {
+                cb(data);
+            }
+        }
+
+        // Both streaming and non-streaming calls return a final response.
+        let text = format!(
+            "Echo: {}",
+            Message::<String>::new(last_msg_text, None).text()
+        );
+        Ok(GenerateResponseData {
+            candidates: vec![Candidate {
+                index: 0,
+                finish_reason: Some(FinishReason::Stop),
+                message: MessageData {
+                    role: Role::Model,
+                    content: vec![Part::text(text)],
+                    metadata: None,
+                },
                 ..Default::default()
-            })
-        },
-    );
+            }],
+            ..Default::default()
+        })
+    });
 }
 
 #[fixture]
