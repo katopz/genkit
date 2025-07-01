@@ -40,7 +40,7 @@ pub enum Role {
 }
 
 /// A serializable representation of a message's data.
-#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, PartialEq)]
+#[derive(Default, Debug, Clone, Serialize, Deserialize, JsonSchema, PartialEq)]
 pub struct MessageData {
     pub role: Role,
     pub content: Vec<Part>,

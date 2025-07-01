@@ -173,7 +173,7 @@ pub struct GenerationUsage {
 }
 
 /// A candidate response from a generative model.
-#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+#[derive(Default, Debug, Clone, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct CandidateData {
     pub index: u32,

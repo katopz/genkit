@@ -210,6 +210,7 @@ struct RegistryState {
     schemas: HashMap<String, schema::ProvidedSchema>,
     values: HashMap<String, HashMap<String, Arc<dyn Any + Send + Sync>>>,
     parent: Option<Registry>,
+    default_model: Option<String>,
 }
 
 impl Debug for Registry {
@@ -305,6 +306,22 @@ impl Registry {
         // }
         // #[cfg(not(feature = "dotprompt-private"))]
         Self { state }
+    }
+
+    pub fn set_default_model(&mut self, name: String) {
+        let mut state = self.state.lock().unwrap();
+        state.default_model = Some(name);
+    }
+
+    pub fn get_default_model(&self) -> Option<String> {
+        let state = self.state.lock().unwrap();
+        if let Some(model_name) = state.default_model.as_ref() {
+            return Some(model_name.clone());
+        }
+        if let Some(parent) = &state.parent {
+            return parent.get_default_model();
+        }
+        None
     }
 
     /// Registers an action with the registry.

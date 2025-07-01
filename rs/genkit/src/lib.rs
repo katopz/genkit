@@ -14,7 +14,8 @@
 
 //! # Genkit
 //!
-//! The main Genkit library for Rust, providing tools for building AI-powered flows.
+//
+// The main Genkit library for Rust, providing tools for building AI-powered flows.
 //!
 //! This crate is the Rust equivalent of the main `genkit` npm package. It provides
 //! high-level APIs for defining flows, models, tools, and other key components
@@ -86,6 +87,13 @@ pub struct Genkit {
     registry: Registry,
 }
 
+/// Options for Genkit initialization.
+#[derive(Default)]
+pub struct GenkitOptions {
+    pub plugins: Vec<Arc<dyn Plugin>>,
+    pub default_model: Option<String>,
+}
+
 /// Options for creating a new session.
 #[cfg(feature = "beta")]
 #[derive(Default)]
@@ -96,9 +104,12 @@ pub struct CreateSessionOptions<S> {
 
 impl Genkit {
     /// Initializes the Genkit framework with a list of plugins.
-    pub async fn init(plugins: Vec<Arc<dyn Plugin>>) -> Result<&'static Arc<Self>> {
+    pub async fn init(options: GenkitOptions) -> Result<&'static Arc<Self>> {
         let mut registry = Registry::new();
-        for plugin in plugins {
+        if let Some(model_name) = options.default_model {
+            registry.set_default_model(model_name);
+        }
+        for plugin in options.plugins {
             plugin.initialize(&mut registry).await?;
         }
         let instance = Arc::new(Self { registry });

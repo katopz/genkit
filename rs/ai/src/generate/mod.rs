@@ -232,6 +232,13 @@ where
         + 'static
         + std::fmt::Debug,
 {
+    // If no model is specified in the options, try to use the default from the registry.
+    if options.model.is_none() {
+        if let Some(model_name) = registry.get_default_model() {
+            options.model = Some(crate::model::Model::Name(model_name));
+        }
+    }
+
     // The `on_chunk` callback is handled by `run_with_streaming_callback`, so we take it here.
     let on_chunk_callback = options.on_chunk.take();
     let registry_clone = registry.clone();
