@@ -93,7 +93,6 @@ use genkit_ai::{
     EvalResponse, GenerateResponseChunkData, ModelAction,
 };
 pub use genkit_core::context::ActionContext;
-use genkit_core::registry::ErasedAction;
 pub use genkit_core::registry::Registry;
 use genkit_core::{Action, ActionFnArg};
 use schemars::JsonSchema;
@@ -193,7 +192,7 @@ impl Genkit {
         S: Serialize + JsonSchema + Send + Sync + Clone + 'static,
         F: Fn(I, ActionFnArg<S>) -> Fut + Send + Sync + 'static,
         Fut: Future<Output = Result<O>> + Send,
-        Action<I, O, S>: ErasedAction + 'static,
+        Action<I, O, S>: genkit_core::registry::ErasedAction + 'static,
     {
         define_flow(&mut self.registry, name, func)
     }

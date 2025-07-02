@@ -23,7 +23,7 @@ use genkit::{
     model::{FinishReason, Part, Role},
     plugin::Plugin,
     registry::Registry,
-    Genkit, GenkitOptions, Model, ToolDefinition,
+    Genkit, GenkitOptions, Model, ToolConfig,
 };
 use genkit_ai::{
     define_model,
@@ -34,7 +34,8 @@ use genkit_ai::{
     GenerateOptions, MessageData, ToolRequest,
 };
 use schemars::JsonSchema;
-use serde_json::json;
+use serde::{Deserialize, Serialize};
+use serde_json::{json, Value};
 use std::sync::{Arc, Mutex};
 
 use helpers::StreamingCallback;
@@ -663,7 +664,7 @@ async fn test_config_picks_up_top_level_version_from_the_ref() {
 // Tools Tests
 //
 
-#[derive(Debug, serde::Serialize, serde::Deserialize, JsonSchema)]
+#[derive(Debug, Serialize, Deserialize, JsonSchema, Clone)]
 struct TestToolInput {}
 
 #[tokio::test]
@@ -671,19 +672,16 @@ async fn test_tools_call_the_tool() {
     let (genkit, pm_handle) = genkit_with_programmable_model().await;
     let req_counter = Arc::new(Mutex::new(0));
 
-    let genkit = Genkit::init(GenkitOptions {
-        ..Default::default()
-    })
-    .await
-    .unwrap();
-
-    let test_tool = genkit.define_tool(ToolDefinition {
-        name: "testTool".to_string(),
-        description: "description".to_string(),
-        input_schema: Some(TestToolInput),
-        output_schema: Some(String),
-        metadata: None,
-    });
+    let test_tool = genkit::dynamic_tool(
+        ToolConfig {
+            name: "testTool".to_string(),
+            description: "description".to_string(),
+            input_schema: Some(TestToolInput {}),
+            output_schema: Some(Value::Null),
+            metadata: None,
+        },
+        |_, _| async { Ok(serde_json::json!("tool called")) },
+    );
 
     {
         let mut handler = pm_handle.handler.lock().unwrap();
@@ -734,7 +732,9 @@ async fn test_tools_call_the_tool() {
         .generate(GenerateOptions {
             model: Some(Model::Name("programmableModel".to_string())),
             prompt: Some(vec![Part::text("call the tool")]),
-            tools: Some(vec![test_tool]),
+            tools: Some(vec![(Arc::new(test_tool)
+                as Arc<dyn genkit_core::registry::ErasedAction>)
+                .into()]),
             ..Default::default()
         })
         .await
@@ -750,7 +750,7 @@ async fn test_tools_call_the_tool() {
     assert_eq!(messages[1].role, Role::Model);
     assert!(messages[1].content[0].tool_request.is_some());
     assert_eq!(messages[2].role, Role::Tool);
-    let tool_response = messages[2].content[0].tool_response.unwrap();
+    let tool_response = messages[2].content[0].tool_response.clone().unwrap();
     assert_eq!(tool_response.name, "testTool");
     assert_eq!(
         tool_response.output,
