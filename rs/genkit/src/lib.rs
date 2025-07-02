@@ -166,6 +166,21 @@ impl Genkit {
         define_tool(&mut self.registry, config, runner)
     }
 
+    /// Defines a new tool and registers it with the Genkit registry.
+    pub fn define_tool<I, O, F, Fut>(
+        &mut self,
+        config: ToolConfig<I, O>,
+        runner: F,
+    ) -> ToolAction<I, O, ()>
+    where
+        I: JsonSchema + Serialize + DeserializeOwned + Send + Sync + Clone + 'static,
+        O: JsonSchema + Serialize + DeserializeOwned + Send + Sync + 'static,
+        F: Fn(I, ToolFnOptions) -> Fut + Send + Sync + Clone + 'static,
+        Fut: Future<Output = Result<O>> + Send + 'static,
+    {
+        define_tool(&mut self.registry, config, runner)
+    }
+
     /// Defines and registers a flow function.
     pub fn define_flow<I, O, S, F, Fut>(
         &mut self,
