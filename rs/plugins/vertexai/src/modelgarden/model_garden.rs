@@ -35,6 +35,7 @@ pub struct ModelGardenModelConfig {
 }
 
 /// A reference to the Llama 3.1 model in the Model Garden.
+#[allow(unused)]
 pub fn llama3_1() -> ModelRef<ModelGardenModelConfig> {
     model_ref(ModelInfo {
         name: "vertexai/llama-3.1".to_string(),
@@ -44,6 +45,7 @@ pub fn llama3_1() -> ModelRef<ModelGardenModelConfig> {
 }
 
 /// A reference to the Llama 3.2 model in the Model Garden.
+#[allow(unused)]
 pub fn llama3_2() -> ModelRef<ModelGardenModelConfig> {
     model_ref(ModelInfo {
         name: "vertexai/llama-3.2".to_string(),
@@ -54,6 +56,7 @@ pub fn llama3_2() -> ModelRef<ModelGardenModelConfig> {
 
 /// A reference to the Llama 3 model in the Model Garden (deprecated in favor of `llama3_1`).
 #[deprecated(since = "0.1.0", note = "Please use `llama3_1` instead")]
+#[allow(unused)]
 pub fn llama3() -> ModelRef<ModelGardenModelConfig> {
     model_ref(ModelInfo {
         name: "vertexai/llama3-405b".to_string(),
@@ -67,7 +70,7 @@ pub fn llama3() -> ModelRef<ModelGardenModelConfig> {
 /// This function constructs the appropriate base URL for the model's endpoint and then
 /// uses the `openai_compatible_model` compatibility layer to create the action.
 pub fn model_garden_openai_compatible_model(
-    model_ref: ModelRef<ModelGardenModelConfig>,
+    model_ref: &ModelRef<serde_json::Value>,
     options: &VertexAIPluginOptions,
     base_url_template: Option<String>,
 ) -> ModelAction {
@@ -94,11 +97,16 @@ pub fn model_garden_openai_compatible_model(
             let opts = opts.clone();
             let template = template.clone();
             async move {
-                let config: ModelGardenModelConfig = req
-                    .config
-                    .as_ref()
-                    .map(|v| serde_json::from_value(v.clone()).unwrap())
-                    .unwrap_or_default();
+                let config: ModelGardenModelConfig = if let Some(val) = req.config.as_ref() {
+                    serde_json::from_value(val.clone())
+                        .map_err(|e| genkit_core::error::Error::new_internal(e.to_string()))?
+                } else {
+                    // This case seems to imply we should have a base config from the model_ref,
+                    // but ModelRef<T> carries PhantomData, not a value.
+                    // For now, we'll default. A proper implementation would need to resolve
+                    // the config from the plugin options.
+                    Default::default()
+                };
                 let params = crate::common::get_derived_params(&opts)
                     .await
                     .map_err(|e| genkit_core::error::Error::new_internal(e.to_string()))?;
@@ -179,6 +187,6 @@ pub fn model_garden_openai_compatible_model(
                 serde_json::to_value(schemars::schema_for!(ModelGardenModelConfig)).unwrap(),
             ),
         },
-        move |req, cb| runner(req, cb),
+        runner,
     )
 }

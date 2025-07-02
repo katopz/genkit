@@ -90,6 +90,7 @@ pub mod openai_types {
     }
 
     #[derive(Debug, Deserialize)]
+    #[allow(unused)]
     pub struct ChatCompletionResponseMessage {
         pub role: String,
         #[serde(skip_serializing_if = "Option::is_none")]
@@ -99,6 +100,7 @@ pub mod openai_types {
     }
 
     #[derive(Debug, Deserialize)]
+    #[allow(unused)]
     pub struct ChatCompletionResponse {
         pub id: String,
         pub object: String,
@@ -198,6 +200,7 @@ pub fn from_openai_choice(choice: openai_types::ChatCompletionChoice) -> Candida
 }
 
 /// Creates a `ModelAction` for an OpenAI-compatible model from the Model Garden.
+#[allow(unused)]
 pub fn openai_compatible_model(
     model_ref: ModelRef<serde_json::Value>,
     // The factory would produce a configured OpenAI client.

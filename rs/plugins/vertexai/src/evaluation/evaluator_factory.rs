@@ -136,11 +136,3 @@ impl EvaluatorFactory {
         response.json::<Resp>().await.map_err(Error::from)
     }
 }
-
-impl ToString for VertexAIEvaluationMetricType {
-    fn to_string(&self) -> String {
-        serde_json::to_string(self)
-            .map(|s| s.trim_matches('"').to_string())
-            .unwrap_or_else(|_| "unknown".to_string())
-    }
-}

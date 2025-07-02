@@ -20,10 +20,12 @@
 use crate::common::VertexAIPluginOptions;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
+use strum::Display;
 
 /// The type of metric to be used for evaluation.
-#[derive(Debug, Serialize, Deserialize, Clone, PartialEq, Eq)]
+#[derive(Debug, Serialize, Deserialize, Clone, PartialEq, Eq, Display)]
 #[serde(rename_all = "SCREAMING_SNAKE_CASE")]
+#[strum(serialize_all = "SCREAMING_SNAKE_CASE")]
 pub enum VertexAIEvaluationMetricType {
     Bleu,
     Rouge,

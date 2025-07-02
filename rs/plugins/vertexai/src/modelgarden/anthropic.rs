@@ -210,16 +210,17 @@ async fn anthropic_runner(
     let full_response_text = response.text().await?;
     let mut last_json = None;
     for line in full_response_text.lines() {
-        if line.starts_with("data: ") {
-            if let Ok(value) = serde_json::from_str::<Value>(&line[6..]) {
-                if value["type"] == "message_stop" {
-                    // This event signals the end, but the content is in prior events.
-                    // We grab the `message` field from this event as the final one.
-                    if let Some(msg) = value.get("message") {
-                        last_json = Some(msg.clone());
-                    }
-                    break;
+        if !line.starts_with("data: ") {
+            continue;
+        }
+        if let Ok(value) = serde_json::from_str::<Value>(&line[6..]) {
+            if value["type"] == "message_stop" {
+                // This event signals the end, but the content is in prior events.
+                // We grab the `message` field from this event as the final one.
+                if let Some(msg) = value.get("message") {
+                    last_json = Some(msg.clone());
                 }
+                break;
             }
         }
     }
@@ -232,18 +233,18 @@ async fn anthropic_runner(
 }
 
 pub fn define_anthropic_model(
-    model_ref: genkit_ai::model::ModelRef<serde_json::Value>,
+    model_ref: &genkit_ai::model::ModelRef<serde_json::Value>,
     options: &VertexAIPluginOptions,
 ) -> ModelAction {
-    let model_id = model_ref.name.split('/').last().unwrap().to_string();
+    let model_id = model_ref.name.split('/').next_back().unwrap().to_string();
     let opts = options.clone();
 
     let model_options = genkit_ai::model::DefineModelOptions {
-        name: model_ref.name,
-        label: Some(model_ref.info.label),
-        supports: model_ref.info.supports,
-        versions: model_ref.info.versions,
-        config_schema: Some(serde_json::from_str("{}").unwrap()),
+        name: model_ref.name.clone(),
+        label: Some(model_ref.info.label.clone()),
+        supports: model_ref.info.supports.clone(),
+        versions: model_ref.info.versions.clone(),
+        config_schema: Some(serde_json::to_value(schemars::schema_for!(AnthropicConfig)).unwrap()),
     };
 
     let mut registry = Registry::default();
@@ -259,6 +260,7 @@ pub fn define_anthropic_model(
 }
 
 // Helper functions to create model references
+#[allow(unused)]
 pub fn claude_3_5_sonnet() -> ModelRef<AnthropicConfig> {
     model_ref(ModelInfo {
         name: "vertexai/claude-3-5-sonnet-20240620".to_owned(),

@@ -16,6 +16,7 @@
 //!
 //! This module provides the Vertex AI evaluation plugin and related types.
 
+#[allow(clippy::module_inception)]
 mod evaluation;
 mod evaluator_factory;
 mod index;

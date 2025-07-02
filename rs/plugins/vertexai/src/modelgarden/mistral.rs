@@ -31,6 +31,7 @@ use genkit_core::Registry;
 use reqwest::header::{HeaderMap, AUTHORIZATION, CONTENT_TYPE};
 
 // Model references
+#[allow(unused)]
 pub fn mistral_large() -> ModelRef<OpenAIConfig> {
     model_ref(ModelInfo {
         name: "vertexai/mistral-large".to_string(),
@@ -39,6 +40,7 @@ pub fn mistral_large() -> ModelRef<OpenAIConfig> {
     })
 }
 
+#[allow(unused)]
 pub fn mistral_nemo() -> ModelRef<OpenAIConfig> {
     model_ref(ModelInfo {
         name: "vertexai/mistral-nemo".to_string(),
@@ -47,6 +49,7 @@ pub fn mistral_nemo() -> ModelRef<OpenAIConfig> {
     })
 }
 
+#[allow(unused)]
 pub fn codestral() -> ModelRef<OpenAIConfig> {
     model_ref(ModelInfo {
         name: "vertexai/codestral".to_string(),
@@ -140,7 +143,7 @@ async fn mistral_runner(
 
 /// Defines a Mistral model from the Model Garden.
 pub fn define_mistral_model(
-    model_ref: ModelRef<OpenAIConfig>,
+    model_ref: &ModelRef<serde_json::Value>,
     options: &VertexAIPluginOptions,
     base_url_template: String,
 ) -> ModelAction {

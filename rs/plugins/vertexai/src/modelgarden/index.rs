@@ -17,25 +17,10 @@
 //! This module provides the main plugin for integrating with models from the
 //! Vertex AI Model Garden.
 
-use super::{
-    anthropic::define_anthropic_model, mistral::define_mistral_model,
-    model_garden::model_garden_openai_compatible_model, types::ModelGardenPluginOptions,
-};
+use super::{anthropic, mistral, model_garden, types::ModelGardenPluginOptions};
 use async_trait::async_trait;
 use genkit_core::{plugin::Plugin, registry::Registry, Result};
 use std::sync::Arc;
-
-use genkit_ai::ModelRef;
-use serde_json::Value;
-use std::marker::PhantomData;
-
-fn specialize_model_ref<T>(model_ref: &ModelRef<Value>) -> ModelRef<T> {
-    ModelRef {
-        name: model_ref.name.clone(),
-        info: model_ref.info.clone(),
-        config: PhantomData,
-    }
-}
 
 fn is_anthropic_model(name: &str) -> bool {
     name.contains("claude")
@@ -74,10 +59,10 @@ impl Plugin for VertexAIModelGardenPlugin {
 
         for model_ref in &model_garden_options.models {
             let action = if is_anthropic_model(&model_ref.name) {
-                define_anthropic_model(model_ref.clone(), base_options)
+                anthropic::define_anthropic_model(model_ref, base_options)
             } else if is_mistral_model(&model_ref.name) {
-                define_mistral_model(
-                    model_ref.clone(),
+                mistral::define_mistral_model(
+                    model_ref,
                     base_options,
                     model_garden_options
                         .open_ai_base_url_template
@@ -85,8 +70,8 @@ impl Plugin for VertexAIModelGardenPlugin {
                         .unwrap_or_default(),
                 )
             } else if is_llama_model(&model_ref.name) {
-                model_garden_openai_compatible_model(
-                    model_ref.clone(),
+                model_garden::model_garden_openai_compatible_model(
+                    model_ref,
                     base_options,
                     model_garden_options.open_ai_base_url_template.clone(),
                 )

@@ -21,15 +21,21 @@
 mod helpers;
 
 use async_trait::async_trait;
-use genkit::{error::Error, Genkit, GenkitOptions, Message, Part, Plugin, Registry, Role};
-
+use genkit::{
+    error::{Error, Result},
+    generate,
+    model::{Candidate, FinishReason, Message, MessageData, Part, Role},
+    plugin::Plugin,
+    registry::Registry,
+    Genkit, GenkitOptions,
+};
 use genkit_ai::{
     define_model,
     model::{
         CandidateData, DefineModelOptions, GenerateRequest, GenerateResponseChunkData,
         GenerateResponseData, ModelInfoSupports,
     },
-    GenerateOptions, MessageData,
+    GenerateOptions,
 };
 use serde_json::json;
 use std::sync::{Arc, Mutex};

@@ -34,16 +34,16 @@ pub type ResponseHandlerFn = Box<
 #[derive(Clone)]
 pub struct ProgrammableModel {
     pub last_request: Arc<Mutex<Option<GenerateRequest>>>,
-    pub handler: Arc<Mutex<ResponseHandlerFn>>,
+    pub handler: Arc<Mutex<Arc<ResponseHandlerFn>>>,
 }
 
 impl Default for ProgrammableModel {
     fn default() -> Self {
         Self {
             last_request: Default::default(),
-            handler: Arc::new(Mutex::new(Box::new(|_req, _cb| {
+            handler: Arc::new(Mutex::new(Arc::new(Box::new(|_req, _cb| {
                 Box::pin(async { Ok(Default::default()) })
-            }))),
+            })))),
         }
     }
 }
@@ -71,11 +71,8 @@ pub fn define_programmable_model(registry: &mut Registry) -> ProgrammableModel {
             let cb_wrapper: Option<StreamingCallback> =
                 streaming_callback.map(|cb| Box::new(cb) as StreamingCallback);
 
-            let fut = {
-                let handler = model_state.handler.lock().unwrap();
-                handler(req, cb_wrapper)
-            };
-            fut.await
+            let handler = model_state.handler.lock().unwrap().clone();
+            handler(req, cb_wrapper).await
         }
     });
 

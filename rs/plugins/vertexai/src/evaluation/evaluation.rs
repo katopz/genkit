@@ -83,6 +83,7 @@ struct PointwiseInstance {
 
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]
+#[allow(unused)]
 struct PointwiseResult {
     score: f32,
     explanation: String,
