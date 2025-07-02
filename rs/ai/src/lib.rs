@@ -62,7 +62,7 @@ pub use self::generate::{
 };
 pub use self::message::{Message, MessageData, MessageParser, Role};
 pub use self::model::{
-    define_background_model, define_model, model_ref, CandidateData, FinishReason, GenerateRequest,
+    define_background_model, define_model, CandidateData, FinishReason, GenerateRequest,
     GenerateResponseChunkData, GenerateResponseData, GenerationCommonConfig, GenerationUsage,
     Model, ModelAction, ModelInfo, ModelRef,
 };

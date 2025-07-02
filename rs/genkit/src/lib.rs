@@ -35,6 +35,7 @@ pub mod evaluator;
 pub mod extract;
 pub mod flow;
 pub mod formats;
+pub mod helpers;
 pub mod logging;
 pub mod middleware;
 pub mod model;
@@ -79,7 +80,7 @@ pub use self::tool::{
     ToolConfig, ToolDefinition,
 };
 pub use genkit_ai::generate::GenerateOptions;
-use genkit_ai::generate::{generate, generate_stream};
+use genkit_ai::generate::{generate as _generate, generate_stream as _generate_stream};
 // Re-export key types directly from the underlying crates for a flat, convenient API.
 pub use genkit_ai::chat::Chat;
 use genkit_ai::model::{BackgroundModelAction, DefineBackgroundModelOptions, DefineModelOptions};
@@ -104,6 +105,7 @@ use std::sync::Arc;
 
 /// The main entry point for the Genkit framework.
 pub struct Genkit {
+    options: GenkitOptions,
     registry: Registry,
     context: Option<ActionContext>,
 }
@@ -128,15 +130,17 @@ impl Genkit {
     /// Initializes the Genkit framework with a list of plugins.
     pub async fn init(options: GenkitOptions) -> Result<Arc<Self>> {
         let mut registry = Registry::new();
-        if let Some(model_name) = options.default_model {
+        if let Some(model_name) = options.default_model.clone() {
             registry.set_default_model(model_name);
         }
-        for plugin in options.plugins {
+        for plugin in &options.plugins {
             plugin.initialize(&mut registry).await?;
         }
+        let context = options.context.clone();
         let instance = Arc::new(Self {
+            options,
             registry,
-            context: options.context,
+            context,
         });
         Ok(instance)
     }
@@ -314,7 +318,7 @@ impl Genkit {
     }
 
     /// Generates content using a model.
-    pub async fn generate<O>(&self, options: GenerateOptions<O>) -> Result<GenerateResponse<O>>
+    pub async fn generate<O>(&self, prompt: &str) -> Result<GenerateResponse<O>>
     where
         O: Clone
             + Default
@@ -325,7 +329,31 @@ impl Genkit {
             + 'static
             + std::fmt::Debug,
     {
-        generate(&self.registry, options).await
+        _generate(
+            &self.registry,
+            GenerateOptions {
+                ..Default::default()
+            },
+        )
+        .await
+    }
+
+    /// Generates content using a model with options.
+    pub async fn generate_with_options<O>(
+        &self,
+        options: GenerateOptions<O>,
+    ) -> Result<GenerateResponse<O>>
+    where
+        O: Clone
+            + Default
+            + for<'de> DeserializeOwned
+            + Serialize
+            + Send
+            + Sync
+            + 'static
+            + std::fmt::Debug,
+    {
+        _generate(&self.registry, options).await
     }
 
     /// Generates content and streams the response.
@@ -343,7 +371,7 @@ impl Genkit {
             + 'static
             + std::fmt::Debug,
     {
-        generate_stream(&self.registry, options)
+        _generate_stream(&self.registry, options)
     }
 
     /// Creates a new, empty session.

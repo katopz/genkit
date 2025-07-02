@@ -28,7 +28,6 @@
 
 use ::core::future::Future;
 use ::core::marker::Send;
-use ::serde::de::DeserializeOwned;
 use ::serde::{Deserialize, Serialize};
 use genkit_core::action::ActionMetadata;
 use genkit_core::context::ActionContext;
@@ -578,7 +577,21 @@ pub fn augment_with_context(options: Option<AugmentWithContextOptions>) -> Model
 pub struct ModelRef<T> {
     pub name: String,
     pub info: ModelInfo,
-    pub config: std::marker::PhantomData<T>,
+    pub version: Option<String>,
+    pub config: Option<T>,
+    _config_type: PhantomData<T>,
+}
+
+impl<T> Default for ModelRef<T> {
+    fn default() -> Self {
+        ModelRef {
+            name: String::new(),
+            info: ModelInfo::default(),
+            version: None,
+            config: None,
+            _config_type: PhantomData,
+        }
+    }
 }
 
 /// Represents a reference to a model.
@@ -601,11 +614,21 @@ impl<T> From<ModelRef<T>> for String {
     }
 }
 
-/// Helper function to create a `ModelRef`.
-pub fn model_ref<T: DeserializeOwned>(info: ModelInfo) -> ModelRef<T> {
-    ModelRef {
-        name: info.name.clone(),
-        info,
-        config: PhantomData,
+impl<T: Clone> ModelRef<T> {
+    pub fn new(name: &str) -> Self {
+        ModelRef {
+            name: name.to_string(),
+            ..Default::default()
+        }
+    }
+
+    pub fn with_config(mut self, config: T) -> Self {
+        self.config = Some(config);
+        self
+    }
+
+    pub fn with_version(mut self, version: &str) -> Self {
+        self.version = Some(version.to_string());
+        self
     }
 }

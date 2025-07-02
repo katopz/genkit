@@ -23,22 +23,19 @@ use genkit::{
     model::{FinishReason, Part, Role},
     plugin::Plugin,
     registry::Registry,
-    Genkit, GenkitOptions, Model, ToolConfig,
+    Genkit, GenkitOptions, Model, ModelInfo, ToolConfig,
 };
 use genkit_ai::{
-    self as genkit_ai, // Alias to prevent ambiguity with genkit::define_model
-    define_model,
+    self as genkit_ai, define_model,
     model::{
         CandidateData, DefineModelOptions, GenerateRequest, GenerateResponseChunkData,
         GenerateResponseData,
     },
-    GenerateOptions,
-    MessageData,
-    ToolRequest,
+    GenerateOptions, MessageData, ModelRef, ToolRequest,
 };
 use rstest::{fixture, rstest};
 use schemars::JsonSchema;
-use serde_json::json;
+use serde_json::{json, Value};
 use std::sync::{Arc, Mutex};
 
 use helpers::StreamingCallback;
@@ -157,7 +154,7 @@ async fn test_calls_default_model(
 ) {
     let (genkit, _) = genkit_instance_for_test.await;
     let response: genkit::GenerateResponse = genkit
-        .generate(GenerateOptions {
+        .generate_with_options(GenerateOptions {
             prompt: Some(vec![Part::text("short and sweet")]),
             config: Some(json!({ "temperature": 0.5 })),
             ..Default::default()
@@ -178,7 +175,7 @@ async fn test_calls_default_model_with_string_prompt(
 ) {
     let (genkit, _) = genkit_instance_for_test.await;
     let response: genkit::GenerateResponse = genkit
-        .generate(GenerateOptions {
+        .generate_with_options(GenerateOptions {
             prompt: Some(vec![Part::text("short and sweet")]),
             ..Default::default()
         })
@@ -198,7 +195,7 @@ async fn test_calls_default_model_with_parts_prompt(
 ) {
     let (genkit, _) = genkit_instance_for_test.await;
     let response: genkit::GenerateResponse = genkit
-        .generate(GenerateOptions {
+        .generate_with_options(GenerateOptions {
             prompt: Some(vec![Part::text("short and sweet")]),
             ..Default::default()
         })
@@ -236,7 +233,7 @@ async fn test_calls_default_model_system_message(
         },
     ];
     let response: genkit::GenerateResponse = genkit
-        .generate(GenerateOptions {
+        .generate_with_options(GenerateOptions {
             messages: Some(messages),
             ..Default::default()
         })
@@ -257,7 +254,7 @@ async fn test_calls_default_model_with_tool_choice(
     let (genkit, last_request) = genkit_instance_for_test.await;
     let config = json!({ "tool_choice": "myTool" });
     let response: genkit::GenerateResponse = genkit
-        .generate(GenerateOptions {
+        .generate_with_options(GenerateOptions {
             config: Some(config.clone()),
             prompt: Some(vec![Part::text("test")]),
             ..Default::default()
@@ -369,7 +366,7 @@ async fn test_uses_the_default_model(
     }
 
     let response: genkit::GenerateResponse = genkit
-        .generate(GenerateOptions {
+        .generate_with_options(GenerateOptions {
             model: Some(Model::Name("programmableModel".to_string())),
             prompt: Some(vec![Part::text(test_prompt.clone())]),
             ..Default::default()
@@ -395,7 +392,7 @@ async fn test_explicit_model_calls_the_explicitly_passed_in_model(
 ) {
     let (genkit, _) = genkit_instance_for_test.await;
     let response: genkit::GenerateResponse = genkit
-        .generate(GenerateOptions {
+        .generate_with_options(GenerateOptions {
             model: Some(Model::Name("echoModel".to_string())),
             prompt: Some(vec![Part::text("short and sweet")]),
             ..Default::default()
@@ -415,7 +412,7 @@ async fn test_explicit_model_rejects_on_invalid_model() {
     let (genkit, _) = genkit_instance_for_test().await;
     let model = Some(Model::Name("modelThatDoesNotExist".to_string()));
     let response: genkit::GenerateResponse = genkit
-        .generate(GenerateOptions {
+        .generate_with_options(GenerateOptions {
             model,
             prompt: Some(vec![Part::text("hi".to_string())]),
             ..Default::default()
@@ -483,7 +480,7 @@ async fn test_streaming_rethrows_initialization_errors() {
 
     let model = Some(Model::Name("errorModel".to_string()));
     let response: genkit::GenerateResponse = genkit
-        .generate(GenerateOptions {
+        .generate_with_options(GenerateOptions {
             model,
             prompt: Some(vec![Part::text("hi".to_string())]),
             ..Default::default()
@@ -568,7 +565,7 @@ async fn test_streaming_strips_out_noop_streaming_callback(
     }
 
     let _: genkit::GenerateResponse = genkit
-        .generate(GenerateOptions {
+        .generate_with_options(GenerateOptions {
             model: Some(Model::Name("programmableModel".to_string())),
             ..Default::default()
         })
@@ -590,7 +587,7 @@ async fn test_config_takes_config_passed_to_generate(
     let (genkit, pm_handle) = genkit_with_programmable_model.await;
 
     let _: genkit::GenerateResponse = genkit
-        .generate(GenerateOptions {
+        .generate_with_options(GenerateOptions {
             model: Some(Model::Name("programmableModel".to_string())),
             config: Some(json!({"temperature": 0.9})),
             ..Default::default()
@@ -645,36 +642,22 @@ impl Plugin for ConfigurableModelPlugin {
 
 #[tokio::test]
 async fn test_config_merges_config_from_the_ref() {
-    let plugin = Arc::new(ConfigurableModelPlugin {
-        config: json!({ "a": 1, "b": 1 }),
-        version: "test".to_string(),
-    });
-    let genkit = Genkit::init(GenkitOptions {
-        plugins: vec![plugin as Arc<dyn Plugin>],
-        ..Default::default()
-    })
-    .await
-    .unwrap();
+    let (genkit, _) = genkit_instance_for_test().await;
 
+    let model_ref = ModelRef::new("echoModel").with_config(serde_json::json!({"version": "abc"}));
     let response: genkit::GenerateResponse = genkit
-        .generate(GenerateOptions {
-            model: Some(Model::Name("configurableModel".to_string())),
-            config: Some(json!({ "b": 2, "c": 3 })),
+        .generate_with_options(GenerateOptions {
+            model: Some(model_ref.into()),
+            config: Some(json!({ "temperature": 11 })),
+            prompt: Some(vec![Part::text("hi")]),
             ..Default::default()
         })
         .await
         .unwrap();
 
-    let response_config: serde_json::Value =
-        serde_json::from_str(&response.text().unwrap()).unwrap();
-
     assert_eq!(
-        response_config,
-        json!({
-            "a": 1,
-            "b": 2,
-            "c": 3
-        })
+        response.text().unwrap(),
+        r#"Echo: hi; config: {"version":"abc","temperature":11}"#
     );
 }
 
@@ -691,9 +674,10 @@ async fn test_config_picks_up_top_level_version_from_the_ref() {
     .await
     .unwrap();
     let response: genkit::GenerateResponse = genkit
-        .generate(GenerateOptions {
-            model: Some(Model::Name("configurableModel".to_string())),
-            config: Some(json!({ "a": 1 })),
+        .generate_with_options(GenerateOptions {
+            model: Some(Model::Name("echoModel".to_string())),
+            config: Some(json!({ "temperature": 11 })),
+            prompt: Some(vec![Part::text("hi")]),
             ..Default::default()
         })
         .await
@@ -780,7 +764,7 @@ async fn test_tools_call_the_tool() {
     }
 
     let response: genkit::GenerateResponse = genkit
-        .generate(GenerateOptions {
+        .generate_with_options(GenerateOptions {
             model: Some(Model::Name("programmableModel".to_string())),
             prompt: Some(vec![Part::text("call the tool")]),
             tools: Some(vec![test_tool]),
