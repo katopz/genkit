@@ -35,7 +35,7 @@ use genkit_ai::{
 };
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
-use serde_json::{json, Value};
+use serde_json::json;
 use std::sync::{Arc, Mutex};
 
 use helpers::StreamingCallback;
@@ -229,7 +229,7 @@ async fn test_calls_default_model_system_message() {
 
     assert_eq!(
         response.text().unwrap(),
-        "Echo: system: You are a cat.What is the meaning of life?; config: null"
+        "Echo: SYSTEM INSTRUCTIONS:\nYou are a cat.Understood.system: What is the meaning of life?; config: null"
     );
 }
 
@@ -240,6 +240,7 @@ async fn test_calls_default_model_with_tool_choice() {
     let response: genkit::GenerateResponse = genkit
         .generate(GenerateOptions {
             config: Some(config.clone()),
+            prompt: Some(vec![Part::text("test")]),
             ..Default::default()
         })
         .await
@@ -249,13 +250,42 @@ async fn test_calls_default_model_with_tool_choice() {
     let request_config = locked_request.as_ref().unwrap().config.clone();
     assert_eq!(request_config, Some(config.clone()));
 
-    let expected_response = format!("Echo: ; config: {}", config);
+    let expected_response = format!("Echo: test; config: {}", config);
     assert_eq!(response.text().unwrap(), expected_response);
 }
 
 #[tokio::test]
 async fn test_streams_default_model() {
-    let (genkit, _) = genkit_instance_for_test().await;
+    let (genkit, pm_handle) = genkit_with_programmable_model().await;
+    {
+        let mut handler = pm_handle.handler.lock().unwrap();
+        *handler = Arc::new(Box::new(|_, on_chunk| {
+            if let Some(cb) = on_chunk.as_ref() {
+                for i in 0..3 {
+                    cb(GenerateResponseChunkData {
+                        index: i,
+                        content: vec![Part::text(format!("chunk{}", i + 1))],
+                        ..Default::default()
+                    });
+                }
+            }
+            Box::pin(async {
+                Ok(GenerateResponseData {
+                    candidates: vec![CandidateData {
+                        index: 0,
+                        finish_reason: Some(FinishReason::Stop),
+                        message: MessageData {
+                            role: Role::Model,
+                            content: vec![Part::text("chunk1chunk2chunk3")],
+                            ..Default::default()
+                        },
+                        ..Default::default()
+                    }],
+                    ..Default::default()
+                })
+            })
+        }));
+    }
 
     let mut response_container: genkit::GenerateStreamResponse =
         genkit.generate_stream(GenerateOptions {
@@ -329,11 +359,13 @@ async fn test_uses_the_default_model() {
 
     let response: genkit::GenerateResponse = genkit
         .generate(GenerateOptions {
-            prompt: Some(vec![Part::text(test_prompt.clone())]),
+            model: Some(Model::Name("programmableModel".to_string())),
+            prompt: Some(vec![Part::text("tell me a joke")]),
             ..Default::default()
         })
         .await
         .unwrap();
+    assert!(response.is_valid());
 
     let last_request = pm.last_request.lock().unwrap();
     assert!(last_request.is_some());
@@ -427,7 +459,7 @@ async fn test_streaming_rethrows_response_errors() {
         ..Default::default()
     });
 
-    assert!(stream_response.response.await.is_err());
+    assert!(stream_response.response.await.unwrap().is_err());
 }
 
 // In TS, initialization can be async and throw. In Rust, we test a model that
@@ -490,7 +522,8 @@ async fn test_streaming_passes_the_streaming_callback_to_the_model() {
     }
 
     let stream_resp: genkit::GenerateStreamResponse = genkit.generate_stream(GenerateOptions {
-        model: Some(Model::Name("programmableModel".to_string())),
+        model: Some(Model::Name("error-model".to_string())),
+        prompt: Some(vec![Part::text("test")]),
         ..Default::default()
     });
     let _ = stream_resp.response.await;
@@ -677,7 +710,7 @@ async fn test_tools_call_the_tool() {
             name: "testTool".to_string(),
             description: "description".to_string(),
             input_schema: Some(TestToolInput {}),
-            output_schema: Some(Value::Null),
+            output_schema: Some(serde_json::json!("tool called")),
             metadata: None,
         },
         |_, _| async { Ok(serde_json::json!("tool called")) },
