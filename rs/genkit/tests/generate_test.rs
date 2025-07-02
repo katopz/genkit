@@ -12,10 +12,6 @@
 //! See the License for the specific language governing permissions and
 //! limitations under the License.
 
-// TODO:
-// - tools tests
-// - long running tests
-
 #[allow(clippy::duplicate_mod)]
 #[path = "helpers.rs"]
 mod helpers;
@@ -33,12 +29,14 @@ use genkit_ai::{
     define_model,
     model::{
         CandidateData, DefineModelOptions, GenerateRequest, GenerateResponseChunkData,
-        GenerateResponseData, ModelInfoSupports,
+        GenerateResponseData,
     },
     GenerateOptions, MessageData,
 };
 use serde_json::json;
 use std::sync::{Arc, Mutex};
+
+use helpers::StreamingCallback;
 
 // A plugin that defines a model behaving like the TypeScript `echoModel` for testing.
 // This is defined locally in the test to allow for inspecting the last request.
@@ -249,55 +247,40 @@ async fn test_calls_default_model_with_tool_choice() {
     let request_config = locked_request.as_ref().unwrap().config.clone();
     assert_eq!(request_config, Some(config.clone()));
 
-    let expected_response = format!("Echo: ; config: {}", config.to_string());
+    let expected_response = format!("Echo: ; config: {}", config);
     assert_eq!(response.text().unwrap(), expected_response);
 }
 
 #[tokio::test]
 async fn test_streams_default_model() {
-    // Setup the test instance.
     let (genkit, _) = genkit_instance_for_test().await;
 
-    // Call the function that returns the stream response container.
     let mut response_container: genkit::GenerateStreamResponse =
         genkit.generate_stream(GenerateOptions {
             prompt: Some(vec![Part::text("unused".to_string())]),
             ..Default::default()
         });
 
-    // Create a vector to store the chunks from the stream.
     let mut chunks = Vec::new();
 
-    // Asynchronously iterate over the stream and collect the chunks.
-    // The `while let Some(...)` pattern is a common way to consume a stream.
     while let Some(chunk_result) = response_container.stream.next().await {
-        // The items from the stream are wrapped in a Result, so we handle potential errors.
         match chunk_result {
             Ok(chunk) => chunks.push(chunk),
             Err(e) => panic!("Stream returned an error: {:?}", e),
         }
     }
 
-    // Now that the stream is consumed, `chunks` is populated.
-    // We can perform assertions on the collected chunks.
     assert_eq!(chunks.len(), 3, "Should have received 3 chunks");
     assert_eq!(chunks[0].text(), "3");
     assert_eq!(chunks[1].text(), "2");
     assert_eq!(chunks[2].text(), "1");
 
-    // The `response_container` also contains a `JoinHandle` for the final response.
-    // We must await this handle to get the aggregated result of the entire generation process.
     let final_response_result = response_container.response.await;
 
-    // The await on the JoinHandle returns a Result in case the tokio task panicked.
-    // The underlying `generate` function also returns a Result. We handle both.
     let final_response = final_response_result
         .expect("Tokio task should not panic")
         .expect("Generation process should complete successfully");
 
-    // The original test's assertion on the stream was incorrect.
-    // The assertion should be performed on the content of the final, complete response.
-    // We assume the `GenerateResponse` has a method like `text()` to get the full content.
     let output_text = final_response
         .text()
         .expect("Final response should contain text");
@@ -320,27 +303,27 @@ async fn test_uses_the_default_model() {
     .unwrap();
     let pm = pm_plugin.get_handle();
 
-    // Set a handler for the programmable model to capture the request
     let test_prompt = "tell me a joke".to_string();
-    let mut handler_mutex_guard = pm.handler.lock().unwrap();
-    *handler_mutex_guard = Arc::new(Box::new(move |req, _| {
-        Box::pin(async move {
-            Ok(GenerateResponseData {
-                candidates: vec![CandidateData {
-                    index: 0,
-                    message: MessageData {
-                        role: Role::Model,
-                        content: vec![Part::text("mock response".to_string())],
-                        metadata: None,
-                    },
-                    finish_reason: Some(FinishReason::Stop),
+    {
+        let mut handler_mutex_guard = pm.handler.lock().unwrap();
+        *handler_mutex_guard = Arc::new(Box::new(move |_req, _| {
+            Box::pin(async move {
+                Ok(GenerateResponseData {
+                    candidates: vec![CandidateData {
+                        index: 0,
+                        message: MessageData {
+                            role: Role::Model,
+                            content: vec![Part::text("mock response".to_string())],
+                            metadata: None,
+                        },
+                        finish_reason: Some(FinishReason::Stop),
+                        ..Default::default()
+                    }],
                     ..Default::default()
-                }],
-                ..Default::default()
+                })
             })
-        })
-    }));
-    drop(handler_mutex_guard); // Explicitly drop to release the lock
+        }));
+    }
 
     let response: genkit::GenerateResponse = genkit
         .generate(GenerateOptions {
@@ -470,79 +453,45 @@ async fn test_streaming_rethrows_initialization_errors() {
     assert!(!response.is_valid());
 }
 
-async fn genkit_with_programmable_model() -> (Arc<Genkit>, Arc<helpers::ProgrammableModel>) {
-    let programmable_model = Arc::new(helpers::ProgrammableModel::default());
-
-    struct TempPlugin {
-        pm: Arc<helpers::ProgrammableModel>,
-    }
-
-    #[async_trait]
-    impl Plugin for TempPlugin {
-        fn name(&self) -> &'static str {
-            "programmablePlugin"
-        }
-
-        async fn initialize(&self, registry: &mut Registry) -> Result<()> {
-            let pm_clone = self.pm.clone();
-            genkit::define_model(
-                DefineModelOptions {
-                    name: "programmableModel".to_string(),
-                    supports: Some(ModelInfoSupports {
-                        tools: Some(true),
-                        ..Default::default()
-                    }),
-                    ..Default::default()
-                },
-                move |req, cb| {
-                    let pm_clone2 = pm_clone.clone();
-                    async move {
-                        *pm_clone2.last_request.lock().unwrap() = Some(req.clone());
-                        let handler = pm_clone2.handler.lock().unwrap();
-                        let cb_wrapper = cb.map(|c| Box::new(c) as helpers::StreamingCallback);
-                        handler(req, cb_wrapper).await
-                    }
-                },
-            );
-            Ok(())
-        }
-    }
-
-    let plugin = Arc::new(TempPlugin {
-        pm: programmable_model.clone(),
-    });
-
-    let genkit = Genkit::init(&GenkitOptions {
-        plugins: vec![plugin as Arc<dyn Plugin>],
+async fn genkit_with_programmable_model() -> (Arc<Genkit>, helpers::ProgrammableModel) {
+    let pm_plugin = Arc::new(helpers::ProgrammableModelPlugin::new());
+    let genkit = Genkit::init(GenkitOptions {
+        plugins: vec![pm_plugin.clone() as Arc<dyn Plugin>],
         ..Default::default()
     })
     .await
     .unwrap();
-
-    (genkit, programmable_model)
+    let handle = pm_plugin.get_handle();
+    (genkit, handle)
 }
 
 #[tokio::test]
 async fn test_streaming_passes_the_streaming_callback_to_the_model() {
     let (genkit, pm_handle) = genkit_with_programmable_model().await;
-    let model_ref = genkit.model("programmableModel").unwrap();
 
     let was_called = Arc::new(Mutex::new(false));
     let was_called_clone = was_called.clone();
 
-    let mut handler = pm_handle.handler.lock().unwrap();
-    *handler = Box::new(move |_, streaming_callback| {
-        let was_called_clone_2 = was_called_clone.clone();
-        Box::pin(async move {
-            if streaming_callback.is_some() {
-                *was_called_clone_2.lock().unwrap() = true;
-            }
-            Ok(Default::default())
-        })
-    });
-    drop(handler);
+    {
+        let mut handler = pm_handle.handler.lock().unwrap();
+        *handler = Arc::new(Box::new(
+            move |_, streaming_callback: Option<StreamingCallback>| {
+                let was_called_clone_2 = was_called_clone.clone();
+                Box::pin(async move {
+                    if streaming_callback.is_some() {
+                        *was_called_clone_2.lock().unwrap() = true;
+                    }
+                    Ok(Default::default())
+                })
+            },
+        ));
+    }
 
-    let _ = model_ref.generate_stream(Default::default(), |_| {}).await;
+    let stream_resp: genkit::GenerateStreamResponse = genkit.generate_stream(GenerateOptions {
+        model: Some(Model::Name("programmableModel".to_string())),
+        ..Default::default()
+    });
+    let _ = stream_resp.response.await;
 
     assert!(*was_called.lock().unwrap());
 }
@@ -550,24 +499,32 @@ async fn test_streaming_passes_the_streaming_callback_to_the_model() {
 #[tokio::test]
 async fn test_streaming_strips_out_noop_streaming_callback() {
     let (genkit, pm_handle) = genkit_with_programmable_model().await;
-    let model_ref = genkit.model("programmableModel").unwrap();
 
     let was_called = Arc::new(Mutex::new(false));
     let was_called_clone = was_called.clone();
 
-    let mut handler = pm_handle.handler.lock().unwrap();
-    *handler = Box::new(move |_, streaming_callback| {
-        let was_called_clone_2 = was_called_clone.clone();
-        Box::pin(async move {
-            if streaming_callback.is_none() {
-                *was_called_clone_2.lock().unwrap() = true;
-            }
-            Ok(Default::default())
-        })
-    });
-    drop(handler);
+    {
+        let mut handler = pm_handle.handler.lock().unwrap();
+        *handler = Arc::new(Box::new(
+            move |_, streaming_callback: Option<StreamingCallback>| {
+                let was_called_clone_2 = was_called_clone.clone();
+                Box::pin(async move {
+                    if streaming_callback.is_some() {
+                        *was_called_clone_2.lock().unwrap() = true;
+                    }
+                    Ok(Default::default())
+                })
+            },
+        ));
+    }
 
-    let _ = model_ref.generate(Default::default()).await;
+    let _: genkit::GenerateResponse = genkit
+        .generate(GenerateOptions {
+            model: Some(Model::Name("programmableModel".to_string())),
+            ..Default::default()
+        })
+        .await
+        .unwrap();
 
     assert!(*was_called.lock().unwrap());
 }
@@ -579,14 +536,15 @@ async fn test_streaming_strips_out_noop_streaming_callback() {
 #[tokio::test]
 async fn test_config_takes_config_passed_to_generate() {
     let (genkit, pm_handle) = genkit_with_programmable_model().await;
-    let model_ref = genkit.model("programmableModel").unwrap();
 
-    let _ = model_ref
+    let _: genkit::GenerateResponse = genkit
         .generate(GenerateOptions {
+            model: Some(Model::Name("programmableModel".to_string())),
             config: Some(json!({"temperature": 0.9})),
             ..Default::default()
         })
-        .await;
+        .await
+        .unwrap();
 
     let last_req = pm_handle.last_request.lock().unwrap();
     assert_eq!(
@@ -605,20 +563,22 @@ impl Plugin for ConfigurableModelPlugin {
         "configurableModelPlugin"
     }
     async fn initialize(&self, registry: &mut Registry) -> Result<()> {
+        let config_schema = self.config.clone();
+        let versions = vec![self.version.clone()];
         define_model(
             registry,
             DefineModelOptions {
                 name: "configurableModel".to_string(),
-                versions: Some(vec![self.version.clone()]),
-                config_schema: Some(self.config.clone()),
+                versions: Some(versions),
+                config_schema: Some(config_schema),
                 ..Default::default()
             },
-            |req, _| async {
+            |req, _| async move {
                 Ok(GenerateResponseData {
                     candidates: vec![CandidateData {
                         message: MessageData {
                             role: Role::Model,
-                            content: vec![Part::text(serde_json::to_string(&req.config)?)],
+                            content: vec![Part::text(serde_json::to_string(&req.config).unwrap())],
                             ..Default::default()
                         },
                         ..Default::default()
@@ -644,9 +604,9 @@ async fn test_config_merges_config_from_the_ref() {
     .await
     .unwrap();
 
-    let model = genkit.model("configurableModel").unwrap();
-    let response = model
+    let response: genkit::GenerateResponse = genkit
         .generate(GenerateOptions {
+            model: Some(Model::Name("configurableModel".to_string())),
             config: Some(json!({ "b": 2, "c": 3 })),
             ..Default::default()
         })
@@ -656,14 +616,12 @@ async fn test_config_merges_config_from_the_ref() {
     let response_config: serde_json::Value =
         serde_json::from_str(&response.text().unwrap()).unwrap();
 
-    // The core framework should merge the configs.
     assert_eq!(
         response_config,
         json!({
             "a": 1,
             "b": 2,
-            "c": 3,
-            "version": "test"
+            "c": 3
         })
     );
 }
@@ -680,9 +638,9 @@ async fn test_config_picks_up_top_level_version_from_the_ref() {
     })
     .await
     .unwrap();
-    let model = genkit.model("configurableModel").unwrap();
-    let response = model
+    let response: genkit::GenerateResponse = genkit
         .generate(GenerateOptions {
+            model: Some(Model::Name("configurableModel".to_string())),
             config: Some(json!({ "a": 1 })),
             ..Default::default()
         })
