@@ -27,9 +27,10 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::collections::HashMap;
 use std::sync::Arc;
+use strum_macros::Display;
 
 /// Represents the role of the entity creating a message.
-#[derive(Default, Debug, Clone, Serialize, Deserialize, JsonSchema, PartialEq, Eq)]
+#[derive(Default, Debug, Clone, Serialize, Deserialize, JsonSchema, PartialEq, Eq, Display)]
 #[serde(rename_all = "camelCase")]
 pub enum Role {
     System,

@@ -23,8 +23,7 @@ mod helpers;
 use async_trait::async_trait;
 use genkit::{
     error::{Error, Result},
-    generate,
-    model::{Candidate, FinishReason, Message, MessageData, Part, Role},
+    model::{FinishReason, Message, Part, Role},
     plugin::Plugin,
     registry::Registry,
     Genkit, GenkitOptions,
@@ -35,7 +34,7 @@ use genkit_ai::{
         CandidateData, DefineModelOptions, GenerateRequest, GenerateResponseChunkData,
         GenerateResponseData, ModelInfoSupports,
     },
-    GenerateOptions,
+    GenerateOptions, MessageData,
 };
 use serde_json::json;
 use std::sync::{Arc, Mutex};
@@ -91,7 +90,7 @@ impl Plugin for TsEchoModelPlugin {
                             let content = m
                                 .content
                                 .iter()
-                                .filter_map(|p| p.text())
+                                .filter_map(|p| p.text.clone())
                                 .collect::<Vec<_>>()
                                 .join("");
                             format!("{}{}", prefix, content)
@@ -233,7 +232,7 @@ async fn test_calls_default_model_with_tool_choice() {
 
     let locked_request = last_request.lock().unwrap();
     let request_config = locked_request.as_ref().unwrap().config.clone();
-    assert_eq!(request_config, config);
+    assert_eq!(request_config, Some(config));
 
     let expected_response = format!("Echo: ; config: {}", config.to_string());
     assert_eq!(response.text().unwrap(), expected_response);
@@ -246,7 +245,7 @@ async fn test_streams_default_model() {
     let response = genkit
         .generate_stream(
             GenerateOptions {
-                prompt: "unused".to_string(),
+                prompt: Some(vec![Part::text("unused".to_string())]),
                 ..Default::default()
             },
             |chunk| {
@@ -481,7 +480,7 @@ async fn test_config_takes_config_passed_to_generate() {
     let last_req = pm_handle.last_request.lock().unwrap();
     assert_eq!(
         last_req.as_ref().unwrap().config,
-        json!({"temperature": 0.9})
+        Some(json!({"temperature": 0.9}))
     );
 }
 
