@@ -199,3 +199,15 @@ where
         }
     }
 }
+
+/// Implementation for `MessageData` to easily extract concatenated text from its parts.
+impl MessageData {
+    /// Concatenates all text from the `content` parts into a single String.
+    pub fn text(&self) -> String {
+        self.content
+            .iter()
+            .filter_map(|part| part.text.as_deref())
+            .collect::<Vec<&str>>()
+            .join("")
+    }
+}

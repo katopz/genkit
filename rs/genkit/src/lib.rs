@@ -87,6 +87,7 @@ use genkit_ai::reranker::{RerankerRequest, RerankerResponse};
 use genkit_ai::retriever::{IndexerRequest, RetrieverRequest, RetrieverResponse};
 pub use genkit_ai::session::{Session, SessionStore};
 use genkit_ai::tool::ToolFnOptions;
+pub use genkit_ai::GenerateStreamResponse;
 use genkit_ai::{
     define_background_model, define_model, BaseEvalDataPoint, EmbedRequest, EmbedResponse,
     EvalResponse, GenerateResponseChunkData, ModelAction,
