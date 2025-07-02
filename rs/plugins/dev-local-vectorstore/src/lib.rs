@@ -131,6 +131,7 @@ impl Plugin for DevLocalVectorStorePlugin {
             let retriever_data_path = data_path.clone();
             let retriever_embedder_action = embedder_action.clone();
             let retriever_action = define_retriever(
+                registry,
                 action_name,
                 move |req: RetrieverRequest<CommonRetrieverOptions>, _| {
                     let path = retriever_data_path.clone();
@@ -161,11 +162,12 @@ impl Plugin for DevLocalVectorStorePlugin {
                     }
                 },
             );
-            registry.register_action(Arc::new(retriever_action))?;
+            registry.register_action(action_name.to_string(), retriever_action)?;
 
             let indexer_data_path = data_path.clone();
             let indexer_embedder_action = embedder_action.clone();
             let indexer_action = define_indexer(
+                registry,
                 action_name,
                 move |req: genkit_ai::retriever::IndexerRequest<()>, _| {
                     let path = indexer_data_path.clone();
@@ -202,7 +204,7 @@ impl Plugin for DevLocalVectorStorePlugin {
                     }
                 },
             );
-            registry.register_action(Arc::new(indexer_action))?;
+            registry.register_action(action_name.to_string(), indexer_action)?;
         }
         Ok(())
     }

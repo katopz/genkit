@@ -14,40 +14,47 @@ use std::sync::Arc;
 
 // A simple mock embedder that returns predefined vectors for specific texts.
 fn mock_embedder() -> genkit_ai::embedder::EmbedderAction {
-    define_embedder("mock-embedder", |req: EmbedRequest, _| async move {
-        let embeddings = req
-            .input
-            .into_iter()
-            .map(|doc| {
-                let text = doc.text();
-                let embedding_vec = match text.as_str() {
-                    "How old is Bob?" => vec![1.0, 0.1, 0.2, 0.3],
-                    "Bob is 42 years old." => vec![1.0, 0.1, 0.2, 0.3], // Same as question for max similarity
-                    "Bob lives on the moon." => vec![0.1, 1.0, 0.2, 0.3],
-                    "Bob likes bananas." => vec![0.2, 0.1, 1.0, 0.3],
-                    "Bob has 11 cats." => vec![0.3, 0.2, 0.1, 1.0],
-                    _ => vec![0.0; 4], // Default for any other text
-                };
-                Embedding {
-                    embedding: embedding_vec,
-                    metadata: None,
-                }
-            })
-            .collect();
-        Ok(EmbedResponse { embeddings })
-    })
+    let mut registry = Registry::new();
+    define_embedder(
+        &mut registry,
+        "mock-embedder",
+        |req: EmbedRequest, _| async move {
+            let embeddings = req
+                .input
+                .into_iter()
+                .map(|doc| {
+                    let text = doc.text();
+                    let embedding_vec = match text.as_str() {
+                        "How old is Bob?" => vec![1.0, 0.1, 0.2, 0.3],
+                        "Bob is 42 years old." => vec![1.0, 0.1, 0.2, 0.3], // Same as question for max similarity
+                        "Bob lives on the moon." => vec![0.1, 1.0, 0.2, 0.3],
+                        "Bob likes bananas." => vec![0.2, 0.1, 1.0, 0.3],
+                        "Bob has 11 cats." => vec![0.3, 0.2, 0.1, 1.0],
+                        _ => vec![0.0; 4], // Default for any other text
+                    };
+                    Embedding {
+                        embedding: embedding_vec,
+                        metadata: None,
+                    }
+                })
+                .collect();
+            Ok(EmbedResponse { embeddings })
+        },
+    )
 }
 
 // A simple mock model that just returns the content of the first document it receives.
 fn mock_model() -> genkit_ai::model::ModelAction {
+    let mut registry = Registry::new();
     define_model(
-        genkit_ai::model::DefineModelOptions::<()> {
+        &mut registry,
+        genkit_ai::model::DefineModelOptions {
             name: "mock-model".to_string(),
-            label: "Mock Context Model".to_string(),
-            supports: genkit_ai::model::ModelInfoSupports {
+            label: Some("Mock Context Model".to_string()),
+            supports: Some(genkit_ai::model::ModelInfoSupports {
                 context: Some(true), // We need to signal that this model supports docs
                 ..Default::default()
-            },
+            }),
             ..Default::default()
         },
         |req: GenerateRequest, _| async move {
@@ -55,13 +62,13 @@ fn mock_model() -> genkit_ai::model::ModelAction {
                 .docs
                 .unwrap_or_default()
                 .first()
-                .map(|d| d.text())
-                .unwrap_or_else(|| "No context provided.".to_string());
+                .map(|d| d.text.clone())
+                .unwrap_or_else(|| Some("No context provided.".to_string()));
 
             let response_message = genkit_ai::message::MessageData {
                 role: genkit_ai::message::Role::Model,
                 content: vec![genkit_ai::document::Part {
-                    text: Some(context_text),
+                    text: context_text,
                     ..Default::default()
                 }],
                 metadata: None,
@@ -85,10 +92,14 @@ async fn test_dev_local_vectorstore_e2e() {
     let mut registry = Registry::new();
 
     let embedder_action = mock_embedder();
-    registry.register_action(Arc::new(embedder_action)).unwrap();
+    registry
+        .register_action("mock-embedder".to_string(), embedder_action)
+        .unwrap();
 
     let model_action = mock_model();
-    registry.register_action(Arc::new(model_action)).unwrap();
+    registry
+        .register_action("mock-model".to_string(), model_action)
+        .unwrap();
 
     // 2. Configure and initialize the vector store plugin.
     // Using `data_path: None` will cause it to write to a temporary file.
