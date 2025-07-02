@@ -726,7 +726,7 @@ async fn test_tools_call_the_tool() {
                 let tool_request = Some(ToolRequest {
                     name: "testTool".to_string(),
                     input: Some(serde_json::to_value(TestToolInput {}).unwrap()),
-                    ref_id: None,
+                    ref_id: Some("ref123".to_string()),
                 });
 
                 GenerateResponseData {
@@ -765,9 +765,7 @@ async fn test_tools_call_the_tool() {
         .generate(GenerateOptions {
             model: Some(Model::Name("programmableModel".to_string())),
             prompt: Some(vec![Part::text("call the tool")]),
-            tools: Some(vec![(Arc::new(test_tool)
-                as Arc<dyn genkit_core::registry::ErasedAction>)
-                .into()]),
+            tools: Some(vec![test_tool]),
             ..Default::default()
         })
         .await
@@ -783,8 +781,9 @@ async fn test_tools_call_the_tool() {
     assert_eq!(messages[1].role, Role::Model);
     assert!(messages[1].content[0].tool_request.is_some());
     assert_eq!(messages[2].role, Role::Tool);
-    let tool_response = messages[2].content[0].tool_response.clone().unwrap();
+    let tool_response = messages[2].content[0].tool_response.as_ref().unwrap();
     assert_eq!(tool_response.name, "testTool");
+    assert_eq!(tool_response.ref_id, Some("ref123".to_string()));
     assert_eq!(
         tool_response.output,
         Some(serde_json::to_value("tool called").unwrap())

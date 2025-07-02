@@ -205,6 +205,17 @@ pub enum ToolArgument {
     Action(Arc<dyn ErasedAction>),
 }
 
+impl<I, O, S> From<ToolAction<I, O, S>> for ToolArgument
+where
+    I: DeserializeOwned + JsonSchema + Send + Sync + Clone + 'static,
+    O: Serialize + JsonSchema + Send + Sync + 'static,
+    S: Serialize + JsonSchema + Send + Sync + Clone + 'static,
+{
+    fn from(action: ToolAction<I, O, S>) -> Self {
+        ToolArgument::Action(Arc::new(action))
+    }
+}
+
 impl Default for ToolArgument {
     fn default() -> Self {
         ToolArgument::Name(String::new())
@@ -309,11 +320,11 @@ where
 }
 
 /// Defines a dynamic tool that is not registered with the framework globally.
-pub fn dynamic_tool<I, O, F, Fut>(config: ToolConfig<I, O>, runner: F) -> ToolAction<I, O, ()>
+pub fn dynamic_tool<I, O, F, Fut>(config: ToolConfig<I, O>, runner: F) -> ToolArgument
 where
-    I: JsonSchema + Serialize + DeserializeOwned + Send + Sync + 'static,
+    I: JsonSchema + Serialize + DeserializeOwned + Send + Sync + Clone + 'static,
     O: JsonSchema + Serialize + DeserializeOwned + Send + Sync + 'static,
-    F: Fn(I, ToolFnOptions) -> Fut + Send + Sync + 'static,
+    F: Fn(I, ToolFnOptions) -> Fut + Send + Sync + Clone + 'static,
     Fut: Future<Output = Result<O>> + Send + 'static,
 {
     let runner_arc = Arc::new(runner);
@@ -335,7 +346,7 @@ where
         },
     );
 
-    ToolAction(action)
+    ToolArgument::from(ToolAction(action))
 }
 
 /// Resolves a slice of `ToolArgument`s into a `Vec` of `ToolAction`s.
