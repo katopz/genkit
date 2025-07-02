@@ -174,6 +174,7 @@ impl Default for ProgrammableModelPlugin {
     }
 }
 
+#[allow(unused)]
 impl ProgrammableModelPlugin {
     pub fn new() -> Self {
         Default::default()
