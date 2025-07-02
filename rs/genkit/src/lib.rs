@@ -31,6 +31,7 @@ pub mod common;
 pub mod context;
 pub mod embedder;
 pub mod error;
+pub mod evaluator;
 pub mod extract;
 pub mod flow;
 pub mod formats;
@@ -40,6 +41,7 @@ pub mod model;
 pub mod plugin;
 pub mod prompt;
 pub mod registry;
+pub mod reranker;
 pub mod retriever;
 pub mod schema;
 pub mod testing;
@@ -47,20 +49,26 @@ pub mod tool;
 pub mod tracing;
 
 // Re-export key components for a unified and convenient API.
+
 pub use self::embedder::{
     define_embedder, embed, embedder_ref, EmbedParams, EmbedderAction, EmbedderArgument,
     EmbedderInfo, EmbedderRef, Embedding, EmbeddingBatch,
 };
 pub use self::error::{Error, Result};
+pub use self::evaluator::{define_evaluator, EvaluatorAction, EvaluatorFn};
+
 pub use self::flow::{define_flow, run as run_flow_step, Flow};
+
 pub use self::model::{
     FinishReason, GenerateRequest, GenerateResponse, Message, Model, ModelInfo, Part, Role,
 };
 pub use self::plugin::Plugin;
+
 pub use self::prompt::{
     define_prompt, is_executable_prompt, prompt, ExecutablePrompt, PromptAction, PromptConfig,
     PromptGenerateOptions,
 };
+pub use self::reranker::{define_reranker, RerankerAction, RerankerFn};
 pub use self::retriever::{
     define_indexer, define_retriever, index, indexer_ref, retrieve, retriever_ref, Document,
     IndexerAction, IndexerArgument, IndexerInfo, IndexerParams, IndexerRef, RetrieverAction,
@@ -70,13 +78,28 @@ pub use self::tool::{
     define_interrupt, define_tool, dynamic_tool, to_tool_definition, ToolAction, ToolArgument,
     ToolConfig, ToolDefinition,
 };
+pub use genkit_ai::generate::GenerateOptions;
+use genkit_ai::generate::{generate, generate_stream};
 // Re-export key types directly from the underlying crates for a flat, convenient API.
 pub use genkit_ai::chat::Chat;
+use genkit_ai::model::{BackgroundModelAction, DefineBackgroundModelOptions, DefineModelOptions};
+use genkit_ai::reranker::{RerankerRequest, RerankerResponse};
+use genkit_ai::retriever::{IndexerRequest, RetrieverRequest, RetrieverResponse};
 pub use genkit_ai::session::{Session, SessionStore};
+use genkit_ai::tool::ToolFnOptions;
+use genkit_ai::{
+    define_background_model, define_model, BaseEvalDataPoint, EmbedRequest, EmbedResponse,
+    EvalResponse, GenerateResponseChunkData, ModelAction,
+};
 pub use genkit_core::context::ActionContext;
+use genkit_core::registry::ErasedAction;
 pub use genkit_core::registry::Registry;
+use genkit_core::{Action, ActionFnArg};
+use schemars::JsonSchema;
+use serde::Deserialize;
 #[cfg(feature = "beta")]
 use serde::{de::DeserializeOwned, Serialize};
+use std::future::Future;
 use std::sync::Arc;
 
 /// The main entry point for the Genkit framework.
@@ -125,6 +148,187 @@ impl Genkit {
 
     pub fn context(&self) -> Option<&ActionContext> {
         self.context.as_ref()
+    }
+
+    /// Defines a new tool and registers it with the Genkit registry.
+    pub fn dynamic_tool<I, O, F, Fut>(
+        &mut self,
+        config: ToolConfig<I, O>,
+        runner: F,
+    ) -> ToolAction<I, O, ()>
+    where
+        I: JsonSchema + Serialize + DeserializeOwned + Send + Sync + Clone + 'static,
+        O: JsonSchema + Serialize + DeserializeOwned + Send + Sync + 'static,
+        F: Fn(I, ToolFnOptions) -> Fut + Send + Sync + Clone + 'static,
+        Fut: Future<Output = Result<O>> + Send + 'static,
+    {
+        define_tool(&mut self.registry, config, runner)
+    }
+
+    /// Defines and registers a flow function.
+    pub fn define_flow<I, O, S, F, Fut>(
+        &mut self,
+        name: impl Into<String>,
+        func: F,
+    ) -> Flow<I, O, S>
+    where
+        I: DeserializeOwned + JsonSchema + Send + Sync + Clone + 'static,
+        O: Serialize + JsonSchema + Send + Sync + 'static,
+        S: Serialize + JsonSchema + Send + Sync + Clone + 'static,
+        F: Fn(I, ActionFnArg<S>) -> Fut + Send + Sync + 'static,
+        Fut: Future<Output = Result<O>> + Send,
+        Action<I, O, S>: ErasedAction + 'static,
+    {
+        define_flow(&mut self.registry, name, func)
+    }
+
+    /// Defines a new model and adds it to the registry.
+    pub fn define_model<F, Fut>(&mut self, options: DefineModelOptions, f: F) -> ModelAction
+    where
+        F: Fn(GenerateRequest, Option<Box<dyn Fn(GenerateResponseChunkData) + Send + Sync>>) -> Fut
+            + Send
+            + Sync
+            + 'static,
+        Fut: Future<Output = Result<genkit_ai::GenerateResponseData, genkit_core::error::Error>>
+            + Send
+            + 'static,
+    {
+        define_model(&mut self.registry, options, f)
+    }
+
+    /// Defines a new background model and adds it to the registry.
+    pub fn define_background_model(
+        &mut self,
+        registry: &mut genkit_core::Registry,
+        options: DefineBackgroundModelOptions,
+    ) -> BackgroundModelAction {
+        define_background_model(&mut self.registry, options)
+    }
+
+    /// Defines and registers a prompt based on a function.
+    pub async fn define_prompt<I, O, C>(
+        &mut self,
+        config: PromptConfig<I, O, C>,
+    ) -> ExecutablePrompt<I, O, C>
+    where
+        I: Serialize + DeserializeOwned + JsonSchema + Send + Sync + 'static,
+        O: for<'de> Deserialize<'de>
+            + Serialize
+            + Send
+            + Sync
+            + std::fmt::Debug
+            + Clone
+            + Default
+            + 'static,
+        C: Serialize + DeserializeOwned + JsonSchema + Send + Sync + 'static,
+    {
+        define_prompt(&mut self.registry, config)
+    }
+
+    /// Creates a retriever action for the provided RetrieverFn implementation.
+    pub async fn define_retriever<I, F, Fut>(&mut self, name: &str, runner: F) -> RetrieverAction<I>
+    where
+        I: JsonSchema + DeserializeOwned + Send + Sync + Clone + 'static,
+        F: Fn(RetrieverRequest<I>, genkit_core::action::ActionFnArg<()>) -> Fut
+            + Send
+            + Sync
+            + 'static,
+        Fut: Future<Output = Result<RetrieverResponse>> + Send + 'static,
+    {
+        define_retriever(&mut self.registry, name, runner)
+    }
+
+    // TODO
+    // /// Defines a simple retriever that maps existing data into documents.
+    // pub async fn define_simple_retriever<C, R>(
+    //     &self,
+    //     options: SimpleRetrieverOptions,
+    //     handler: R,
+    // ) -> Result<RetrieverAction<C, R>>
+    // where
+    //     C: Serialize + for<'de> DeserializeOwned + Send + Sync + 'static,
+    //     R: SimpleRetrieverFn<C> + 'static,
+    // {
+    //     define_simple_retriever(&mut self.registry, options, handler).await
+    // }
+
+    /// Creates an indexer action for the provided IndexerFn implementation.
+    pub fn define_indexer<I, F, Fut>(&mut self, name: &str, runner: F) -> IndexerAction<I>
+    where
+        I: JsonSchema + DeserializeOwned + Send + Sync + Clone + 'static,
+        F: Fn(IndexerRequest<I>, genkit_core::action::ActionFnArg<()>) -> Fut
+            + Send
+            + Sync
+            + 'static,
+        Fut: Future<Output = Result<()>> + Send + 'static,
+    {
+        define_indexer(&mut self.registry, name, runner)
+    }
+
+    /// Creates evaluator action for the provided EvaluatorFn implementation.
+    pub fn define_evaluator<I, F, Fut>(&mut self, name: &str, runner: F) -> EvaluatorAction<I>
+    where
+        I: JsonSchema + DeserializeOwned + Send + Sync + Clone + 'static,
+        F: Fn(BaseEvalDataPoint) -> Fut + Send + Sync + 'static,
+        Fut: Future<Output = Result<EvalResponse>> + Send + 'static,
+    {
+        define_evaluator(&mut self.registry, name, runner)
+    }
+
+    /// Creates embedder model for the provided EmbedderFn model implementation.
+    pub fn define_embedder<I, F, Fut>(&mut self, name: &str, runner: F) -> EmbedderAction<I>
+    where
+        I: JsonSchema + DeserializeOwned + Send + Sync + Clone + 'static,
+        F: Fn(EmbedRequest<I>, genkit_core::action::ActionFnArg<()>) -> Fut + Send + Sync + 'static,
+        Fut: Future<Output = Result<EmbedResponse>> + Send + 'static,
+    {
+        define_embedder(&mut self.registry, name, runner)
+    }
+
+    /// Creates reranker action for the provided RerankerFn implementation.
+    pub fn define_reranker<I, F, Fut>(&mut self, name: &str, runner: F) -> RerankerAction<I>
+    where
+        I: JsonSchema + DeserializeOwned + Send + Sync + Clone + 'static,
+        F: Fn(RerankerRequest<I>, genkit_core::action::ActionFnArg<()>) -> Fut
+            + Send
+            + Sync
+            + 'static,
+        Fut: Future<Output = Result<RerankerResponse>> + Send + 'static,
+    {
+        define_reranker(&mut self.registry, name, runner)
+    }
+
+    /// Generates content using a model.
+    pub async fn generate<O>(&self, options: GenerateOptions<O>) -> Result<GenerateResponse<O>>
+    where
+        O: Clone
+            + Default
+            + for<'de> DeserializeOwned
+            + Serialize
+            + Send
+            + Sync
+            + 'static
+            + std::fmt::Debug,
+    {
+        generate(&self.registry, options).await
+    }
+
+    /// Generates content and streams the response.
+    pub fn generate_stream<O>(
+        &self,
+        options: GenerateOptions<O>,
+    ) -> genkit_ai::generate::GenerateStreamResponse<O>
+    where
+        O: Clone
+            + Default
+            + for<'de> DeserializeOwned
+            + Serialize
+            + Send
+            + Sync
+            + 'static
+            + std::fmt::Debug,
+    {
+        generate_stream(&self.registry, options)
     }
 
     /// Creates a new, empty session.

@@ -158,6 +158,36 @@ pub fn define_programmable_model(registry: &mut Registry) -> ProgrammableModel {
     state
 }
 
+/// A plugin for defining the programmable model for testing.
+#[derive(Clone)]
+pub struct ProgrammableModelPlugin {
+    // This state allows the test to get a handle to the model's state
+    // after it has been initialized through the plugin system.
+    pub state: Arc<Mutex<Option<ProgrammableModel>>>,
+}
+
+impl Default for ProgrammableModelPlugin {
+    fn default() -> Self {
+        Self {
+            state: Arc::new(Mutex::new(None)),
+        }
+    }
+}
+
+impl ProgrammableModelPlugin {
+    pub fn new() -> Self {
+        Default::default()
+    }
+
+    pub fn get_handle(&self) -> ProgrammableModel {
+        self.state
+            .lock()
+            .unwrap()
+            .clone()
+            .expect("Programmable model was not initialized by the plugin")
+    }
+}
+
 /// A simple plugin to define our echo model for testing.
 pub struct EchoModelPlugin;
 
@@ -204,4 +234,17 @@ pub async fn genkit_instance_with_echo_model() -> Arc<Genkit> {
     })
     .await
     .unwrap()
+}
+
+#[async_trait]
+impl Plugin for ProgrammableModelPlugin {
+    fn name(&self) -> &'static str {
+        "programmableModelPlugin"
+    }
+
+    async fn initialize(&self, registry: &mut Registry) -> Result<()> {
+        let pm = define_programmable_model(registry);
+        *self.state.lock().unwrap() = Some(pm);
+        Ok(())
+    }
 }

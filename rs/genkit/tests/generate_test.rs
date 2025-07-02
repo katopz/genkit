@@ -266,6 +266,55 @@ async fn test_streams_default_model() {
         .starts_with("Echo: unused; config: null"));
 }
 
+#[tokio::test]
+async fn test_uses_the_default_model() {
+    let pm_plugin = Arc::new(helpers::ProgrammableModelPlugin::new());
+    let genkit = Genkit::init(GenkitOptions {
+        plugins: vec![pm_plugin.clone() as Arc<dyn Plugin>],
+        default_model: Some("programmableModel".to_string()),
+        ..Default::default()
+    })
+    .await
+    .unwrap();
+    let pm = pm_plugin.get_handle();
+
+    // Set a handler for the programmable model to capture the request
+    let test_prompt = "tell me a joke".to_string();
+    let mut handler_mutex_guard = pm.handler.lock().unwrap();
+    *handler_mutex_guard = Arc::new(Box::new(move |req, _| {
+        Box::pin(async move {
+            Ok(GenerateResponseData {
+                candidates: vec![CandidateData {
+                    index: 0,
+                    message: MessageData {
+                        role: Role::Model,
+                        content: vec![Part::text("mock response".to_string())],
+                        metadata: None,
+                    },
+                    finish_reason: Some(FinishReason::Stop),
+                    ..Default::default()
+                }],
+                ..Default::default()
+            })
+        })
+    }));
+    drop(handler_mutex_guard); // Explicitly drop to release the lock
+
+    let response = genkit
+        .generate(GenerateOptions {
+            prompt: Some(vec![Part::text(test_prompt.clone())]),
+            ..Default::default()
+        })
+        .await
+        .unwrap();
+
+    let last_request = pm.last_request.lock().unwrap();
+    assert!(last_request.is_some());
+    let last_message = last_request.as_ref().unwrap().messages.last().unwrap();
+    assert_eq!(last_message.text(), test_prompt);
+    assert_eq!(response.text().unwrap(), "mock response");
+}
+
 //
 // Explicit Model Tests
 //
@@ -374,7 +423,6 @@ async fn genkit_with_programmable_model() -> (Arc<Genkit>, Arc<helpers::Programm
         async fn initialize(&self, registry: &mut Registry) -> Result<()> {
             let pm_clone = self.pm.clone();
             define_model(
-                registry,
                 DefineModelOptions {
                     name: "programmableModel".to_string(),
                     supports: Some(ModelInfoSupports {

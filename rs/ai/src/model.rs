@@ -225,7 +225,9 @@ pub type BoxFuture<'a, T> = Pin<Box<dyn Future<Output = T> + Send + 'a>>;
 
 /// The `next` function passed to a `ModelMiddleware`.
 pub type ModelMiddlewareNext<'a> = Box<
-    dyn Fn(GenerateRequest) -> BoxFuture<'a, Result<GenerateResponse, genkit_core::error::Error>>
+    dyn Fn(
+            GenerateRequest,
+        ) -> BoxFuture<'a, Result<GenerateResponseData, genkit_core::error::Error>>
         + Send
         + Sync,
 >;
@@ -235,14 +237,15 @@ pub type ModelMiddleware = Arc<
     dyn for<'a> Fn(
             GenerateRequest,
             ModelMiddlewareNext<'a>,
-        ) -> BoxFuture<'a, Result<GenerateResponse, genkit_core::error::Error>>
+        )
+            -> BoxFuture<'a, Result<GenerateResponseData, genkit_core::error::Error>>
         + Send
         + Sync,
 >;
 
 /// An action that can be used to generate content.
 #[derive(Clone)]
-pub struct ModelAction(Action<GenerateRequest, GenerateResponse, GenerateResponseChunkData>);
+pub struct ModelAction(Action<GenerateRequest, GenerateResponseData, GenerateResponseChunkData>);
 
 impl Deref for ModelAction {
     type Target = Action<GenerateRequest, GenerateResponseData, GenerateResponseChunkData>;
@@ -373,7 +376,7 @@ where
         + Send
         + Sync
         + 'static,
-    Fut: Future<Output = Result<GenerateResponse, genkit_core::error::Error>> + Send + 'static,
+    Fut: Future<Output = Result<GenerateResponseData, genkit_core::error::Error>> + Send + 'static,
 {
     let all_middlewares = Arc::new(get_model_middleware(&options));
     let f = Arc::new(f);
@@ -417,7 +420,7 @@ where
                     middlewares: Arc<Vec<ModelMiddleware>>,
                     index: usize,
                     f: Arc<F2>,
-                ) -> BoxFuture<'static, Result<GenerateResponse, genkit_core::error::Error>>
+                ) -> BoxFuture<'static, Result<GenerateResponseData, genkit_core::error::Error>>
                 where
                     F2: Fn(
                             GenerateRequest,
@@ -426,7 +429,7 @@ where
                         + Send
                         + Sync
                         + 'static,
-                    Fut2: Future<Output = Result<GenerateResponse, genkit_core::error::Error>>
+                    Fut2: Future<Output = Result<GenerateResponseData, genkit_core::error::Error>>
                         + Send
                         + 'static,
                 {
