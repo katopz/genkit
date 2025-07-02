@@ -26,15 +26,18 @@ use genkit::{
     Genkit, GenkitOptions, Model, ToolConfig,
 };
 use genkit_ai::{
+    self as genkit_ai, // Alias to prevent ambiguity with genkit::define_model
     define_model,
     model::{
         CandidateData, DefineModelOptions, GenerateRequest, GenerateResponseChunkData,
         GenerateResponseData,
     },
-    GenerateOptions, MessageData, ToolRequest,
+    GenerateOptions,
+    MessageData,
+    ToolRequest,
 };
+use rstest::{fixture, rstest};
 use schemars::JsonSchema;
-use serde::{Deserialize, Serialize};
 use serde_json::json;
 use std::sync::{Arc, Mutex};
 
@@ -125,7 +128,8 @@ impl Plugin for TsEchoModelPlugin {
     }
 }
 
-/// Creates a Genkit instance with a model that mimics the behavior of the TS echoModel.
+/// Fixture that creates a Genkit instance with a model that mimics the behavior of the TS echoModel.
+#[fixture]
 async fn genkit_instance_for_test() -> (Arc<Genkit>, Arc<Mutex<Option<GenerateRequest>>>) {
     let last_request = Arc::new(Mutex::new(None));
     let echo_plugin = Arc::new(TsEchoModelPlugin {
@@ -146,12 +150,15 @@ async fn genkit_instance_for_test() -> (Arc<Genkit>, Arc<Mutex<Option<GenerateRe
 // Default Model Tests
 //
 
+#[rstest]
 #[tokio::test]
-async fn test_calls_default_model() {
-    let (genkit, _) = genkit_instance_for_test().await;
+async fn test_calls_default_model(
+    #[future] genkit_instance_for_test: (Arc<Genkit>, Arc<Mutex<Option<GenerateRequest>>>),
+) {
+    let (genkit, _) = genkit_instance_for_test.await;
     let response: genkit::GenerateResponse = genkit
         .generate(GenerateOptions {
-            prompt: Some(vec![Part::text("short and sweet".to_string())]),
+            prompt: Some(vec![Part::text("short and sweet")]),
             config: Some(json!({ "temperature": 0.5 })),
             ..Default::default()
         })
@@ -164,26 +171,12 @@ async fn test_calls_default_model() {
     );
 }
 
+#[rstest]
 #[tokio::test]
-async fn test_calls_default_model_with_string_prompt() {
-    let (genkit, _) = genkit_instance_for_test().await;
-    let response: genkit::GenerateResponse = genkit
-        .generate(GenerateOptions {
-            prompt: Some(vec![Part::text("short and sweet".to_string())]),
-            ..Default::default()
-        })
-        .await
-        .unwrap();
-
-    assert_eq!(
-        response.text().unwrap(),
-        "Echo: short and sweet; config: null"
-    );
-}
-
-#[tokio::test]
-async fn test_calls_default_model_with_parts_prompt() {
-    let (genkit, _) = genkit_instance_for_test().await;
+async fn test_calls_default_model_with_string_prompt(
+    #[future] genkit_instance_for_test: (Arc<Genkit>, Arc<Mutex<Option<GenerateRequest>>>),
+) {
+    let (genkit, _) = genkit_instance_for_test.await;
     let response: genkit::GenerateResponse = genkit
         .generate(GenerateOptions {
             prompt: Some(vec![Part::text("short and sweet")]),
@@ -198,9 +191,32 @@ async fn test_calls_default_model_with_parts_prompt() {
     );
 }
 
+#[rstest]
 #[tokio::test]
-async fn test_calls_default_model_system_message() {
-    let (genkit, _) = genkit_instance_for_test().await;
+async fn test_calls_default_model_with_parts_prompt(
+    #[future] genkit_instance_for_test: (Arc<Genkit>, Arc<Mutex<Option<GenerateRequest>>>),
+) {
+    let (genkit, _) = genkit_instance_for_test.await;
+    let response: genkit::GenerateResponse = genkit
+        .generate(GenerateOptions {
+            prompt: Some(vec![Part::text("short and sweet")]),
+            ..Default::default()
+        })
+        .await
+        .unwrap();
+
+    assert_eq!(
+        response.text().unwrap(),
+        "Echo: short and sweet; config: null"
+    );
+}
+
+#[rstest]
+#[tokio::test]
+async fn test_calls_default_model_system_message(
+    #[future] genkit_instance_for_test: (Arc<Genkit>, Arc<Mutex<Option<GenerateRequest>>>),
+) {
+    let (genkit, _) = genkit_instance_for_test.await;
     let messages = vec![
         MessageData {
             role: Role::System,
@@ -233,9 +249,12 @@ async fn test_calls_default_model_system_message() {
     );
 }
 
+#[rstest]
 #[tokio::test]
-async fn test_calls_default_model_with_tool_choice() {
-    let (genkit, last_request) = genkit_instance_for_test().await;
+async fn test_calls_default_model_with_tool_choice(
+    #[future] genkit_instance_for_test: (Arc<Genkit>, Arc<Mutex<Option<GenerateRequest>>>),
+) {
+    let (genkit, last_request) = genkit_instance_for_test.await;
     let config = json!({ "tool_choice": "myTool" });
     let response: genkit::GenerateResponse = genkit
         .generate(GenerateOptions {
@@ -254,6 +273,7 @@ async fn test_calls_default_model_with_tool_choice() {
     assert_eq!(response.text().unwrap(), expected_response);
 }
 
+#[rstest]
 #[tokio::test]
 async fn test_streams_default_model() {
     let (genkit, pm_handle) = genkit_with_programmable_model().await;
@@ -294,12 +314,8 @@ async fn test_streams_default_model() {
         });
 
     let mut chunks = Vec::new();
-
     while let Some(chunk_result) = response_container.stream.next().await {
-        match chunk_result {
-            Ok(chunk) => chunks.push(chunk),
-            Err(e) => panic!("Stream returned an error: {:?}", e),
-        }
+        chunks.push(chunk_result.unwrap());
     }
 
     assert_eq!(chunks.len(), 3, "Should have received 3 chunks");
@@ -307,9 +323,9 @@ async fn test_streams_default_model() {
     assert_eq!(chunks[1].text(), "2");
     assert_eq!(chunks[2].text(), "1");
 
-    let final_response_result = response_container.response.await;
-
-    let final_response = final_response_result
+    let final_response = response_container
+        .response
+        .await
         .expect("Tokio task should not panic")
         .expect("Generation process should complete successfully");
 
@@ -323,17 +339,12 @@ async fn test_streams_default_model() {
     );
 }
 
+#[rstest]
 #[tokio::test]
-async fn test_uses_the_default_model() {
-    let pm_plugin = Arc::new(helpers::ProgrammableModelPlugin::new());
-    let genkit = Genkit::init(GenkitOptions {
-        plugins: vec![pm_plugin.clone() as Arc<dyn Plugin>],
-        default_model: Some("programmableModel".to_string()),
-        ..Default::default()
-    })
-    .await
-    .unwrap();
-    let pm = pm_plugin.get_handle();
+async fn test_uses_the_default_model(
+    #[future] genkit_with_programmable_model: (Arc<Genkit>, helpers::ProgrammableModel),
+) {
+    let (genkit, pm) = genkit_with_programmable_model.await;
 
     let test_prompt = "tell me a joke".to_string();
     {
@@ -360,12 +371,11 @@ async fn test_uses_the_default_model() {
     let response: genkit::GenerateResponse = genkit
         .generate(GenerateOptions {
             model: Some(Model::Name("programmableModel".to_string())),
-            prompt: Some(vec![Part::text("tell me a joke")]),
+            prompt: Some(vec![Part::text(test_prompt.clone())]),
             ..Default::default()
         })
         .await
         .unwrap();
-    assert!(response.is_valid());
 
     let last_request = pm.last_request.lock().unwrap();
     assert!(last_request.is_some());
@@ -378,14 +388,16 @@ async fn test_uses_the_default_model() {
 // Explicit Model Tests
 //
 
+#[rstest]
 #[tokio::test]
-async fn test_explicit_model_calls_the_explicitly_passed_in_model() {
-    let (genkit, _) = genkit_instance_for_test().await;
-    let model = Some(Model::Name("echoModel".to_string()));
+async fn test_explicit_model_calls_the_explicitly_passed_in_model(
+    #[future] genkit_instance_for_test: (Arc<Genkit>, Arc<Mutex<Option<GenerateRequest>>>),
+) {
+    let (genkit, _) = genkit_instance_for_test.await;
     let response: genkit::GenerateResponse = genkit
         .generate(GenerateOptions {
-            model,
-            prompt: Some(vec![Part::text("short and sweet".to_string())]),
+            model: Some(Model::Name("echoModel".to_string())),
+            prompt: Some(vec![Part::text("short and sweet")]),
             ..Default::default()
         })
         .await
@@ -397,6 +409,7 @@ async fn test_explicit_model_calls_the_explicitly_passed_in_model() {
     );
 }
 
+#[rstest]
 #[tokio::test]
 async fn test_explicit_model_rejects_on_invalid_model() {
     let (genkit, _) = genkit_instance_for_test().await;
@@ -430,13 +443,7 @@ impl Plugin for ErrorModelPlugin {
                 name: "errorModel".to_string(),
                 ..Default::default()
             },
-            |_, _| async {
-                Err(Error::new_user_facing(
-                    genkit_core::status::StatusCode::Internal,
-                    "foo",
-                    None,
-                ))
-            },
+            |_, _| async { Err(Error::new_internal("foo")) },
         );
         Ok(())
     }
@@ -487,6 +494,7 @@ async fn test_streaming_rethrows_initialization_errors() {
     assert!(!response.is_valid());
 }
 
+#[fixture]
 async fn genkit_with_programmable_model() -> (Arc<Genkit>, helpers::ProgrammableModel) {
     let pm_plugin = Arc::new(helpers::ProgrammableModelPlugin::new());
     let genkit = Genkit::init(GenkitOptions {
@@ -499,9 +507,12 @@ async fn genkit_with_programmable_model() -> (Arc<Genkit>, helpers::Programmable
     (genkit, handle)
 }
 
+#[rstest]
 #[tokio::test]
-async fn test_streaming_passes_the_streaming_callback_to_the_model() {
-    let (genkit, pm_handle) = genkit_with_programmable_model().await;
+async fn test_streaming_passes_the_streaming_callback_to_the_model(
+    #[future] genkit_with_programmable_model: (Arc<Genkit>, helpers::ProgrammableModel),
+) {
+    let (genkit, pm_handle) = genkit_with_programmable_model.await;
 
     let was_called = Arc::new(Mutex::new(false));
     let was_called_clone = was_called.clone();
@@ -531,9 +542,12 @@ async fn test_streaming_passes_the_streaming_callback_to_the_model() {
     assert!(*was_called.lock().unwrap());
 }
 
+#[rstest]
 #[tokio::test]
-async fn test_streaming_strips_out_noop_streaming_callback() {
-    let (genkit, pm_handle) = genkit_with_programmable_model().await;
+async fn test_streaming_strips_out_noop_streaming_callback(
+    #[future] genkit_with_programmable_model: (Arc<Genkit>, helpers::ProgrammableModel),
+) {
+    let (genkit, pm_handle) = genkit_with_programmable_model.await;
 
     let was_called = Arc::new(Mutex::new(false));
     let was_called_clone = was_called.clone();
@@ -568,9 +582,12 @@ async fn test_streaming_strips_out_noop_streaming_callback() {
 // Config Tests
 //
 
+#[rstest]
 #[tokio::test]
-async fn test_config_takes_config_passed_to_generate() {
-    let (genkit, pm_handle) = genkit_with_programmable_model().await;
+async fn test_config_takes_config_passed_to_generate(
+    #[future] genkit_with_programmable_model: (Arc<Genkit>, helpers::ProgrammableModel),
+) {
+    let (genkit, pm_handle) = genkit_with_programmable_model.await;
 
     let _: genkit::GenerateResponse = genkit
         .generate(GenerateOptions {
@@ -697,9 +714,10 @@ async fn test_config_picks_up_top_level_version_from_the_ref() {
 // Tools Tests
 //
 
-#[derive(Debug, Serialize, Deserialize, JsonSchema, Clone)]
+#[derive(Debug, serde::Serialize, serde::Deserialize, JsonSchema, Clone)]
 struct TestToolInput {}
 
+#[rstest]
 #[tokio::test]
 async fn test_tools_call_the_tool() {
     let (genkit, pm_handle) = genkit_with_programmable_model().await;
