@@ -287,20 +287,29 @@ where
     let (tx, rx) = mpsc::channel(128);
     let mut stream_options = options;
 
-    // Create a callback that sends chunks received from the generation logic
-    // into the sender part of our channel.
+    let tx_for_callback = tx.clone();
+    // Create a callback that sends chunks into the channel.
     let on_chunk: OnChunkCallback<O> = Arc::new(move |chunk| {
-        // We use try_send to avoid blocking if the receiver is slow.
-        // If the receiver has been dropped, this will error, so we ignore it.
-        let _ = tx.try_send(Ok(chunk));
+        // We use try_send to avoid blocking.
+        let _ = tx_for_callback.try_send(Ok(chunk));
         Ok(())
     });
 
     stream_options.on_chunk = Some(on_chunk);
     let registry_clone = registry.clone();
 
-    let response_handle =
-        tokio::spawn(async move { generate(&registry_clone, stream_options).await });
+    // Spawn the background generation task.
+    let tx_for_error = tx.clone();
+    let response_handle = tokio::spawn(async move {
+        let final_result = generate(&registry_clone, stream_options).await;
+
+        if let Err(e) = &final_result {
+            let new_error = Error::new_internal(e.to_string());
+            let _ = tx_for_error.send(Err(new_error)).await;
+        }
+
+        final_result
+    });
 
     let stream = ReceiverStream::new(rx);
 

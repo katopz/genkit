@@ -24,7 +24,7 @@ use genkit::{
     model::Part,
     plugin::Plugin,
     registry::Registry,
-    FinishReason, Genkit, GenkitOptions, Model, Role,
+    FinishReason, GenerateRequest, Genkit, GenkitOptions, Model, Role,
 };
 use genkit_ai::{
     self as genkit_ai, define_model, model::DefineModelOptions, CandidateData, GenerateOptions,
@@ -37,6 +37,11 @@ use serde_json::Value;
 use std::sync::{Arc, Mutex};
 
 use helpers::StreamingCallback;
+
+#[fixture]
+async fn genkit_instance_for_test() -> (Arc<Genkit>, Arc<Mutex<Option<GenerateRequest>>>) {
+    helpers::genkit_instance_for_test().await
+}
 
 #[fixture]
 async fn genkit_with_programmable_model() -> (Arc<Genkit>, helpers::ProgrammableModel) {
@@ -153,26 +158,35 @@ async fn test_streaming_rethrows_response_errors() {
 }
 
 #[tokio::test]
-async fn test_streaming_rethrows_initialization_errors() {
-    let error_plugin = Arc::new(ErrorModelPlugin);
-    let genkit = Genkit::init(GenkitOptions {
-        plugins: vec![error_plugin as Arc<dyn Plugin>],
+async fn test_generate_stream_rethrows_initialization_errors() {
+    let (genkit, _) = helpers::genkit_instance_for_test().await;
+
+    // Call generate_stream with a model that doesn't exist.
+    let mut resp: genkit::GenerateStreamResponse = genkit.generate_stream(GenerateOptions {
+        model: Some(Model::Name("modelNotFound".to_string())),
+        prompt: Some(vec![Part::text("hi")]),
         ..Default::default()
-    })
-    .await
-    .unwrap();
+    });
 
-    let model = Some(Model::Name("errorModel".to_string()));
-    let response: genkit::GenerateResponse = genkit
-        .generate_with_options(GenerateOptions {
-            model,
-            prompt: Some(vec![Part::text("hi".to_string())]),
-            ..Default::default()
-        })
-        .await
-        .unwrap();
+    // Try to get the first item from the stream.
+    // This is where the initialization error should now appear.
+    let first_item = resp.stream.next().await;
 
-    assert!(!response.is_valid());
+    assert!(
+        first_item.is_some(),
+        "Stream should have emitted an error item"
+    );
+
+    let result = first_item.unwrap();
+    assert!(result.is_err(), "Stream item should be an Err");
+
+    // Check that the error is the one we expect.
+    let err = result.unwrap_err();
+    let err_string = err.to_string();
+    assert!(
+        err_string.contains("not found"),
+        "Error message should indicate that the model was not found"
+    );
 }
 
 #[rstest]

@@ -272,3 +272,105 @@ pub async fn genkit_with_programmable_model() -> (Arc<Genkit>, ProgrammableModel
     let handle = pm_plugin.get_handle();
     (genkit, handle)
 }
+
+// A plugin that defines a model behaving like the TypeScript `echoModel` for testing.
+// This is defined locally in the test to allow for inspecting the last request.
+struct TsEchoModelPlugin {
+    last_request: Arc<Mutex<Option<GenerateRequest>>>,
+}
+
+#[async_trait]
+impl Plugin for TsEchoModelPlugin {
+    fn name(&self) -> &'static str {
+        "tsEchoModelPlugin"
+    }
+
+    async fn initialize(&self, registry: &mut Registry) -> Result<()> {
+        let last_request_clone = self.last_request.clone();
+        define_model(
+            registry,
+            DefineModelOptions {
+                name: "echoModel".to_string(),
+                label: Some("TS-Compatible Echo Model".to_string()),
+                ..Default::default()
+            },
+            move |req: GenerateRequest, streaming_callback| {
+                let last_request_clone = last_request_clone.clone();
+                async move {
+                    // Store the last request for inspection.
+                    let mut last_req = last_request_clone.lock().unwrap();
+                    *last_req = Some(req.clone());
+
+                    // Handle streaming by sending down a countdown.
+                    if let Some(cb) = streaming_callback {
+                        for i in (1..=3).rev() {
+                            cb(GenerateResponseChunkData {
+                                index: 0,
+                                content: vec![genkit::model::Part::text(i.to_string())],
+                                ..Default::default()
+                            });
+                        }
+                    }
+
+                    // Construct the response text by concatenating messages, similar to the TS version.
+                    let concatenated_messages = req
+                        .messages
+                        .iter()
+                        .map(|m| {
+                            let prefix = match m.role {
+                                Role::User | Role::Model => "".to_string(),
+                                _ => format!("{}: ", m.role.to_string().to_lowercase()),
+                            };
+                            let content = m
+                                .content
+                                .iter()
+                                .filter_map(|p| p.text.clone())
+                                .collect::<Vec<_>>()
+                                .join("");
+                            format!("{}{}", prefix, content)
+                        })
+                        .collect::<Vec<_>>()
+                        .join("");
+
+                    let config_str =
+                        serde_json::to_string(&req.config).unwrap_or_else(|_| "null".to_string());
+
+                    let response_text_part = Part::text(format!("Echo: {}", concatenated_messages));
+
+                    let config_part = Part::text(format!("; config: {}", config_str));
+
+                    Ok(GenerateResponseData {
+                        candidates: vec![CandidateData {
+                            message: MessageData {
+                                role: Role::Model,
+                                content: vec![response_text_part, config_part],
+                                ..Default::default()
+                            },
+                            finish_reason: Some(FinishReason::Stop),
+                            ..Default::default()
+                        }],
+                        ..Default::default()
+                    })
+                }
+            },
+        );
+        Ok(())
+    }
+}
+
+#[allow(unused)]
+pub async fn genkit_instance_for_test() -> (Arc<Genkit>, Arc<Mutex<Option<GenerateRequest>>>) {
+    let last_request = Arc::new(Mutex::new(None));
+    let echo_plugin = Arc::new(TsEchoModelPlugin {
+        last_request: last_request.clone(),
+    });
+
+    let genkit = Genkit::init(GenkitOptions {
+        plugins: vec![echo_plugin as Arc<dyn Plugin>],
+        default_model: Some("echoModel".to_string()),
+        ..Default::default()
+    })
+    .await
+    .unwrap();
+    (genkit, last_request)
+}
