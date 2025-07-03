@@ -33,6 +33,7 @@ use genkit_ai::{
     },
     GenerateOptions, MessageData, ModelRef,
 };
+
 use rstest::{fixture, rstest};
 use serde_json::{json, Value};
 use std::sync::{Arc, Mutex};
@@ -514,10 +515,12 @@ async fn test_streaming_passes_the_streaming_callback_to_the_model(
 
     {
         let mut handler = pm_handle.handler.lock().unwrap();
+        // REVERT the handler signature back to the original version.
         *handler = Arc::new(Box::new(
             move |_, streaming_callback: Option<StreamingCallback>| {
                 let was_called_clone_2 = was_called_clone.clone();
                 Box::pin(async move {
+                    // This logic is correct.
                     if streaming_callback.is_some() {
                         *was_called_clone_2.lock().unwrap() = true;
                     }
@@ -528,10 +531,15 @@ async fn test_streaming_passes_the_streaming_callback_to_the_model(
     }
 
     let stream_resp: genkit::GenerateStreamResponse = genkit.generate_stream(GenerateOptions {
-        model: Some(Model::Name("error-model".to_string())),
+        model: Some(Model::Name("programmableModel".to_string())),
         prompt: Some(vec![Part::text("test")]),
         ..Default::default()
     });
+
+    // Drain the stream to ensure the underlying calls are made.
+    let mut stream = stream_resp.stream;
+    while stream.next().await.is_some() {}
+
     let _ = stream_resp.response.await;
 
     assert!(*was_called.lock().unwrap());

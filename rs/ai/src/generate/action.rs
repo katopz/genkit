@@ -20,21 +20,23 @@
 
 use super::{response::GenerateResponse, GenerateOptions};
 use crate::document::Part;
-use crate::generate::{OnChunkCallback, OutputOptions, ToolChoice};
+use crate::generate::{OutputOptions, ToolChoice};
 use crate::message::{Message, MessageData, Role};
 use crate::model::{self, GenerateRequest, GenerateResponseChunkData, GenerateResponseData};
 use crate::{formats, to_generate_request, Document, Model};
-use genkit_core::action::{Action, ActionBuilder, ActionFnArg};
+use genkit_core::action::{Action, ActionBuilder, ActionFnArg, StreamingCallback};
 use genkit_core::error::{Error, Result};
 use genkit_core::registry::{ActionType, ErasedAction, Registry};
 use genkit_core::tracing;
 use serde::{de::DeserializeOwned, Deserialize, Serialize};
 use serde_json::Value;
 use std::collections::HashMap;
+use tokio::task_local;
 
 use std::future::Future;
 use std::pin::Pin;
 use std::sync::Arc;
+use tokio_stream::StreamExt;
 
 pub type NextFn = Box<
     dyn FnOnce(
@@ -79,7 +81,6 @@ pub struct GenerateHelperOptions<O: 'static> {
     pub middleware: Vec<ModelMiddleware>,
     pub current_turn: u32,
     pub message_index: u32,
-    pub on_chunk: Option<OnChunkCallback<O>>,
 }
 
 /// Defines (registers) a utility `generate` action.
@@ -365,26 +366,45 @@ where
 }
 
 /// Builds the middleware chain and calls the underlying model action.
-async fn run_model_via_middleware<O: 'static>(
+async fn run_model_via_middleware(
     model_action: Arc<dyn ErasedAction>,
     request: GenerateRequest,
     middleware: Vec<ModelMiddleware>,
-    _on_chunk: Option<OnChunkCallback<O>>,
 ) -> Result<GenerateResponseData> {
-    // The final step in the chain is to call the model itself.
     let mut chain = Box::new(move |req: GenerateRequest| {
         let model_action = model_action.clone();
-        // The `run_http_json` is used here because middleware deals with raw Values.
-        // A streaming implementation would require passing the streaming callback
-        // through the context.
+
         Box::pin(async move {
             let req_value = serde_json::to_value(req).unwrap();
-            let mut resp_value = model_action.run_http_json(req_value, None).await?;
-            if let Some(result) = resp_value.get_mut("result") {
-                resp_value = result.take();
+
+            // Get the callback from the context instead of a parameter.
+            if let Some(chunk_callback) = get_streaming_callback() {
+                // STREAMING PATH
+                let mut streaming_response = model_action.stream_http_json(req_value, None)?;
+
+                // Spawn a task to forward stream chunks to the callback.
+                tokio::spawn(async move {
+                    while let Some(chunk_result) = streaming_response.stream.next().await {
+                        chunk_callback(chunk_result);
+                    }
+                });
+
+                // Wait for the final response.
+                let mut final_resp_value = streaming_response.output.await?;
+                if let Some(result) = final_resp_value.get_mut("result") {
+                    final_resp_value = result.take();
+                }
+                serde_json::from_value(final_resp_value)
+                    .map_err(|e| Error::new_internal(format!("Failed to deserialize: {}", e)))
+            } else {
+                // NON-STREAMING PATH
+                let mut resp_value = model_action.run_http_json(req_value, None).await?;
+                if let Some(result) = resp_value.get_mut("result") {
+                    resp_value = result.take();
+                }
+                serde_json::from_value(resp_value)
+                    .map_err(|e| Error::new_internal(format!("Failed to deserialize: {}", e)))
             }
-            serde_json::from_value(resp_value)
-                .map_err(|e| Error::new_internal(format!("Failed to deserialize: {}", e)))
         }) as Pin<Box<dyn Future<Output = Result<GenerateResponseData>> + Send>>
     }) as NextFn;
 
@@ -404,15 +424,22 @@ fn generate_internal<O>(
     options: GenerateHelperOptions<O>,
 ) -> std::pin::Pin<Box<dyn std::future::Future<Output = Result<GenerateResponseData>> + Send>>
 where
-    O: Default + for<'de> DeserializeOwned + Serialize + Send + Sync + std::fmt::Debug + 'static,
+    O: Default
+        + for<'de> DeserializeOwned
+        + Serialize
+        + Send
+        + Sync
+        + std::fmt::Debug
+        + 'static
+        + Clone,
 {
     Box::pin(async move {
+        // Destructuring no longer includes `on_chunk`
         let GenerateHelperOptions {
             raw_request,
             middleware,
             current_turn,
             message_index,
-            on_chunk,
         } = options;
         let mut request = raw_request;
 
@@ -477,35 +504,28 @@ where
         if let Some(interrupted_response) = resume_result.interrupted_response {
             return Ok(interrupted_response);
         }
-        let mut request = resume_result.revised_request.unwrap(); // Should always be Some if not interrupted.
+        let mut request = resume_result.revised_request.unwrap();
+
+        // This block now gets the callback from the context.
         if let Some(tool_msg) = resume_result.tool_message {
-            if let Some(cb) = &on_chunk {
-                let chunk = super::chunk::GenerateResponseChunk::new(
-                    GenerateResponseChunkData {
-                        index: message_index,
-                        content: tool_msg.content,
-                        ..Default::default()
-                    },
-                    super::chunk::GenerateResponseChunkOptions {
-                        role: Some(Role::Tool),
-                        ..Default::default()
-                    },
-                );
-                cb(chunk)?;
+            if let Some(cb) = get_streaming_callback() {
+                let chunk_data = GenerateResponseChunkData {
+                    index: message_index,
+                    content: tool_msg.content,
+                    ..Default::default()
+                };
+                let chunk_value = serde_json::to_value(chunk_data)
+                    .map_err(|e| Error::new_internal(e.to_string()))?;
+                cb(Ok(chunk_value));
             }
         }
 
         // 5. Convert to GenerateRequest (the type the model action expects).
         let generate_request = to_generate_request(&registry, &request).await?;
 
-        // 6. Call the model action through the middleware chain.
-        let response_data = run_model_via_middleware(
-            model_action,
-            generate_request,
-            middleware.clone(),
-            on_chunk.clone(),
-        )
-        .await?;
+        // 6. Call the model action (no longer passing the callback).
+        let response_data =
+            run_model_via_middleware(model_action, generate_request, middleware.clone()).await?;
 
         let generated_message = match response_data.candidates.first() {
             Some(c) => c.message.clone(),
@@ -552,7 +572,7 @@ where
         }
         request.messages = Some(messages);
 
-        // 8. Recursive call for the next turn in the tool loop.
+        // 8. Recursive call (no longer passing the callback).
         generate_internal(
             registry,
             GenerateHelperOptions {
@@ -560,9 +580,47 @@ where
                 middleware,
                 current_turn: current_turn + 1,
                 message_index: message_index + 1,
-                on_chunk,
             },
         )
         .await
     })
+}
+
+/// A type-erased streaming callback that operates on raw JSON `Value`s.
+pub type ErasedStreamingCallback = Arc<dyn Fn(Result<Value>) + Send + Sync>;
+
+task_local! {
+    /// The task-local variable that holds the current streaming callback.
+    static STREAMING_CALLBACK: Option<ErasedStreamingCallback>;
+}
+
+/// Retrieves the type-erased streaming callback from the current task-local context.
+pub fn get_streaming_callback() -> Option<ErasedStreamingCallback> {
+    STREAMING_CALLBACK.try_with(|cb| cb.clone()).unwrap_or(None)
+}
+
+/// Retrieves the type-erased streaming callback from the current task-local context.
+pub async fn run_with_streaming_callback<S, F, Fut>(
+    callback: Option<StreamingCallback<S>>,
+    f: F,
+) -> Fut::Output
+where
+    S: DeserializeOwned + Send + 'static,
+    F: FnOnce() -> Fut,
+    Fut: Future,
+{
+    let erased_callback: Option<ErasedStreamingCallback> = callback.map(|cb| {
+        // By giving `erased` the explicit type, we tell Rust to create the
+        // `dyn Fn` trait object that the task-local variable expects.
+        let erased: ErasedStreamingCallback = Arc::new(move |value_result: Result<Value>| {
+            let final_result = value_result.and_then(|value| {
+                serde_json::from_value(value).map_err(|e| Error::new_internal(e.to_string()))
+            });
+            cb(final_result);
+        });
+        erased
+    });
+
+    // Use `.scope()` to run the provided future with the task-local set.
+    STREAMING_CALLBACK.scope(erased_callback, f()).await
 }

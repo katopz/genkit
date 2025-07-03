@@ -4,7 +4,7 @@
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
 //
-//     http://www.apache.org/licenses/LICENSE-2.0
+//      http://www.apache.org/licenses/LICENSE-2.0
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
@@ -23,7 +23,7 @@ use crate::extract::extract_json;
 use crate::message::Role;
 use crate::model::GenerateResponseChunkData;
 use genkit_core::error::{Error, Result};
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::fmt;
 use std::sync::Arc;
@@ -32,22 +32,23 @@ use std::sync::Arc;
 pub type ChunkParser<O> = Arc<dyn Fn(&GenerateResponseChunk<O>) -> Result<O> + Send + Sync>;
 
 /// Represents a chunk of a streaming response from a model.
-#[derive(Clone)]
+// FIX #1: Remove `Debug` from the derive macro to resolve the conflict.
+#[derive(Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct GenerateResponseChunk<O = Value> {
-    /// The index of the message this chunk corresponds to.
     pub index: u32,
-    /// The role of the message this chunk corresponds to (`model` or `tool`).
     pub role: Role,
-    /// The content generated in this chunk.
     pub content: Vec<Part>,
-    /// Custom, model-specific data for this chunk.
     pub custom: Option<Value>,
-    /// Accumulated chunks for partial output extraction.
     pub previous_chunks: Vec<GenerateResponseChunkData>,
-    /// The parser to be used to parse `output` from this chunk.
-    parser: Option<ChunkParser<O>>,
+
+    // FIX #2: Add `#[serde(skip)]` to tell Serde to ignore this non-serializable field.
+    // It's also now public to allow it to be set from outside the module.
+    #[serde(skip)]
+    pub parser: Option<ChunkParser<O>>,
 }
 
+// This manual `Debug` implementation is correct and now the only one.
 impl<O> fmt::Debug for GenerateResponseChunk<O> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("GenerateResponseChunk")
@@ -90,7 +91,7 @@ where
             content: data.content,
             custom: data.custom,
             previous_chunks: options.previous_chunks,
-            parser: None, // Parser can be attached later.
+            parser: None, // This correctly initializes the skipped field.
         }
     }
 

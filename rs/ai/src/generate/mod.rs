@@ -28,7 +28,7 @@ pub use self::chunk::GenerateResponseChunk;
 pub use self::response::GenerateResponse;
 
 use crate::document::{Document, Part, ToolRequest, ToolRequestPart, ToolResponsePart};
-use crate::generate::action::ModelMiddleware;
+use crate::generate::action::{run_with_streaming_callback, ModelMiddleware};
 use crate::message::{MessageData, Role};
 use crate::model::GenerateRequest;
 use crate::tool::{self, ToolArgument};
@@ -239,21 +239,34 @@ where
         }
     }
 
-    // The `on_chunk` callback is handled by `run_with_streaming_callback`, so we take it here.
     let on_chunk_callback = options.on_chunk.take();
     let registry_clone = registry.clone();
 
-    // The `run_with_streaming_callback` function from genkit-core would set the
-    // callback in a task-local context, which can then be retrieved by the model action.
-    // This is a placeholder for that logic.
-    let helper_options = action::GenerateHelperOptions {
-        middleware: options.r#use.take().unwrap_or_default(),
-        raw_request: options,
-        current_turn: 0,
-        message_index: 0,
-        on_chunk: on_chunk_callback,
-    };
-    action::generate_helper(Arc::new(registry_clone), helper_options).await
+    // FIX #1: Add explicit type annotation for the trait object.
+    let core_streaming_callback: Option<
+        genkit_core::action::StreamingCallback<GenerateResponseChunk<O>>,
+    > = on_chunk_callback.map(|user_callback| {
+        let new_cb: genkit_core::action::StreamingCallback<GenerateResponseChunk<O>> = Arc::new(
+            move |chunk_result: Result<GenerateResponseChunk<O>, genkit_core::Error>| {
+                if let Ok(chunk) = chunk_result {
+                    let _ = user_callback(chunk);
+                }
+            },
+        );
+        new_cb
+    });
+
+    // FIX #3: Wrap the async block in a no-argument closure `||`.
+    run_with_streaming_callback(core_streaming_callback, || async move {
+        let helper_options = action::GenerateHelperOptions {
+            middleware: options.r#use.take().unwrap_or_default(),
+            raw_request: options,
+            current_turn: 0,
+            message_index: 0,
+        };
+        action::generate_helper(Arc::new(registry_clone), helper_options).await
+    })
+    .await
 }
 
 /// Generates content and streams the response.
