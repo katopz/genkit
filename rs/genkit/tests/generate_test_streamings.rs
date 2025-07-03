@@ -137,6 +137,7 @@ async fn test_streams_default_model() {
     );
 }
 
+#[rstest]
 #[tokio::test]
 async fn test_streaming_rethrows_response_errors() {
     let error_plugin = Arc::new(ErrorModelPlugin);
@@ -157,6 +158,7 @@ async fn test_streaming_rethrows_response_errors() {
     assert!(stream_response.response.await.unwrap().is_err());
 }
 
+#[rstest]
 #[tokio::test]
 async fn test_generate_stream_rethrows_initialization_errors() {
     let (genkit, _) = helpers::genkit_instance_for_test().await;
@@ -191,44 +193,66 @@ async fn test_generate_stream_rethrows_initialization_errors() {
 
 #[rstest]
 #[tokio::test]
-async fn test_streaming_passes_the_streaming_callback_to_the_model(
-    #[future] genkit_with_programmable_model: (Arc<Genkit>, helpers::ProgrammableModel),
-) {
-    let (genkit, pm_handle) = genkit_with_programmable_model.await;
+async fn test_flow_passes_streaming_callback_to_generate() {
+    // 1. Setup the environment with a programmable model
+    let (genkit, pm_handle) = helpers::genkit_with_programmable_model().await;
+    let mut registry = genkit.registry().clone();
 
-    let was_called = Arc::new(Mutex::new(false));
-    let was_called_clone = was_called.clone();
+    // 2. Create a flag to track if the model received the streaming signal
+    let streaming_was_received = Arc::new(Mutex::new(false));
+    let streaming_was_received_clone = streaming_was_received.clone();
 
+    // 3. Configure the mock model to set the flag if it receives a callback
     {
         let mut handler = pm_handle.handler.lock().unwrap();
-        // REVERT the handler signature back to the original version.
         *handler = Arc::new(Box::new(
-            move |_, streaming_callback: Option<StreamingCallback>| {
-                let was_called_clone_2 = was_called_clone.clone();
-                Box::pin(async move {
-                    // This logic is correct.
-                    if streaming_callback.is_some() {
-                        *was_called_clone_2.lock().unwrap() = true;
-                    }
-                    Ok(Default::default())
-                })
+            move |_, streaming_callback: Option<helpers::StreamingCallback>| {
+                if streaming_callback.is_some() {
+                    *streaming_was_received_clone.lock().unwrap() = true;
+                }
+                Box::pin(async { Ok(Default::default()) })
             },
         ));
     }
 
-    let stream_resp: genkit::GenerateStreamResponse = genkit.generate_stream(GenerateOptions {
-        model: Some(Model::Name("programmableModel".to_string())),
-        prompt: Some(vec![Part::text("test")]),
+    // 4. Define the flow that calls `generate`
+    let wrapper_flow = define_flow(
+        &mut registry,
+        "wrapper",
+        // The flow's chunk type is `()`, defined by `ActionFnArg<()>`
+        move |_: (), _args: ActionFnArg<()>| {
+            let genkit_clone = genkit.clone();
+            async move {
+                // Inside the flow, call `generate` with its own `on_chunk` callback.
+                let response = genkit_clone
+                    .generate_with_options(GenerateOptions {
+                        model: Some(Model::Name("programmableModel".to_string())),
+                        prompt: Some(vec![Part::text("hi")]),
+                        on_chunk: Some(Arc::new(|_chunk: GenerateResponseChunk<Value>| Ok(()))),
+                        ..Default::default()
+                    })
+                    .await?;
+
+                Ok(response.text().unwrap_or_default())
+            }
+        },
+    );
+
+    // 5. Run the flow itself in streaming mode.
+    let run_options = ActionRunOptions {
+        // This `on_chunk` must match the flow's chunk type, which is `()`.
+        on_chunk: Some(Arc::new(|_chunk: Result<(), Error>| {})),
         ..Default::default()
-    });
+    };
 
-    // Drain the stream to ensure the underlying calls are made.
-    let mut stream = stream_resp.stream;
-    while stream.next().await.is_some() {}
+    // We don't need the flow's final output, just its side effect on the model.
+    let _ = wrapper_flow.run((), Some(run_options)).await;
 
-    let _ = stream_resp.response.await;
-
-    assert!(*was_called.lock().unwrap());
+    // 6. Assert that the model handler received the streaming callback.
+    assert!(
+        *streaming_was_received.lock().unwrap(),
+        "The model action was not notified of the streaming request."
+    );
 }
 
 #[tokio::test]
