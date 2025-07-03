@@ -43,7 +43,12 @@ impl Format for ArrayFormat {
         // This is a simplified streaming parser. To correctly handle the cursor,
         // we determine the end of the last fully parsed section and start
         // from there.
-        let cursor = if chunk.previous_chunks.is_empty() {
+        let cursor = if chunk
+            .previous_chunks
+            .as_deref()
+            .unwrap_or_default()
+            .is_empty()
+        {
             0
         } else {
             // Re-run extract_items on the previous text to find out where we left off.

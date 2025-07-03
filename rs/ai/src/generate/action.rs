@@ -609,18 +609,49 @@ where
     F: FnOnce() -> Fut,
     Fut: Future,
 {
-    let erased_callback: Option<ErasedStreamingCallback> = callback.map(|cb| {
-        // By giving `erased` the explicit type, we tell Rust to create the
-        // `dyn Fn` trait object that the task-local variable expects.
+    println!(
+        "[ACTION] run_with_streaming_callback called. callback.is_some(): {}",
+        callback.is_some()
+    );
+    if let Some(cb) = callback {
+        println!("[ACTION] Callback is Some. Creating erased callback and setting task-local.");
         let erased: ErasedStreamingCallback = Arc::new(move |value_result: Result<Value>| {
+            println!(
+                "[ACTION] Erased callback invoked with value: {:?}",
+                value_result
+            );
             let final_result = value_result.and_then(|value| {
-                serde_json::from_value(value).map_err(|e| Error::new_internal(e.to_string()))
+                // HACK: The value here is a raw `GenerateResponseChunkData` which is not
+                // directly deserializable into a `GenerateResponseChunk` because the latter
+                // has additional fields. We manually add the missing fields to the JSON
+                // representation before attempting to deserialize.
+                let mut obj = match value {
+                    Value::Object(map) => map,
+                    _ => {
+                        return Err(Error::new_internal(
+                            "Expected JSON object for chunk data".to_string(),
+                        ))
+                    }
+                };
+                // `previous_chunks` is required by `GenerateResponseChunk`.
+                obj.entry("previousChunks".to_string())
+                    .or_insert(Value::Array(vec![]));
+
+                let new_value = Value::Object(obj);
+                let deserialized: Result<S, _> = serde_json::from_value(new_value.clone());
+                if let Err(e) = &deserialized {
+                    println!(
+                        "[ACTION] Deserialization ERROR: {}. Value was: {}",
+                        e, new_value
+                    );
+                }
+                deserialized.map_err(|e| Error::new_internal(e.to_string()))
             });
             cb(final_result);
         });
-        erased
-    });
-
-    // Use `.scope()` to run the provided future with the task-local set.
-    STREAMING_CALLBACK.scope(erased_callback, f()).await
+        STREAMING_CALLBACK.scope(Some(erased), f()).await
+    } else {
+        println!("[ACTION] Callback is None. Running future directly.");
+        f().await
+    }
 }

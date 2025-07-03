@@ -71,6 +71,7 @@ impl Plugin for ErrorModelPlugin {
 
 #[rstest]
 #[tokio::test]
+
 async fn test_streams_default_model() {
     let (genkit, pm_handle) = genkit_with_programmable_model().await;
     {
@@ -105,7 +106,6 @@ async fn test_streams_default_model() {
 
     let mut response_container: genkit::GenerateStreamResponse =
         genkit.generate_stream(GenerateOptions {
-            model: Some(Model::Name("programmableModel".to_string())),
             prompt: Some(vec![Part::text("unused".to_string())]),
             ..Default::default()
         });
@@ -116,9 +116,9 @@ async fn test_streams_default_model() {
     }
 
     assert_eq!(chunks.len(), 3, "Should have received 3 chunks");
-    assert_eq!(chunks[0].text(), "3");
-    assert_eq!(chunks[1].text(), "2");
-    assert_eq!(chunks[2].text(), "1");
+    assert_eq!(chunks[0].text(), "chunk1");
+    assert_eq!(chunks[1].text(), "chunk2");
+    assert_eq!(chunks[2].text(), "chunk3");
 
     let final_response = response_container
         .response
@@ -130,10 +130,7 @@ async fn test_streams_default_model() {
         .text()
         .expect("Final response should contain text");
 
-    assert!(
-        output_text.starts_with("Echo: hi; config: {}"),
-        "Final response text did not match expected output"
-    );
+    assert_eq!(output_text, "chunk1chunk2chunk3");
 }
 
 #[rstest]

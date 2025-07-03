@@ -32,23 +32,21 @@ use std::sync::Arc;
 pub type ChunkParser<O> = Arc<dyn Fn(&GenerateResponseChunk<O>) -> Result<O> + Send + Sync>;
 
 /// Represents a chunk of a streaming response from a model.
-// FIX #1: Remove `Debug` from the derive macro to resolve the conflict.
 #[derive(Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct GenerateResponseChunk<O = Value> {
     pub index: u32,
-    pub role: Role,
+    #[serde(default)]
+    pub role: Option<Role>,
     pub content: Vec<Part>,
     pub custom: Option<Value>,
-    pub previous_chunks: Vec<GenerateResponseChunkData>,
+    #[serde(default)]
+    pub previous_chunks: Option<Vec<GenerateResponseChunkData>>,
 
-    // FIX #2: Add `#[serde(skip)]` to tell Serde to ignore this non-serializable field.
-    // It's also now public to allow it to be set from outside the module.
     #[serde(skip)]
     pub parser: Option<ChunkParser<O>>,
 }
 
-// This manual `Debug` implementation is correct and now the only one.
 impl<O> fmt::Debug for GenerateResponseChunk<O> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("GenerateResponseChunk")
@@ -57,14 +55,7 @@ impl<O> fmt::Debug for GenerateResponseChunk<O> {
             .field("content", &self.content)
             .field("custom", &self.custom)
             .field("previous_chunks", &self.previous_chunks)
-            .field(
-                "parser",
-                &if self.parser.is_some() {
-                    "Some(<fn>)"
-                } else {
-                    "None"
-                },
-            )
+            .field("parser", &self.parser.as_ref().map(|_| "Some(<fn>)"))
             .finish()
     }
 }
@@ -85,12 +76,10 @@ where
     pub fn new(data: GenerateResponseChunkData, options: GenerateResponseChunkOptions) -> Self {
         Self {
             index: data.index,
-            role: data
-                .role
-                .unwrap_or_else(|| options.role.unwrap_or_default()),
+            role: data.role.or(options.role),
             content: data.content,
             custom: data.custom,
-            previous_chunks: options.previous_chunks,
+            previous_chunks: Some(options.previous_chunks),
             parser: None, // This correctly initializes the skipped field.
         }
     }
@@ -114,6 +103,8 @@ where
     /// Concatenates all `text` parts of all preceding chunks.
     pub fn previous_text(&self) -> String {
         self.previous_chunks
+            .as_deref()
+            .unwrap_or_default()
             .iter()
             .flat_map(|c| &c.content)
             .filter_map(|p| p.text.as_deref())

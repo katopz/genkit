@@ -232,6 +232,10 @@ where
         + 'static
         + std::fmt::Debug,
 {
+    println!(
+        "[GENERATE] Called. on_chunk.is_some(): {}",
+        options.on_chunk.is_some()
+    );
     // If no model is specified in the options, try to use the default from the registry.
     if options.model.is_none() {
         if let Some(model_name) = registry.get_default_model() {
@@ -239,7 +243,15 @@ where
         }
     }
 
+    println!(
+        "[GENERATE] Before take(), options.on_chunk.is_some(): {}",
+        options.on_chunk.is_some()
+    );
     let on_chunk_callback = options.on_chunk.clone();
+    println!(
+        "[GENERATE] After take(), on_chunk_callback.is_some(): {}",
+        on_chunk_callback.is_some()
+    );
     let registry_clone = registry.clone();
 
     // FIX #1: Add explicit type annotation for the trait object.
@@ -284,12 +296,17 @@ where
         + 'static
         + std::fmt::Debug,
 {
+    println!(
+        "[STREAM] Called. options.on_chunk.is_some(): {}",
+        options.on_chunk.is_some()
+    );
     let (tx, rx) = mpsc::channel(128);
     let mut stream_options = options;
 
     let tx_for_callback = tx.clone();
     // Create a callback that sends chunks into the channel.
     let on_chunk: OnChunkCallback<O> = Arc::new(move |chunk| {
+        println!("[STREAM] on_chunk callback invoked. Sending chunk to stream channel.");
         // We use try_send to avoid blocking.
         let _ = tx_for_callback.try_send(Ok(chunk));
         Ok(())
@@ -299,9 +316,18 @@ where
     let registry_clone = registry.clone();
 
     // Spawn the background generation task.
+    println!("[STREAM] Spawning background task to call generate().");
     let tx_for_error = tx.clone();
     let response_handle = tokio::spawn(async move {
+        println!(
+            "[STREAM_TASK] Started. Calling generate() with on_chunk.is_some(): {}",
+            stream_options.on_chunk.is_some()
+        );
         let final_result = generate(&registry_clone, stream_options).await;
+        println!(
+            "[STREAM_TASK] generate() finished. Result is_ok(): {}",
+            final_result.is_ok()
+        );
 
         if let Err(e) = &final_result {
             let new_error = Error::new_internal(e.to_string());
@@ -334,7 +360,6 @@ where
         + 'static
         + std::fmt::Debug,
 {
-    println!("[generate] options.output: {:?}", options.output);
     let model_ref = options
         .model
         .as_ref()
