@@ -36,8 +36,6 @@ use rstest::{fixture, rstest};
 use serde_json::Value;
 use std::sync::{Arc, Mutex};
 
-use helpers::StreamingCallback;
-
 #[fixture]
 async fn genkit_instance_for_test() -> (Arc<Genkit>, Arc<Mutex<Option<GenerateRequest>>>) {
     helpers::genkit_instance_for_test().await
@@ -323,33 +321,52 @@ async fn test_flow_propagates_streaming_to_generate() {
 async fn test_streaming_strips_out_noop_streaming_callback(
     #[future] genkit_with_programmable_model: (Arc<Genkit>, helpers::ProgrammableModel),
 ) {
+    // 1. Setup
     let (genkit, pm_handle) = genkit_with_programmable_model.await;
+    let streaming_was_received = Arc::new(Mutex::new(false));
+    let streaming_was_received_clone = streaming_was_received.clone();
 
-    let was_called = Arc::new(Mutex::new(false));
-    let was_called_clone = was_called.clone();
-
+    // 2. Configure mock model
     {
         let mut handler = pm_handle.handler.lock().unwrap();
         *handler = Arc::new(Box::new(
-            move |_, streaming_callback: Option<StreamingCallback>| {
-                let was_called_clone_2 = was_called_clone.clone();
-                Box::pin(async move {
-                    if streaming_callback.is_some() {
-                        *was_called_clone_2.lock().unwrap() = true;
-                    }
-                    Ok(Default::default())
+            move |_, streaming_callback: Option<helpers::StreamingCallback>| {
+                if streaming_callback.is_some() {
+                    *streaming_was_received_clone.lock().unwrap() = true;
+                }
+                // Return a valid response with one candidate to prevent the error.
+                Box::pin(async {
+                    Ok(GenerateResponseData {
+                        candidates: vec![CandidateData {
+                            index: 0,
+                            finish_reason: Some(FinishReason::Stop),
+                            message: MessageData {
+                                role: Role::Model,
+                                content: vec![Part::text("ok")],
+                                ..Default::default()
+                            },
+                            ..Default::default()
+                        }],
+                        ..Default::default()
+                    })
                 })
             },
         ));
     }
 
-    let _: genkit::GenerateResponse = genkit
-        .generate_with_options(GenerateOptions {
+    // 3. Call `generate` in a non-streaming context
+    let _ = genkit
+        .generate_with_options::<Value>(GenerateOptions {
             model: Some(Model::Name("programmableModel".to_string())),
+            prompt: Some(vec![Part::text("hi")]),
             ..Default::default()
         })
         .await
         .unwrap();
 
-    assert!(*was_called.lock().unwrap());
+    // 4. Assert that the model did NOT receive a streaming callback
+    assert!(
+        !*streaming_was_received.lock().unwrap(),
+        "Model should not have received a streaming callback for a non-streaming call."
+    );
 }
