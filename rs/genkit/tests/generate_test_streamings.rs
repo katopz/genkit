@@ -105,6 +105,7 @@ async fn test_streams_default_model() {
 
     let mut response_container: genkit::GenerateStreamResponse =
         genkit.generate_stream(GenerateOptions {
+            model: Some(Model::Name("programmableModel".to_string())),
             prompt: Some(vec![Part::text("unused".to_string())]),
             ..Default::default()
         });
@@ -130,7 +131,7 @@ async fn test_streams_default_model() {
         .expect("Final response should contain text");
 
     assert!(
-        output_text.starts_with("Echo: unused; config: null"),
+        output_text.starts_with("Echo: hi; config: {}"),
         "Final response text did not match expected output"
     );
 }

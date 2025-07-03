@@ -239,7 +239,7 @@ where
         }
     }
 
-    let on_chunk_callback = options.on_chunk.take();
+    let on_chunk_callback = options.on_chunk.clone();
     let registry_clone = registry.clone();
 
     // FIX #1: Add explicit type annotation for the trait object.
