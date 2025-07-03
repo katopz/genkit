@@ -44,21 +44,19 @@ async fn genkit_with_programmable_model() -> (Arc<Genkit>, helpers::Programmable
 #[rstest]
 #[tokio::test]
 async fn test_tools_call_the_tool() {
-    let (mut genkit, pm_handle) = genkit_with_programmable_model().await;
+    let (genkit, pm_handle) = genkit_with_programmable_model().await;
     let req_counter = Arc::new(Mutex::new(0));
 
-    let test_tool = Arc::get_mut(&mut genkit)
-        .expect("Failed to get mutable reference to Genkit")
-        .define_tool(
-            ToolConfig {
-                name: "testTool".to_string(),
-                description: "description".to_string(),
-                input_schema: Some(TestToolInput {}),
-                output_schema: Some(json!("tool called")),
-                metadata: None,
-            },
-            |_, _| async { Ok(json!("tool called")) },
-        );
+    let test_tool = genkit.define_tool(
+        ToolConfig {
+            name: "testTool".to_string(),
+            description: "description".to_string(),
+            input_schema: Some(TestToolInput {}),
+            output_schema: Some(json!("tool called")),
+            metadata: None,
+        },
+        |_, _| async { Ok(json!("tool called")) },
+    );
 
     {
         let mut handler = pm_handle.handler.lock().unwrap();

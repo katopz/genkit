@@ -167,23 +167,8 @@ impl Genkit {
     }
 
     /// Defines a new tool and registers it with the Genkit registry.
-    pub fn dynamic_tool<I, O, F, Fut>(
-        &mut self,
-        config: ToolConfig<I, O>,
-        runner: F,
-    ) -> ToolAction<I, O, ()>
-    where
-        I: JsonSchema + Serialize + DeserializeOwned + Send + Sync + Clone + 'static,
-        O: JsonSchema + Serialize + DeserializeOwned + Send + Sync + 'static,
-        F: Fn(I, ToolFnOptions) -> Fut + Send + Sync + Clone + 'static,
-        Fut: Future<Output = Result<O>> + Send + 'static,
-    {
-        define_tool(&mut self.registry, config, runner)
-    }
-
-    /// Defines a new tool and registers it with the Genkit registry.
     pub fn define_tool<I, O, F, Fut>(
-        &mut self,
+        &self,
         config: ToolConfig<I, O>,
         runner: F,
     ) -> ToolAction<I, O, ()>
@@ -193,15 +178,12 @@ impl Genkit {
         F: Fn(I, ToolFnOptions) -> Fut + Send + Sync + Clone + 'static,
         Fut: Future<Output = Result<O>> + Send + 'static,
     {
-        define_tool(&mut self.registry, config, runner)
+        let mut registry = self.registry.clone();
+        define_tool(&mut registry, config, runner)
     }
 
     /// Defines and registers a flow function.
-    pub fn define_flow<I, O, S, F, Fut>(
-        &mut self,
-        name: impl Into<String>,
-        func: F,
-    ) -> Flow<I, O, S>
+    pub fn define_flow<I, O, S, F, Fut>(&self, name: impl Into<String>, func: F) -> Flow<I, O, S>
     where
         I: DeserializeOwned + JsonSchema + Send + Sync + Clone + 'static,
         O: Serialize + JsonSchema + Send + Sync + 'static,
@@ -210,11 +192,11 @@ impl Genkit {
         Fut: Future<Output = Result<O>> + Send,
         Action<I, O, S>: genkit_core::registry::ErasedAction + 'static,
     {
-        define_flow(&mut self.registry, name, func)
+        define_flow(&mut self.registry.clone(), name, func)
     }
 
     /// Defines a new model and adds it to the registry.
-    pub fn define_model<F, Fut>(&mut self, options: DefineModelOptions, f: F) -> ModelAction
+    pub fn define_model<F, Fut>(&self, options: DefineModelOptions, f: F) -> ModelAction
     where
         F: Fn(GenerateRequest, Option<Box<dyn Fn(GenerateResponseChunkData) + Send + Sync>>) -> Fut
             + Send
@@ -224,21 +206,21 @@ impl Genkit {
             + Send
             + 'static,
     {
-        define_model(&mut self.registry, options, f)
+        define_model(&mut self.registry.clone(), options, f)
     }
 
     /// Defines a new background model and adds it to the registry.
     pub fn define_background_model(
-        &mut self,
+        &self,
         registry: &mut genkit_core::Registry,
         options: DefineBackgroundModelOptions,
     ) -> BackgroundModelAction {
-        define_background_model(&mut self.registry, options)
+        define_background_model(&mut self.registry.clone(), options)
     }
 
     /// Defines and registers a prompt based on a function.
     pub async fn define_prompt<I, O, C>(
-        &mut self,
+        &self,
         config: PromptConfig<I, O, C>,
     ) -> ExecutablePrompt<I, O, C>
     where
@@ -253,11 +235,11 @@ impl Genkit {
             + 'static,
         C: Serialize + DeserializeOwned + JsonSchema + Send + Sync + 'static,
     {
-        define_prompt(&mut self.registry, config)
+        define_prompt(&mut self.registry.clone(), config)
     }
 
     /// Creates a retriever action for the provided RetrieverFn implementation.
-    pub async fn define_retriever<I, F, Fut>(&mut self, name: &str, runner: F) -> RetrieverAction<I>
+    pub async fn define_retriever<I, F, Fut>(&self, name: &str, runner: F) -> RetrieverAction<I>
     where
         I: JsonSchema + DeserializeOwned + Send + Sync + Clone + 'static,
         F: Fn(RetrieverRequest<I>, genkit_core::action::ActionFnArg<()>) -> Fut
@@ -266,7 +248,7 @@ impl Genkit {
             + 'static,
         Fut: Future<Output = Result<RetrieverResponse>> + Send + 'static,
     {
-        define_retriever(&mut self.registry, name, runner)
+        define_retriever(&mut self.registry.clone(), name, runner)
     }
 
     // TODO
@@ -284,7 +266,7 @@ impl Genkit {
     // }
 
     /// Creates an indexer action for the provided IndexerFn implementation.
-    pub fn define_indexer<I, F, Fut>(&mut self, name: &str, runner: F) -> IndexerAction<I>
+    pub fn define_indexer<I, F, Fut>(&self, name: &str, runner: F) -> IndexerAction<I>
     where
         I: JsonSchema + DeserializeOwned + Send + Sync + Clone + 'static,
         F: Fn(IndexerRequest<I>, genkit_core::action::ActionFnArg<()>) -> Fut
@@ -293,31 +275,31 @@ impl Genkit {
             + 'static,
         Fut: Future<Output = Result<()>> + Send + 'static,
     {
-        define_indexer(&mut self.registry, name, runner)
+        define_indexer(&mut self.registry.clone(), name, runner)
     }
 
     /// Creates evaluator action for the provided EvaluatorFn implementation.
-    pub fn define_evaluator<I, F, Fut>(&mut self, name: &str, runner: F) -> EvaluatorAction<I>
+    pub fn define_evaluator<I, F, Fut>(&self, name: &str, runner: F) -> EvaluatorAction<I>
     where
         I: JsonSchema + DeserializeOwned + Send + Sync + Clone + 'static,
         F: Fn(BaseEvalDataPoint) -> Fut + Send + Sync + 'static,
         Fut: Future<Output = Result<EvalResponse>> + Send + 'static,
     {
-        define_evaluator(&mut self.registry, name, runner)
+        define_evaluator(&mut self.registry.clone(), name, runner)
     }
 
     /// Creates embedder model for the provided EmbedderFn model implementation.
-    pub fn define_embedder<I, F, Fut>(&mut self, name: &str, runner: F) -> EmbedderAction<I>
+    pub fn define_embedder<I, F, Fut>(&self, name: &str, runner: F) -> EmbedderAction<I>
     where
         I: JsonSchema + DeserializeOwned + Send + Sync + Clone + 'static,
         F: Fn(EmbedRequest<I>, genkit_core::action::ActionFnArg<()>) -> Fut + Send + Sync + 'static,
         Fut: Future<Output = Result<EmbedResponse>> + Send + 'static,
     {
-        define_embedder(&mut self.registry, name, runner)
+        define_embedder(&mut self.registry.clone(), name, runner)
     }
 
     /// Creates reranker action for the provided RerankerFn implementation.
-    pub fn define_reranker<I, F, Fut>(&mut self, name: &str, runner: F) -> RerankerAction<I>
+    pub fn define_reranker<I, F, Fut>(&self, name: &str, runner: F) -> RerankerAction<I>
     where
         I: JsonSchema + DeserializeOwned + Send + Sync + Clone + 'static,
         F: Fn(RerankerRequest<I>, genkit_core::action::ActionFnArg<()>) -> Fut
@@ -326,7 +308,7 @@ impl Genkit {
             + 'static,
         Fut: Future<Output = Result<RerankerResponse>> + Send + 'static,
     {
-        define_reranker(&mut self.registry, name, runner)
+        define_reranker(&mut self.registry.clone(), name, runner)
     }
 
     /// Generates content using a model.
