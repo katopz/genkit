@@ -23,7 +23,7 @@ use genkit::{
     model::{FinishReason, Part, Role},
     plugin::Plugin,
     registry::Registry,
-    Genkit, GenkitOptions, Model, ModelInfo, ToolConfig,
+    Genkit, GenkitOptions, Model, ToolConfig,
 };
 use genkit_ai::{
     self as genkit_ai, define_model,
@@ -644,21 +644,42 @@ impl Plugin for ConfigurableModelPlugin {
 async fn test_config_merges_config_from_the_ref() {
     let (genkit, _) = genkit_instance_for_test().await;
 
-    let model_ref = ModelRef::new("echoModel").with_config(serde_json::json!({"version": "abc"}));
     let response: genkit::GenerateResponse = genkit
         .generate_with_options(GenerateOptions {
-            model: Some(model_ref.into()),
-            config: Some(json!({ "temperature": 11 })),
+            model: Some(
+                ModelRef::new(json!({
+                    "name": "echoModel"
+                }))
+                .with_config(json!({
+                    "version": "abc"
+                }))
+                .into(),
+            ),
             prompt: Some(vec![Part::text("hi")]),
+            config: Some(json!({
+                "temperature": 11
+            })),
             ..Default::default()
         })
         .await
         .unwrap();
 
-    assert_eq!(
-        response.text().unwrap(),
-        r#"Echo: hi; config: {"version":"abc","temperature":11}"#
-    );
+    let left_str = response.text().unwrap();
+    let right_str = r#"Echo: hi; config: {"version":"abc","temperature":11}"#;
+    let prefix = "Echo: hi; config: ";
+
+    // 1. Extract the JSON part from each string
+    println!("left_str:{}", left_str);
+    let left_json_str = left_str.strip_prefix(prefix).expect("Prefix not found");
+    let right_json_str = right_str.strip_prefix(prefix).expect("Prefix not found");
+
+    // 2. Parse them into serde_json::Value
+    let left_value: Value = serde_json::from_str(left_json_str).expect("Failed to parse left JSON");
+    let right_value: Value =
+        serde_json::from_str(right_json_str).expect("Failed to parse right JSON");
+
+    // 3. Assert the JSON values are equal
+    assert_eq!(left_value, right_value);
 }
 
 #[tokio::test]
@@ -712,10 +733,10 @@ async fn test_tools_call_the_tool() {
             name: "testTool".to_string(),
             description: "description".to_string(),
             input_schema: Some(TestToolInput {}),
-            output_schema: Some(serde_json::json!("tool called")),
+            output_schema: Some(json!("tool called")),
             metadata: None,
         },
-        |_, _| async { Ok(serde_json::json!("tool called")) },
+        |_, _| async { Ok(json!("tool called")) },
     );
 
     {

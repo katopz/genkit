@@ -319,7 +319,7 @@ where
         .ok_or_else(|| Error::new_internal("Model not specified".to_string()))?;
 
     let model_name = match model_ref {
-        crate::model::Model::Reference(r) => r.clone(),
+        crate::model::Model::Reference(r) => r.name.clone(),
         crate::model::Model::Name(n) => n.clone(),
     };
     let action_key = format!("/background-model/{}", model_name);
@@ -336,6 +336,14 @@ where
         serde_json::from_value(op_value).map_err(|e| Error::new_internal(e.to_string()))?;
 
     Ok(operation)
+}
+
+fn merge_json_objects(base: &mut Value, overrides: Value) {
+    if let (Some(base_map), Some(overrides_map)) = (base.as_object_mut(), overrides.as_object()) {
+        for (key, value) in overrides_map {
+            base_map.insert(key.clone(), value.clone());
+        }
+    }
 }
 
 /// Converts `GenerateOptions` to a `GenerateRequest`.
@@ -368,6 +376,24 @@ pub async fn to_generate_request<O>(
         ));
     }
 
+    // START of new merge logic
+    let ref_config = if let Some(crate::model::Model::Reference(model_ref)) = &options.model {
+        model_ref.config.clone()
+    } else {
+        None
+    };
+
+    let final_config = match (ref_config, options.config.clone()) {
+        (Some(mut base), Some(overrides)) => {
+            merge_json_objects(&mut base, overrides);
+            Some(base)
+        }
+        (Some(base), None) => Some(base),
+        (None, Some(overrides)) => Some(overrides),
+        (None, None) => None,
+    };
+    // END of new merge logic
+
     let resolved_tools = tool::resolve_tools(registry, options.tools.as_deref()).await?;
     let tools = if !resolved_tools.is_empty() {
         Some(
@@ -385,7 +411,7 @@ pub async fn to_generate_request<O>(
 
     Ok(GenerateRequest {
         messages,
-        config: options.config.clone(),
+        config: final_config, // Use the merged config
         tools,
         output: options
             .output

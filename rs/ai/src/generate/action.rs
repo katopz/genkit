@@ -150,7 +150,7 @@ pub fn define_generate_action(registry: &mut Registry) -> Arc<GenerateAction> {
                                 Error::new_internal("Model not specified".to_string())
                             })?;
                             let model_name = match model_ref {
-                                model::Model::Reference(r) => r.clone(),
+                                model::Model::Reference(r) => r.name.clone(),
                                 model::Model::Name(n) => n.clone(),
                             };
                             let erased_action = registry
@@ -422,7 +422,7 @@ where
             .as_ref()
             .ok_or_else(|| Error::new_internal("Model not specified".to_string()))?;
         let model_name = match model_ref {
-            model::Model::Reference(r) => r.clone(),
+            model::Model::Reference(r) => r.name.clone(),
             model::Model::Name(n) => n.clone(),
         };
         let erased_action = registry

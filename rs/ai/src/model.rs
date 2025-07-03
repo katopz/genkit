@@ -571,14 +571,20 @@ pub fn augment_with_context(options: Option<AugmentWithContextOptions>) -> Model
     middleware::augment_with_context(options)
 }
 
+// -- Start of refined code --
+
 /// A serializable reference to a model, often used in plugin configurations.
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct ModelRef<T> {
     pub name: String,
+    #[serde(default)]
     pub info: ModelInfo,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub version: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub config: Option<T>,
+    #[serde(skip)]
     _config_type: PhantomData<T>,
 }
 
@@ -594,32 +600,15 @@ impl<T> Default for ModelRef<T> {
     }
 }
 
-/// Represents a reference to a model.
-#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
-#[serde(rename_all = "camelCase")]
-pub enum Model {
-    Reference(String),
-    Name(String),
-}
-
-impl From<ModelRef<serde_json::Value>> for Model {
-    fn from(model_ref: ModelRef<serde_json::Value>) -> Self {
-        Model::Reference(model_ref.name)
-    }
-}
-
-impl<T> From<ModelRef<T>> for String {
-    fn from(m: ModelRef<T>) -> Self {
-        m.name
-    }
-}
-
-impl<T: Clone> ModelRef<T> {
-    pub fn new(name: &str) -> Self {
-        ModelRef {
-            name: name.to_string(),
-            ..Default::default()
-        }
+impl<T> ModelRef<T>
+where
+    T: for<'de> serde::Deserialize<'de> + Clone,
+{
+    /// Creates a new ModelRef from a JSON value.
+    /// The JSON must contain a "name" field.
+    pub fn new(value: serde_json::Value) -> Self {
+        serde_json::from_value(value)
+            .expect("Failed to create ModelRef from JSON. 'name' field is required.")
     }
 
     pub fn with_config(mut self, config: T) -> Self {
@@ -630,5 +619,27 @@ impl<T: Clone> ModelRef<T> {
     pub fn with_version(mut self, version: &str) -> Self {
         self.version = Some(version.to_string());
         self
+    }
+}
+
+/// Represents a reference to a model, which can hold configuration.
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "camelCase")]
+pub enum Model {
+    /// A reference to a model that includes configuration details.
+    Reference(ModelRef<serde_json::Value>),
+    /// A reference to a model by name only.
+    Name(String),
+}
+
+impl From<ModelRef<serde_json::Value>> for Model {
+    fn from(model_ref: ModelRef<serde_json::Value>) -> Self {
+        Model::Reference(model_ref)
+    }
+}
+
+impl<T> From<ModelRef<T>> for String {
+    fn from(m: ModelRef<T>) -> Self {
+        m.name
     }
 }
