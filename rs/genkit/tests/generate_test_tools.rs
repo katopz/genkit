@@ -18,7 +18,7 @@ mod helpers;
 
 use genkit::{
     model::{FinishReason, Part, Role},
-    Genkit, Model, ToolConfig,
+    Genkit, Model, ToolArgument, ToolConfig,
 };
 use genkit_ai::{
     model::{CandidateData, GenerateResponseData},
@@ -44,19 +44,21 @@ async fn genkit_with_programmable_model() -> (Arc<Genkit>, helpers::Programmable
 #[rstest]
 #[tokio::test]
 async fn test_tools_call_the_tool() {
-    let (genkit, pm_handle) = genkit_with_programmable_model().await;
+    let (mut genkit, pm_handle) = genkit_with_programmable_model().await;
     let req_counter = Arc::new(Mutex::new(0));
 
-    let test_tool = genkit::dynamic_tool(
-        ToolConfig {
-            name: "testTool".to_string(),
-            description: "description".to_string(),
-            input_schema: Some(TestToolInput {}),
-            output_schema: Some(json!("tool called")),
-            metadata: None,
-        },
-        |_, _| async { Ok(json!("tool called")) },
-    );
+    let test_tool = Arc::get_mut(&mut genkit)
+        .expect("Failed to get mutable reference to Genkit")
+        .define_tool(
+            ToolConfig {
+                name: "testTool".to_string(),
+                description: "description".to_string(),
+                input_schema: Some(TestToolInput {}),
+                output_schema: Some(json!("tool called")),
+                metadata: None,
+            },
+            |_, _| async { Ok(json!("tool called")) },
+        );
 
     {
         let mut handler = pm_handle.handler.lock().unwrap();
@@ -107,7 +109,7 @@ async fn test_tools_call_the_tool() {
         .generate_with_options(GenerateOptions {
             model: Some(Model::Name("programmableModel".to_string())),
             prompt: Some(vec![Part::text("call the tool")]),
-            tools: Some(vec![test_tool]),
+            tools: Some(vec![ToolArgument::from(test_tool)]),
             ..Default::default()
         })
         .await

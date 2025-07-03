@@ -145,6 +145,18 @@ impl Genkit {
         Ok(instance)
     }
 
+    pub fn from_registry(
+        options: GenkitOptions,
+        registry: Registry,
+        context: Option<ActionContext>,
+    ) -> Self {
+        Self {
+            options,
+            registry,
+            context,
+        }
+    }
+
     /// Returns a reference to the underlying registry.
     pub fn registry(&self) -> &Registry {
         &self.registry
