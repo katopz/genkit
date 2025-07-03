@@ -249,3 +249,16 @@ impl Plugin for ProgrammableModelPlugin {
         Ok(())
     }
 }
+
+#[allow(unused)]
+pub async fn genkit_with_programmable_model() -> (Arc<Genkit>, ProgrammableModel) {
+    let pm_plugin = Arc::new(ProgrammableModelPlugin::new());
+    let genkit = Genkit::init(GenkitOptions {
+        plugins: vec![pm_plugin.clone() as Arc<dyn Plugin>],
+        ..Default::default()
+    })
+    .await
+    .unwrap();
+    let handle = pm_plugin.get_handle();
+    (genkit, handle)
+}
