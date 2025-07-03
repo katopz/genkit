@@ -19,6 +19,7 @@ mod helpers;
 use async_trait::async_trait;
 use futures_util::StreamExt;
 use genkit::{
+    define_flow,
     error::{Error, Result},
     model::{FinishReason, Part, Role},
     plugin::Plugin,
@@ -31,9 +32,10 @@ use genkit_ai::{
         CandidateData, DefineModelOptions, GenerateRequest, GenerateResponse,
         GenerateResponseChunkData, GenerateResponseData,
     },
-    GenerateOptions, MessageData, ModelRef,
+    GenerateOptions, GenerateResponseChunk, MessageData, ModelRef,
 };
 
+use genkit_core::{action::ActionRunOptions, ActionFnArg};
 use rstest::{fixture, rstest};
 use serde_json::{json, Value};
 use std::sync::{Arc, Mutex};
@@ -543,6 +545,69 @@ async fn test_streaming_passes_the_streaming_callback_to_the_model(
     let _ = stream_resp.response.await;
 
     assert!(*was_called.lock().unwrap());
+}
+
+#[tokio::test]
+async fn test_flow_propagates_streaming_to_generate() {
+    // 1. Setup the test environment with the correct fixture
+    let (genkit, pm_handle) = helpers::genkit_with_programmable_model().await;
+    let mut registry = genkit.registry().clone();
+
+    // 2. Create a flag to track if the model received the streaming signal
+    let streaming_was_requested = Arc::new(Mutex::new(false));
+    let streaming_was_requested_clone = streaming_was_requested.clone();
+
+    // 3. Configure the programmable model's handler
+    {
+        let mut handler = pm_handle.handler.lock().unwrap();
+        // The handler's signature now uses the correct type alias from your helper file
+        *handler = Arc::new(Box::new(
+            move |_, streaming_callback: Option<helpers::StreamingCallback>| {
+                let was_called_clone_2 = streaming_was_requested_clone.clone();
+                Box::pin(async move {
+                    if streaming_callback.is_some() {
+                        *was_called_clone_2.lock().unwrap() = true;
+                    }
+                    Ok(Default::default())
+                })
+            },
+        ));
+    }
+
+    // 4. Define the flow
+    let wrapper_flow = define_flow(
+        &mut registry,
+        "wrapper",
+        move |_: (), _args: ActionFnArg<()>| {
+            let genkit_clone = genkit.clone();
+            async move {
+                let response = genkit_clone
+                    .generate_with_options(GenerateOptions {
+                        model: Some(Model::Name("programmableModel".to_string())),
+                        prompt: Some(vec![Part::text("hi")]),
+                        on_chunk: Some(Arc::new(|_chunk: GenerateResponseChunk<Value>| Ok(()))),
+                        ..Default::default()
+                    })
+                    .await?;
+
+                Ok(response.text().unwrap_or_default())
+            }
+        },
+    );
+
+    // 5. Run the flow in a streaming context
+    let run_options = ActionRunOptions {
+        on_chunk: Some(Arc::new(|_chunk: Result<(), Error>| {})),
+        ..Default::default()
+    };
+
+    let _ = wrapper_flow.run((), Some(run_options)).await;
+
+    // 6. Assert that the model was correctly notified
+    assert!(
+        *streaming_was_requested.lock().unwrap(),
+        "The model action was not notified of the streaming request."
+    );
 }
 
 #[rstest]

@@ -94,11 +94,26 @@ pub fn define_echo_model(registry: &mut Registry, constrained_support: &str) {
     });
 }
 
+// A type alias for the swappable handler inside our ProgrammableModel.
+pub type ProgrammableModelHandler = Arc<
+    Box<
+        dyn Fn(
+                GenerateRequest,
+                // The handler receives an Option of a boxed, dynamic callback function.
+                Option<Box<dyn Fn(GenerateResponseChunkData) + Send + Sync>>,
+            ) -> Pin<Box<dyn Future<Output = Result<GenerateResponseData>> + Send>>
+            + Send
+            + Sync,
+    >,
+>;
+
 // In TS, the StreamingCallback is a simple (chunk) => void function.
 // We're defining the type for the callback here.
+#[allow(unused)]
 pub type StreamingCallback = Box<dyn Fn(GenerateResponseChunkData) + Send + Sync>;
 
 // The handler for a programmable model. It's an async function.
+#[allow(unused)]
 pub type ResponseHandlerFn = Box<
     dyn Fn(
             GenerateRequest,
@@ -108,73 +123,19 @@ pub type ResponseHandlerFn = Box<
         + Sync,
 >;
 
+/// A handle that tests can use to modify the model's behavior at runtime.
 #[derive(Clone)]
-#[allow(unused)]
 pub struct ProgrammableModel {
     pub last_request: Arc<Mutex<Option<GenerateRequest>>>,
-    pub handler: Arc<Mutex<Arc<ResponseHandlerFn>>>,
+    pub handler: Arc<Mutex<ProgrammableModelHandler>>,
 }
 
-impl Default for ProgrammableModel {
-    fn default() -> Self {
-        Self {
-            last_request: Default::default(),
-            handler: Arc::new(Mutex::new(Arc::new(Box::new(|_req, _cb| {
-                Box::pin(async { Ok(Default::default()) })
-            })))),
-        }
-    }
-}
-
-#[allow(unused)]
-pub fn define_programmable_model(registry: &mut Registry) -> ProgrammableModel {
-    let state = ProgrammableModel::default();
-
-    let model_state = state.clone();
-    let model_opts = DefineModelOptions {
-        name: "programmableModel".to_string(),
-        supports: Some(ModelInfoSupports {
-            tools: Some(true),
-            ..Default::default()
-        }),
-        ..Default::default()
-    };
-
-    define_model(registry, model_opts, move |req, streaming_callback| {
-        let model_state = model_state.clone();
-        async move {
-            *model_state.last_request.lock().unwrap() = Some(req.clone());
-            // This is tricky. The streaming_callback from define_model is an Option<impl Fn(...)>.
-            // We can't easily store it or pass it to our Box<dyn Fn(...)>.
-            // We need to wrap it.
-            let cb_wrapper: Option<StreamingCallback> =
-                streaming_callback.map(|cb| Box::new(cb) as StreamingCallback);
-
-            let handler = model_state.handler.lock().unwrap().clone();
-            handler(req, cb_wrapper).await
-        }
-    });
-
-    state
-}
-
-/// A plugin for defining the programmable model for testing.
-#[derive(Clone)]
+/// The Genkit Plugin that provides the programmable model for testing.
+#[derive(Clone, Default)]
 pub struct ProgrammableModelPlugin {
-    // This state allows the test to get a handle to the model's state
-    // after it has been initialized through the plugin system.
-    pub state: Arc<Mutex<Option<ProgrammableModel>>>,
+    state: Arc<Mutex<Option<ProgrammableModel>>>,
 }
 
-impl Default for ProgrammableModelPlugin {
-    fn default() -> Self {
-        Self {
-            state: Arc::new(Mutex::new(None)),
-        }
-    }
-}
-
-#[allow(unused)]
 impl ProgrammableModelPlugin {
     pub fn new() -> Self {
         Default::default()
@@ -189,7 +150,53 @@ impl ProgrammableModelPlugin {
     }
 }
 
-/// A simple plugin to define our echo model for testing.
+#[async_trait]
+impl Plugin for ProgrammableModelPlugin {
+    fn name(&self) -> &'static str {
+        "programmableModelPlugin"
+    }
+
+    async fn initialize(&self, registry: &mut Registry) -> Result<()> {
+        let initial_handler: ProgrammableModelHandler = Arc::new(Box::new(|_req, _cb| {
+            Box::pin(async { Ok(Default::default()) })
+        }));
+
+        let model_state = ProgrammableModel {
+            last_request: Arc::new(Mutex::new(None)),
+            handler: Arc::new(Mutex::new(initial_handler)),
+        };
+
+        *self.state.lock().unwrap() = Some(model_state.clone());
+
+        define_model(
+            registry,
+            DefineModelOptions {
+                name: "programmableModel".to_string(),
+                supports: Some(ModelInfoSupports {
+                    tools: Some(true),
+                    ..Default::default()
+                }),
+                ..Default::default()
+            },
+            move |req, streaming_callback| {
+                let model_state = model_state.clone();
+                async move {
+                    *model_state.last_request.lock().unwrap() = Some(req.clone());
+
+                    let cb_wrapper: Option<Box<dyn Fn(GenerateResponseChunkData) + Send + Sync>> =
+                        streaming_callback.map(|cb| Box::new(cb) as Box<_>);
+
+                    let handler = model_state.handler.lock().unwrap().clone();
+                    handler(req, cb_wrapper).await
+                }
+            },
+        );
+
+        Ok(())
+    }
+}
+
+/// A simple plugin that provides an `echoModel` for testing.
 pub struct EchoModelPlugin;
 
 #[async_trait]
@@ -199,26 +206,42 @@ impl Plugin for EchoModelPlugin {
     }
 
     async fn initialize(&self, registry: &mut Registry) -> Result<()> {
-        // Define a simple model that just echoes back the last message.
         define_model(
             registry,
             DefineModelOptions {
                 name: "echoModel".to_string(),
-                label: Some("Echo Model".to_string()),
                 ..Default::default()
             },
-            |req: GenerateRequest, _streaming_callback| async move {
-                let last_message = req.messages.last().cloned().unwrap_or_default();
-                let response = GenerateResponseData {
+            |req: GenerateRequest, _cb| async move {
+                let config_str = serde_json::to_string(&req.config.unwrap_or_default())
+                    .map_err(|e| genkit::error::Error::new_internal(e.to_string()))?;
+
+                let last_msg = req
+                    .messages
+                    .last()
+                    .ok_or_else(|| genkit::error::Error::new_internal("No message found"))?;
+                let default_string = "".to_string();
+                let prompt_text = last_msg
+                    .content
+                    .first()
+                    .and_then(|p| p.text.as_ref())
+                    .unwrap_or(&default_string);
+
+                let text = format!("Echo: {}; config: {}", prompt_text, config_str);
+
+                Ok(GenerateResponseData {
                     candidates: vec![CandidateData {
                         index: 0,
-                        message: last_message,
                         finish_reason: Some(FinishReason::Stop),
+                        message: MessageData {
+                            role: Role::Model,
+                            content: vec![Part::text(text)],
+                            ..Default::default()
+                        },
                         ..Default::default()
                     }],
                     ..Default::default()
-                };
-                Ok(response)
+                })
             },
         );
         Ok(())
@@ -235,19 +258,6 @@ pub async fn genkit_instance_with_echo_model() -> Arc<Genkit> {
     })
     .await
     .unwrap()
-}
-
-#[async_trait]
-impl Plugin for ProgrammableModelPlugin {
-    fn name(&self) -> &'static str {
-        "programmableModelPlugin"
-    }
-
-    async fn initialize(&self, registry: &mut Registry) -> Result<()> {
-        let pm = define_programmable_model(registry);
-        *self.state.lock().unwrap() = Some(pm);
-        Ok(())
-    }
 }
 
 #[allow(unused)]
