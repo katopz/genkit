@@ -581,25 +581,40 @@ async fn test_streaming_strips_out_noop_streaming_callback(
 
 #[rstest]
 #[tokio::test]
-async fn test_config_takes_config_passed_to_generate(
-    #[future] genkit_with_programmable_model: (Arc<Genkit>, helpers::ProgrammableModel),
-) {
-    let (genkit, pm_handle) = genkit_with_programmable_model.await;
+async fn test_config_takes_config_passed_to_generate() {
+    let (genkit, _) = genkit_instance_for_test().await;
 
-    let _: genkit::GenerateResponse = genkit
+    let response: genkit::GenerateResponse = genkit
         .generate_with_options(GenerateOptions {
-            model: Some(Model::Name("programmableModel".to_string())),
-            config: Some(json!({"temperature": 0.9})),
+            model: Some(
+                ModelRef::new(json!({ "name": "echoModel" }))
+                    .with_version("bcd")
+                    .into(),
+            ),
+            prompt: Some(vec![Part::text("hi")]),
+            config: Some(json!({
+                "temperature": 11
+            })),
             ..Default::default()
         })
         .await
         .unwrap();
 
-    let last_req = pm_handle.last_request.lock().unwrap();
-    assert_eq!(
-        last_req.as_ref().unwrap().config,
-        Some(json!({"temperature": 0.9}))
-    );
+    let left_str = response.text().unwrap();
+    let right_str = r#"Echo: hi; config: {"version":"bcd","temperature":11}"#;
+    let prefix = "Echo: hi; config: ";
+
+    // Extract the JSON part from each string
+    let left_json_str = left_str.strip_prefix(prefix).expect("Prefix not found");
+    let right_json_str = right_str.strip_prefix(prefix).expect("Prefix not found");
+
+    // Parse them into serde_json::Value
+    let left_value: Value = serde_json::from_str(left_json_str).expect("Failed to parse left JSON");
+    let right_value: Value =
+        serde_json::from_str(right_json_str).expect("Failed to parse right JSON");
+
+    // Assert the JSON values are equal, ignoring key order
+    assert_eq!(left_value, right_value);
 }
 
 #[rstest]
