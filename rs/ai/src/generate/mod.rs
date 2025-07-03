@@ -40,7 +40,7 @@ use genkit_core::registry::Registry;
 use genkit_core::status::StatusCode;
 use schemars::JsonSchema;
 use serde::{de::DeserializeOwned, Deserialize, Serialize};
-use serde_json::Value;
+use serde_json::{json, Value};
 use std::fmt;
 use std::marker::PhantomData;
 use std::pin::Pin;
@@ -338,14 +338,6 @@ where
     Ok(operation)
 }
 
-fn merge_json_objects(base: &mut Value, overrides: Value) {
-    if let (Some(base_map), Some(overrides_map)) = (base.as_object_mut(), overrides.as_object()) {
-        for (key, value) in overrides_map {
-            base_map.insert(key.clone(), value.clone());
-        }
-    }
-}
-
 /// Converts `GenerateOptions` to a `GenerateRequest`.
 pub async fn to_generate_request<O>(
     registry: &Registry,
@@ -376,23 +368,29 @@ pub async fn to_generate_request<O>(
         ));
     }
 
-    // START of new merge logic
-    let ref_config = if let Some(crate::model::Model::Reference(model_ref)) = &options.model {
-        model_ref.config.clone()
-    } else {
-        None
-    };
+    let mut merged_config = serde_json::Map::new();
 
-    let final_config = match (ref_config, options.config.clone()) {
-        (Some(mut base), Some(overrides)) => {
-            merge_json_objects(&mut base, overrides);
-            Some(base)
+    if let Some(crate::model::Model::Reference(model_ref)) = &options.model {
+        // 1. Add base version from ModelRef.version
+        if let Some(version) = &model_ref.version {
+            merged_config.insert("version".to_string(), json!(version));
         }
-        (Some(base), None) => Some(base),
-        (None, Some(overrides)) => Some(overrides),
-        (None, None) => None,
+        // 2. Merge config from ModelRef.config (overwrites base version if key exists)
+        if let Some(Value::Object(map)) = &model_ref.config {
+            merged_config.extend(map.clone());
+        }
+    }
+
+    // 3. Merge config from GenerateOptions (overwrites anything from ModelRef)
+    if let Some(Value::Object(map)) = &options.config {
+        merged_config.extend(map.clone());
+    }
+
+    let final_config = if merged_config.is_empty() {
+        None
+    } else {
+        Some(Value::Object(merged_config))
     };
-    // END of new merge logic
 
     let resolved_tools = tool::resolve_tools(registry, options.tools.as_deref()).await?;
     let tools = if !resolved_tools.is_empty() {

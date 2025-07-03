@@ -602,44 +602,7 @@ async fn test_config_takes_config_passed_to_generate(
     );
 }
 
-struct ConfigurableModelPlugin {
-    config: serde_json::Value,
-    version: String,
-}
-#[async_trait]
-impl Plugin for ConfigurableModelPlugin {
-    fn name(&self) -> &'static str {
-        "configurableModelPlugin"
-    }
-    async fn initialize(&self, registry: &mut Registry) -> Result<()> {
-        let config_schema = self.config.clone();
-        let versions = vec![self.version.clone()];
-        define_model(
-            registry,
-            DefineModelOptions {
-                name: "configurableModel".to_string(),
-                versions: Some(versions),
-                config_schema: Some(config_schema),
-                ..Default::default()
-            },
-            |req, _| async move {
-                Ok(GenerateResponseData {
-                    candidates: vec![CandidateData {
-                        message: MessageData {
-                            role: Role::Model,
-                            content: vec![Part::text(serde_json::to_string(&req.config).unwrap())],
-                            ..Default::default()
-                        },
-                        ..Default::default()
-                    }],
-                    ..Default::default()
-                })
-            },
-        );
-        Ok(())
-    }
-}
-
+#[rstest]
 #[tokio::test]
 async fn test_config_merges_config_from_the_ref() {
     let (genkit, _) = genkit_instance_for_test().await;
@@ -682,37 +645,47 @@ async fn test_config_merges_config_from_the_ref() {
     assert_eq!(left_value, right_value);
 }
 
+#[rstest]
 #[tokio::test]
 async fn test_config_picks_up_top_level_version_from_the_ref() {
-    let plugin = Arc::new(ConfigurableModelPlugin {
-        config: json!({}),
-        version: "test-version".to_string(),
-    });
-    let genkit = Genkit::init(GenkitOptions {
-        plugins: vec![plugin as Arc<dyn Plugin>],
-        ..Default::default()
-    })
-    .await
-    .unwrap();
+    let (genkit, _) = genkit_instance_for_test().await;
+
     let response: genkit::GenerateResponse = genkit
         .generate_with_options(GenerateOptions {
-            model: Some(Model::Name("echoModel".to_string())),
-            config: Some(json!({ "temperature": 11 })),
+            model: Some(
+                ModelRef::new(json!({
+                    "name": "echoModel"
+                }))
+                .with_config(json!({
+                    "version": "abc"
+                }))
+                .into(),
+            ),
             prompt: Some(vec![Part::text("hi")]),
+            config: Some(json!({
+                "temperature": 11
+            })),
             ..Default::default()
         })
         .await
         .unwrap();
 
-    let response_config: serde_json::Value =
-        serde_json::from_str(&response.text().unwrap()).unwrap();
-    assert_eq!(
-        response_config,
-        json!({
-            "a": 1,
-            "version": "test-version"
-        })
-    );
+    let left_str = response.text().unwrap();
+    let right_str = r#"Echo: hi; config: {"version":"abc","temperature":11}"#;
+    let prefix = "Echo: hi; config: ";
+
+    // 1. Extract the JSON part from each string
+    println!("left_str:{}", left_str);
+    let left_json_str = left_str.strip_prefix(prefix).expect("Prefix not found");
+    let right_json_str = right_str.strip_prefix(prefix).expect("Prefix not found");
+
+    // 2. Parse them into serde_json::Value
+    let left_value: Value = serde_json::from_str(left_json_str).expect("Failed to parse left JSON");
+    let right_value: Value =
+        serde_json::from_str(right_json_str).expect("Failed to parse right JSON");
+
+    // 3. Assert the JSON values are equal
+    assert_eq!(left_value, right_value);
 }
 
 //
