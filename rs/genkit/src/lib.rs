@@ -76,8 +76,8 @@ pub use self::retriever::{
     RetrieverArgument, RetrieverInfo, RetrieverParams, RetrieverRef,
 };
 pub use self::tool::{
-    define_interrupt, define_tool, dynamic_tool, to_tool_definition, ToolAction, ToolArgument,
-    ToolConfig, ToolDefinition,
+    define_interrupt, define_tool, to_tool_definition, ToolAction, ToolArgument, ToolConfig,
+    ToolDefinition,
 };
 pub use genkit_ai::generate::GenerateOptions;
 use genkit_ai::generate::{generate as _generate, generate_stream as _generate_stream};
@@ -167,11 +167,7 @@ impl Genkit {
     }
 
     /// Defines a new tool and registers it with the Genkit registry.
-    pub fn define_tool<I, O, F, Fut>(
-        &self,
-        config: ToolConfig<I, O>,
-        runner: F,
-    ) -> ToolAction<I, O, ()>
+    pub fn define_tool<I, O, F, Fut>(&self, config: ToolConfig<I, O>, runner: F)
     where
         I: JsonSchema + Serialize + DeserializeOwned + Send + Sync + Clone + 'static,
         O: JsonSchema + Serialize + DeserializeOwned + Send + Sync + 'static,
@@ -179,7 +175,7 @@ impl Genkit {
         Fut: Future<Output = Result<O>> + Send + 'static,
     {
         let mut registry = self.registry.clone();
-        define_tool(&mut registry, config, runner)
+        define_tool(&mut registry, config, runner);
     }
 
     /// Defines and registers a flow function.

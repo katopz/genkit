@@ -162,7 +162,7 @@ impl Plugin for DevLocalVectorStorePlugin {
                     }
                 },
             );
-            registry.register_action(action_name.to_string(), retriever_action)?;
+            registry.register_action(action_name, retriever_action)?;
 
             let indexer_data_path = data_path.clone();
             let indexer_embedder_action = embedder_action.clone();
@@ -204,7 +204,7 @@ impl Plugin for DevLocalVectorStorePlugin {
                     }
                 },
             );
-            registry.register_action(action_name.to_string(), indexer_action)?;
+            registry.register_action(action_name, indexer_action)?;
         }
         Ok(())
     }

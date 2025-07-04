@@ -195,7 +195,7 @@ where
     let action = ActionBuilder::new(ActionType::Retriever, name.to_string(), runner).build();
     let retriever_action = RetrieverAction(action);
     registry
-        .register_action(name.to_string(), retriever_action.clone())
+        .register_action(name, retriever_action.clone())
         .unwrap();
     retriever_action
 }
@@ -210,7 +210,7 @@ where
     let action = ActionBuilder::new(ActionType::Indexer, name.to_string(), runner).build();
     let indexer_action = IndexerAction(action);
     registry
-        .register_action(name.to_string(), indexer_action.clone())
+        .register_action(name, indexer_action.clone())
         .unwrap();
     indexer_action
 }

@@ -1,28 +1,29 @@
 [package]
-description = "Genkit development local vector store plugin."
-edition     = "2021"
-license     = "Apache-2.0"
-name        = "genkit-plugins-dev-local-vectorstore"
-repository  = "https://github.com/firebase/genkit"
-version     = "0.1.0"
+authors.workspace    = true
+description          = "Genkit development local vector store plugin."
+edition.workspace    = true
+license.workspace    = true
+name                 = "genkit-plugins-dev-local-vectorstore"
+repository.workspace = true
+version.workspace    = true
 
 [dependencies]
-genkit-ai   = { path = "../../ai" }
-genkit-core = { path = "../../core" }
+genkit-ai   = { path = "../../ai", version = "0.1.0" }
+genkit-core = { path = "../../core", version = "0.1.0" }
 
-async-trait           = "0.1"
-log                   = "0.4"
+async-trait.workspace = true
+log.workspace         = true
 md5                   = "0.8.0"
 ndarray               = "0.16.1"
-once_cell             = "1.21.3"
-schemars              = { version = "1.0", features = ["derive"] }
+once_cell.workspace   = true
+schemars              = { workspace = true, features = ["derive"] }
 semanticsimilarity_rs = "0.1.1"
-serde                 = { version = "1.0", features = ["derive"] }
-serde_json            = "1.0"
-thiserror             = "1.0"
-tokio                 = { version = "1", features = ["fs", "io-util"] }
-uuid                  = { version = "1.17.0", features = ["v4", "serde"] }
+serde.workspace       = true
+serde_json.workspace  = true
+thiserror.workspace   = true
+tokio                 = { workspace = true, features = ["fs", "io-util"] }
+uuid.workspace        = true
 
 [dev-dependencies]
-tempfile   = "3"
-tokio-test = "0.4"
+tempfile             = "3"
+tokio-test.workspace = true

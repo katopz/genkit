@@ -75,7 +75,7 @@ where
     };
     let action = ActionBuilder::new(ActionType::Flow, name.clone(), wrapped_func).build();
     registry
-        .register_action(name, action.clone())
+        .register_action(name.as_str(), action.clone())
         .expect("Failed to register flow");
     action
 }

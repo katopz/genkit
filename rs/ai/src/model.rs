@@ -455,7 +455,7 @@ where
     .build();
     let model_action = ModelAction(action);
     registry
-        .register_action(options.name.clone(), model_action.clone())
+        .register_action(options.name.clone().as_str(), model_action.clone())
         .unwrap();
     model_action
 }
@@ -549,7 +549,7 @@ pub fn define_background_model(
     .build();
     let bg_model_action = BackgroundModelAction(action);
     registry
-        .register_action(options.name.clone(), bg_model_action.clone())
+        .register_action(options.name.clone().as_str(), bg_model_action.clone())
         .unwrap();
     bg_model_action
 }

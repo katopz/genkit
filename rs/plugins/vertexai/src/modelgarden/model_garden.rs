@@ -18,7 +18,7 @@
 //! expose an OpenAI-compatible API, such as various versions of Llama.
 
 use crate::common::VertexAIPluginOptions;
-use genkit_ai::model::{model_ref, GenerateResponseChunkData, ModelAction, ModelInfo, ModelRef};
+use genkit_ai::model::{GenerateResponseChunkData, ModelAction, ModelInfo, ModelRef};
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
@@ -37,32 +37,35 @@ pub struct ModelGardenModelConfig {
 /// A reference to the Llama 3.1 model in the Model Garden.
 #[allow(unused)]
 pub fn llama3_1() -> ModelRef<ModelGardenModelConfig> {
-    model_ref(ModelInfo {
-        name: "vertexai/llama-3.1".to_string(),
-        label: "Vertex AI Llama 3.1".to_string(),
-        ..Default::default()
-    })
+    todo!();
+    // model_ref(ModelInfo {
+    //     name: "vertexai/llama-3.1".to_string(),
+    //     label: "Vertex AI Llama 3.1".to_string(),
+    //     ..Default::default()
+    // })
 }
 
 /// A reference to the Llama 3.2 model in the Model Garden.
 #[allow(unused)]
 pub fn llama3_2() -> ModelRef<ModelGardenModelConfig> {
-    model_ref(ModelInfo {
-        name: "vertexai/llama-3.2".to_string(),
-        label: "Vertex AI Llama 3.2".to_string(),
-        ..Default::default()
-    })
+    todo!();
+    // model_ref(ModelInfo {
+    //     name: "vertexai/llama-3.2".to_string(),
+    //     label: "Vertex AI Llama 3.2".to_string(),
+    //     ..Default::default()
+    // })
 }
 
 /// A reference to the Llama 3 model in the Model Garden (deprecated in favor of `llama3_1`).
 #[deprecated(since = "0.1.0", note = "Please use `llama3_1` instead")]
 #[allow(unused)]
 pub fn llama3() -> ModelRef<ModelGardenModelConfig> {
-    model_ref(ModelInfo {
-        name: "vertexai/llama3-405b".to_string(),
-        label: "Vertex AI Llama3".to_string(),
-        ..Default::default()
-    })
+    todo!();
+    // model_ref(ModelInfo {
+    //     name: "vertexai/llama3-405b".to_string(),
+    //     label: "Vertex AI Llama3".to_string(),
+    //     ..Default::default()
+    // })
 }
 
 /// Defines a `ModelAction` for a Model Garden model that is compatible with the OpenAI API.

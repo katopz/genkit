@@ -145,7 +145,7 @@ where
     let action = ActionBuilder::new(ActionType::Embedder, name.to_string(), runner).build();
     let embedder_action = EmbedderAction(action);
     registry
-        .register_action(name.to_string(), embedder_action.clone())
+        .register_action(name, embedder_action.clone())
         .expect("Failed to register embedder");
     embedder_action
 }

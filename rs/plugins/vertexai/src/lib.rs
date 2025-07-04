@@ -34,7 +34,7 @@ use self::model::gemini::define_gemini_model;
 use self::model::imagen::define_imagen_model;
 use self::model::SUPPORTED_EMBEDDER_MODELS;
 use async_trait::async_trait;
-use genkit_ai::{embedder_ref, model_ref, EmbedderRef, ModelInfo, ModelRef};
+use genkit_ai::{embedder_ref, EmbedderRef, ModelInfo, ModelRef};
 use genkit_core::{plugin::Plugin, registry::Registry};
 use serde_json::Value;
 use std::sync::Arc;
@@ -98,13 +98,13 @@ impl VertexAIPlugin {
 
             if short_name.contains("gemini") {
                 let action = define_gemini_model(short_name, &self.options);
-                registry.register_action(short_name.to_string(), action)?;
+                registry.register_action(short_name, action)?;
             } else if short_name.contains("imagen") {
                 let action = define_imagen_model(short_name, &self.options);
-                registry.register_action(short_name.to_string(), action)?;
+                registry.register_action(short_name, action)?;
             } else if SUPPORTED_EMBEDDER_MODELS.contains(&short_name) {
                 let embedder = define_vertex_ai_embedder(short_name, &self.options);
-                registry.register_action(short_name.to_string(), embedder)?;
+                registry.register_action(short_name, embedder)?;
             }
         }
         Ok(())
@@ -129,18 +129,20 @@ pub fn vertex_ai(options: VertexAIPluginOptions) -> Arc<dyn Plugin> {
 
 /// Helper function to create a `ModelRef` for a Gemini model.
 pub fn gemini(name: &str) -> ModelRef<Value> {
-    model_ref(ModelInfo {
-        name: format!("vertexai/{}", name).to_owned(),
-        ..Default::default()
-    })
+    todo!();
+    // model_ref(ModelInfo {
+    //     name: format!("vertexai/{}", name).to_owned(),
+    //     ..Default::default()
+    // })
 }
 
 /// Helper function to create a `ModelRef` for an Imagen model.
 pub fn imagen(name: &str) -> ModelRef<Value> {
-    model_ref(ModelInfo {
-        name: format!("vertexai/{}", name).to_owned(),
-        ..Default::default()
-    })
+    todo!();
+    // model_ref(ModelInfo {
+    //     name: format!("vertexai/{}", name).to_owned(),
+    //     ..Default::default()
+    // })
 }
 
 /// Helper function to create an `EmbedderRef` for a Vertex AI text embedding model.

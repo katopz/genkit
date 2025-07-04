@@ -155,7 +155,7 @@ where
     let action = ActionBuilder::new(ActionType::Reranker, name.to_string(), runner).build();
     let reranker_action = RerankerAction(action);
     registry
-        .register_action(name.to_string(), reranker_action.clone())
+        .register_action(name, reranker_action.clone())
         .unwrap();
     reranker_action
 }

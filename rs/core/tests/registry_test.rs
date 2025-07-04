@@ -63,7 +63,7 @@ impl Plugin for MockPlugin {
             |_, _| async { Ok(TestOutput {}) },
         )
         .build();
-        registry.register_action(action_name, test_action)?;
+        registry.register_action(action_name.as_str(), test_action)?;
         Ok(())
     }
 }
@@ -108,7 +108,7 @@ mod test {
             })
             .build();
         parent_registry
-            .register_action("parentUtil".to_string(), parent_action)
+            .register_action("parentUtil", parent_action)
             .unwrap();
 
         let mut child_registry = Registry::with_parent(&parent_registry);
@@ -118,7 +118,7 @@ mod test {
             })
             .build();
         child_registry
-            .register_action("childUtil".to_string(), child_action)
+            .register_action("childUtil", child_action)
             .unwrap();
 
         // Child can find its own action
@@ -150,9 +150,7 @@ mod test {
         )
         .build();
 
-        registry
-            .register_action("myFlow".to_string(), test_action)
-            .unwrap();
+        registry.register_action("myFlow", test_action).unwrap();
 
         let key = "/flow/myFlow";
         let looked_up = registry.lookup_action(key).await;

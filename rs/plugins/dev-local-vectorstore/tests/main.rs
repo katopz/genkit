@@ -93,12 +93,12 @@ async fn test_dev_local_vectorstore_e2e() {
 
     let embedder_action = mock_embedder();
     registry
-        .register_action("mock-embedder".to_string(), embedder_action)
+        .register_action("mock-embedder", embedder_action)
         .unwrap();
 
     let model_action = mock_model();
     registry
-        .register_action("mock-model".to_string(), model_action)
+        .register_action("mock-model", model_action)
         .unwrap();
 
     // 2. Configure and initialize the vector store plugin.

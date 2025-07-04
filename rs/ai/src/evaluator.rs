@@ -223,7 +223,7 @@ where
     .build();
     let evaluator_action = EvaluatorAction(action);
     registry
-        .register_action(name.to_string(), evaluator_action.clone())
+        .register_action(name, evaluator_action.clone())
         .expect("Failed to register evaluator");
     evaluator_action
 }

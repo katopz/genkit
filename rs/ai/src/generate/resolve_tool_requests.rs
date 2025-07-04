@@ -149,6 +149,11 @@ pub async fn resolve_tool_requests<O: 'static>(
     let tool_actions: Vec<Arc<ToolAction>> = resolved_tools
         .into_iter()
         .map(|action| {
+            println!(
+                "resolve_tool_requests: trying to downcast action named `{}` of type {:?}",
+                action.name(),
+                std::any::Any::type_id(&*action)
+            );
             any_downcast::downcast_arc::<ToolAction>(action)
                 .map_err(|_| Error::new_internal("Failed to downcast to ToolAction".to_string()))
         })
@@ -336,6 +341,11 @@ pub async fn resolve_resume_option<O: Default + Send + Sync + 'static>(
     let tool_actions: Vec<Arc<ToolAction>> = resolved_tools
         .into_iter()
         .map(|action| {
+            println!(
+                "resolve_resume_option: trying to downcast action named `{}` of type {:?}",
+                action.name(),
+                std::any::Any::type_id(&*action)
+            );
             any_downcast::downcast_arc::<ToolAction>(action)
                 .map_err(|_| Error::new_internal("Failed to downcast to ToolAction".to_string()))
         })

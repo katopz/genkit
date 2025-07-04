@@ -25,7 +25,7 @@ use crate::modelgarden::openai_compatibility::{
 };
 use crate::Result;
 use genkit_ai::model::{
-    define_model, model_ref, GenerateResponse, ModelAction, ModelInfo, ModelInfoSupports, ModelRef,
+    define_model, GenerateResponse, ModelAction, ModelInfo, ModelInfoSupports, ModelRef,
 };
 use genkit_core::Registry;
 use reqwest::header::{HeaderMap, AUTHORIZATION, CONTENT_TYPE};
@@ -33,29 +33,32 @@ use reqwest::header::{HeaderMap, AUTHORIZATION, CONTENT_TYPE};
 // Model references
 #[allow(unused)]
 pub fn mistral_large() -> ModelRef<OpenAIConfig> {
-    model_ref(ModelInfo {
-        name: "vertexai/mistral-large".to_string(),
-        label: "vertexai/mistral-large".to_string(),
-        ..Default::default()
-    })
+    todo!();
+    // model_ref(ModelInfo {
+    //     name: "vertexai/mistral-large".to_string(),
+    //     label: "vertexai/mistral-large".to_string(),
+    //     ..Default::default()
+    // })
 }
 
 #[allow(unused)]
 pub fn mistral_nemo() -> ModelRef<OpenAIConfig> {
-    model_ref(ModelInfo {
-        name: "vertexai/mistral-nemo".to_string(),
-        label: "vertexai/mistral-nemo".to_string(),
-        ..Default::default()
-    })
+    todo!();
+    // model_ref(ModelInfo {
+    //     name: "vertexai/mistral-nemo".to_string(),
+    //     label: "vertexai/mistral-nemo".to_string(),
+    //     ..Default::default()
+    // })
 }
 
 #[allow(unused)]
 pub fn codestral() -> ModelRef<OpenAIConfig> {
-    model_ref(ModelInfo {
-        name: "vertexai/codestral".to_string(),
-        label: "vertexai/codestral".to_string(),
-        ..Default::default()
-    })
+    todo!();
+    // model_ref(ModelInfo {
+    //     name: "vertexai/codestral".to_string(),
+    //     label: "vertexai/codestral".to_string(),
+    //     ..Default::default()
+    // })
 }
 
 async fn mistral_runner(

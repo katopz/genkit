@@ -81,7 +81,7 @@ impl Plugin for VertexAIModelGardenPlugin {
                     model_ref.name
                 )));
             };
-            registry.register_action(model_ref.name.clone(), action)?;
+            registry.register_action(&model_ref.name, action)?;
         }
         Ok(())
     }

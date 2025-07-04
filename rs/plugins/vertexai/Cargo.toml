@@ -1,28 +1,29 @@
 [package]
-description = "Genkit Vertex AI plugin."
-edition     = "2021"
-license     = "Apache-2.0"
-name        = "genkit-vertexai"
-repository  = "https://github.com/firebase/genkit"
-version     = "0.1.0"
+authors.workspace    = true
+description          = "Genkit Vertex AI plugin."
+edition.workspace    = true
+license.workspace    = true
+name                 = "genkit-vertexai"
+repository.workspace = true
+version.workspace    = true
 
 [dependencies]
-async-trait = "0.1"
-base64      = "0.22"
-gcp_auth    = "0.12"
-genkit-ai   = { path = "../../ai" }
-genkit-core = { path = "../../core" }
-log         = "0.4"
-reqwest     = { version = "0.12", features = ["json"] }
-schemars    = "1.0.3"
-serde       = { version = "1.0", features = ["derive"] }
-serde_json  = "1.0"
-sha2        = "0.10.8"
-strum = { version = "0.27.1", features = ["derive"] }
-strum_macros = "0.27.1"
-thiserror   = "1.0"
+async-trait.workspace = true
+base64.workspace      = true
+gcp_auth              = "0.12"
+genkit-ai             = { path = "../../ai", version = "0.1.0" }
+genkit-core           = { path = "../../core", version = "0.1.0" }
+log.workspace         = true
+reqwest               = { workspace = true, features = ["json"] }
+schemars.workspace    = true
+serde.workspace       = true
+serde_json.workspace  = true
+sha2                  = "0.10.9"
+strum                 = { version = "0.27", features = ["derive"] }
+strum_macros          = "0.27"
+thiserror.workspace   = true
 
 [dev-dependencies]
-anyhow     = "1.0"
-tokio      = { version = "1", features = ["full"] }
-tokio-test = "0.4"
+anyhow.workspace     = true
+tokio.workspace      = true
+tokio-test.workspace = true

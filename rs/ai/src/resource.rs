@@ -108,7 +108,7 @@ where
     .build();
 
     let resource_action = Arc::new(action);
-    registry.register_action(name, (*resource_action).clone())?;
+    registry.register_action(name.as_str(), (*resource_action).clone())?;
     Ok(resource_action)
 }
 

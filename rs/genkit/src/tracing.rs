@@ -16,7 +16,7 @@
 pub use genkit_core::tracing::exporter::TraceServerExporter;
 pub use genkit_core::tracing::types::PathMetadata;
 pub use genkit_core::tracing::{enable_telemetry, flush_tracing, in_new_span as run_in_new_span};
-pub use opentelemetry_sdk::export::trace::SpanData;
+pub use opentelemetry_sdk::trace::SpanData;
 
 // Note: The following items from the TypeScript version have different names,
 // are not yet available in the Rust version, or are handled by the Rust

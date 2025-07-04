@@ -20,8 +20,8 @@
 use crate::common::{get_derived_params, VertexAIPluginOptions};
 use crate::{Error, Result};
 use genkit_ai::model::{
-    define_model, model_ref, CandidateData, FinishReason, GenerateRequest, GenerateResponseData,
-    ModelAction, ModelInfo, ModelInfoSupports, ModelRef,
+    define_model, CandidateData, FinishReason, GenerateRequest, GenerateResponseData, ModelAction,
+    ModelInfo, ModelInfoSupports, ModelRef,
 };
 use genkit_ai::{Part, Role};
 use genkit_core::Registry;
@@ -262,17 +262,18 @@ pub fn define_anthropic_model(
 // Helper functions to create model references
 #[allow(unused)]
 pub fn claude_3_5_sonnet() -> ModelRef<AnthropicConfig> {
-    model_ref(ModelInfo {
-        name: "vertexai/claude-3-5-sonnet-20240620".to_owned(),
-        label: "Claude 3.5 Sonnet".to_string(),
-        supports: Some(ModelInfoSupports {
-            multiturn: Some(true),
-            media: Some(true),
-            tools: Some(true),
-            system_role: Some(true),
-            output: Some(vec!["text".to_string()]),
-            ..Default::default()
-        }),
-        ..Default::default()
-    })
+    todo!();
+    // model_ref(ModelInfo {
+    //     name: "vertexai/claude-3-5-sonnet-20240620".to_owned(),
+    //     label: "Claude 3.5 Sonnet".to_string(),
+    //     supports: Some(ModelInfoSupports {
+    //         multiturn: Some(true),
+    //         media: Some(true),
+    //         tools: Some(true),
+    //         system_role: Some(true),
+    //         output: Some(vec!["text".to_string()]),
+    //         ..Default::default()
+    //     }),
+    //     ..Default::default()
+    // })
 }

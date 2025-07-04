@@ -49,7 +49,7 @@ impl Plugin for VertexAIEvaluationPlugin {
         let factory = EvaluatorFactory::new(params);
         let evaluators = vertex_evaluators(&factory, &self.options.evaluation.metrics);
         for evaluator in evaluators {
-            registry.register_action(self.name().to_owned(), evaluator)?;
+            registry.register_action(self.name(), evaluator)?;
         }
         Ok(())
     }
