@@ -71,7 +71,6 @@ impl Plugin for ErrorModelPlugin {
 
 #[rstest]
 #[tokio::test]
-
 async fn test_streams_default_model() {
     let (genkit, pm_handle) = genkit_with_programmable_model().await;
     {
