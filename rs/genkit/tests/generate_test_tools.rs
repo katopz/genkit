@@ -255,7 +255,6 @@ async fn test_calls_the_dynamic_tool() {
     let (genkit, pm_handle) = genkit_with_programmable_model().await;
     let req_counter = Arc::new(Mutex::new(0));
 
-    let mut registry = genkit.registry.clone();
     let dynamic_test_tool_1 = dynamic_tool(
         ToolConfig {
             name: "dynamicTestTool1".to_string(),
@@ -267,8 +266,7 @@ async fn test_calls_the_dynamic_tool() {
             metadata: None,
         },
         |_, _| async { Ok(json!("tool called 1")) },
-    ) // Rust explicit about registry
-    .attach(&mut registry);
+    );
 
     let dynamic_test_tool_2 = genkit.dynamic_tool(
         ToolConfig {
@@ -339,7 +337,10 @@ async fn test_calls_the_dynamic_tool() {
         .generate_with_options(GenerateOptions {
             model: Some(Model::Name("programmableModel".to_string())),
             prompt: Some(vec![Part::text("call the tool")]),
-            tools: Some(vec![dynamic_test_tool_1, dynamic_test_tool_2]),
+            tools: Some(vec![
+                dynamic_test_tool_1.to_tool_argument(),
+                dynamic_test_tool_2,
+            ]),
             ..Default::default()
         })
         .await

@@ -363,6 +363,39 @@ where
     }
 }
 
+impl<I, O, F, Fut> DynamicTool<I, O, F, Fut>
+where
+    I: JsonSchema + Serialize + DeserializeOwned + Send + Sync + Clone + 'static,
+    O: JsonSchema + Serialize + DeserializeOwned + Send + Sync + 'static,
+    F: Fn(I, ToolFnOptions) -> Fut + Send + Sync + Clone + 'static,
+    Fut: Future<Output = Result<O>> + Send + 'static,
+{
+    /// Attaches the dynamic tool to a registry, making it an executable action.
+    pub fn to_tool_argument(self) -> ToolArgument {
+        let runner_arc = Arc::new(self.runner);
+        let action = detached_action(
+            ActionType::Tool,
+            self.config.name.clone(),
+            move |input, args: ActionFnArg<()>| {
+                let runner_clone = runner_arc.clone();
+                let options = ToolFnOptions {
+                    interrupt: Box::new(|metadata| {
+                        Error::new_internal(format!(
+                            "INTERRUPT::{}",
+                            serde_json::to_string(&metadata.unwrap_or(serde_json::Value::Null))
+                                .unwrap()
+                        ))
+                    }),
+                    context: args.context.unwrap_or_default(),
+                };
+                async move { runner_clone(input, options).await }
+            },
+        );
+
+        ToolArgument::from(ToolAction(action))
+    }
+}
+
 /// Defines a dynamic tool that is not registered with the framework globally.
 pub fn dynamic_tool<I, O, F, Fut>(config: ToolConfig<I, O>, runner: F) -> DynamicTool<I, O, F, Fut>
 where
