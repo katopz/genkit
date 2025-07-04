@@ -399,21 +399,16 @@ async fn test_interrupts_the_dynamic_tool_with_no_impl() {
         foo: String,
     }
 
-    // Define a dynamic tool with a schema but no implementation by passing `None`
-    // as the handler. This makes the tool's schema available to the model but
-    // will cause an interrupt if the model requests to call it.
-    let dynamic_test_tool = genkit.dynamic_tool(
-        ToolConfig {
-            name: "dynamicTestTool".to_string(),
-            description: "description".to_string(),
-            input_schema: Some(InterruptToolInput {
-                foo: "".to_string(),
-            }),
-            output_schema: None,
-            metadata: None,
-        },
-        |_, _| async { Ok(()) },
-    );
+    // Define a dynamic tool that is expected to interrupt.
+    let dynamic_test_tool = genkit.dynamic_tool_without_runner(ToolConfig {
+        name: "dynamicTestTool".to_string(),
+        description: "description".to_string(),
+        input_schema: Some(InterruptToolInput {
+            foo: "".to_string(),
+        }),
+        output_schema: None::<Value>,
+        metadata: None,
+    });
 
     // Configure the programmable model to respond with a tool request.
     {
@@ -474,21 +469,16 @@ async fn test_interrupts_the_dynamic_tool_with_no_impl() {
     assert_eq!(interrupts.len(), 1);
     let interrupt = interrupts[0];
 
-    let mut metadata = HashMap::new();
-    metadata.insert("interrupt".to_string(), json!(true));
-
     let expected_tool_request = json!({
         "name": "dynamicTestTool",
         "input": {"foo": "bar"},
-        "ref_id": "ref123",
+        "refId": "ref123",
     });
 
-    // TODO
-    // assert_eq!(
-    //     serde_json::to_value(interrupt.tool_request.as_ref().unwrap()).unwrap(),
-    //     expected_tool_request
-    // );
-    // assert_eq!(interrupt.metadata.as_ref().unwrap(), &metadata);
+    assert_eq!(
+        serde_json::to_value(interrupt).unwrap(),
+        expected_tool_request
+    );
 }
 
 #[rstest]

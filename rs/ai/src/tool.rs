@@ -407,6 +407,21 @@ where
     DynamicTool { config, runner }
 }
 
+/// Defines a dynamic tool that will always interrupt when called.
+///
+/// This is useful for tools that require human-in-the-loop intervention
+/// or whose implementation exists outside the current execution flow.
+pub fn dynamic_tool_without_runner<I, O>(config: ToolConfig<I, O>) -> ToolArgument
+where
+    I: JsonSchema + Serialize + DeserializeOwned + Send + Sync + Clone + 'static,
+    O: JsonSchema + Serialize + DeserializeOwned + Send + Sync + 'static,
+{
+    dynamic_tool(config, |_, options: ToolFnOptions| async move {
+        Err((options.interrupt)(None))
+    })
+    .to_tool_argument()
+}
+
 /// Resolves a slice of `ToolArgument`s into a `Vec` of `ToolAction`s.
 pub async fn resolve_tools(
     registry: &Registry,

@@ -87,7 +87,7 @@ use genkit_ai::model::{BackgroundModelAction, DefineBackgroundModelOptions, Defi
 use genkit_ai::reranker::{RerankerRequest, RerankerResponse};
 use genkit_ai::retriever::{IndexerRequest, RetrieverRequest, RetrieverResponse};
 pub use genkit_ai::session::{Session, SessionStore};
-use genkit_ai::tool::ToolFnOptions;
+use genkit_ai::tool::{dynamic_tool_without_runner, ToolFnOptions};
 pub use genkit_ai::GenerateStreamResponse;
 use genkit_ai::{
     define_background_model, define_model, dynamic_tool, BaseEvalDataPoint, EmbedRequest,
@@ -188,6 +188,15 @@ impl Genkit {
     {
         let mut registry = self.registry.clone();
         dynamic_tool(config, runner).attach(&mut registry)
+    }
+
+    /// Defines a new dynamic tool and registers it with the Genkit registry.
+    pub fn dynamic_tool_without_runner<I, O>(&self, config: ToolConfig<I, O>) -> ToolArgument
+    where
+        I: JsonSchema + Serialize + DeserializeOwned + Send + Sync + Clone + 'static,
+        O: JsonSchema + Serialize + DeserializeOwned + Send + Sync + 'static,
+    {
+        dynamic_tool_without_runner(config)
     }
 
     /// Defines and registers a flow function.

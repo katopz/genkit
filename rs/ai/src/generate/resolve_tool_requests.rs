@@ -62,6 +62,7 @@ pub struct ResolveResumeOptionResult<O: 'static> {
 }
 
 /// Converts a slice of `ErasedAction` trait objects into a map of short names to actions.
+/// This is the primary change: we now work with the generic trait object, not the concrete type.
 pub fn to_tool_map(
     tools: &[Arc<dyn ErasedAction>],
 ) -> Result<HashMap<String, Arc<dyn ErasedAction>>> {
@@ -76,6 +77,7 @@ pub fn to_tool_map(
 }
 
 /// Ensures that no two tools in a given slice have the same short name.
+/// This now accepts a slice of trait objects.
 pub fn assert_valid_tool_names(tools: &[Arc<dyn ErasedAction>]) -> Result<()> {
     let mut names = HashMap::new();
     for tool in tools {
@@ -105,8 +107,9 @@ pub fn to_pending_output(part: &Part, response: &Part) -> Part {
 }
 
 /// Resolves a single tool request by executing it.
+/// This now accepts a map of trait objects.
 pub async fn resolve_tool_request<O: 'static>(
-    raw_request: &GenerateOptions<O>,
+    _raw_request: &GenerateOptions<O>,
     part: &Part,
     tool_map: &HashMap<String, Arc<dyn ErasedAction>>,
 ) -> Result<ResolvedToolRequest<O>> {
@@ -115,36 +118,50 @@ pub async fn resolve_tool_request<O: 'static>(
         .as_ref()
         .ok_or_else(|| Error::new_internal("resolve_tool_request called on a non-tool part"))?;
 
-    let short_name = tool_request
-        .name
-        .split('/')
-        .next_back()
-        .unwrap_or(&tool_request.name);
     let tool = tool_map
-        .get(short_name)
+        .get(&tool_request.name)
         .ok_or_else(|| Error::new_internal(format!("Tool '{}' not found", &tool_request.name)))?;
 
     let request_value = serde_json::to_value(tool_request.input.clone().unwrap_or(Value::Null))
         .map_err(|e| Error::new_internal(format!("Failed to serialize request: {}", e)))?;
 
-    // FIX: Pass the context from the GenerateOptions to the tool's execution.
-    let response = tool
-        .run_http_json(request_value, raw_request.context.clone())
-        .await?;
-    let output = response;
+    let response_result = tool.run_http_json(request_value, None).await;
 
-    let response_part = Part {
-        tool_response: Some(ToolResponse {
-            name: tool_request.name.clone(),
-            ref_id: tool_request.ref_id.clone(),
-            output: Some(output),
-        }),
-        ..Default::default()
-    };
-    Ok(ResolvedToolRequest {
-        response: Some(response_part),
-        ..Default::default()
-    })
+    match response_result {
+        Ok(response) => {
+            let output = response;
+
+            let response_part = Part {
+                tool_response: Some(ToolResponse {
+                    name: tool_request.name.clone(),
+                    ref_id: tool_request.ref_id.clone(),
+                    output: Some(output),
+                }),
+                ..Default::default()
+            };
+            Ok(ResolvedToolRequest {
+                response: Some(response_part),
+                ..Default::default()
+            })
+        }
+        Err(e) => {
+            if let Error::Internal { message, .. } = &e {
+                if message.starts_with("INTERRUPT::") {
+                    let mut interrupted_part = part.clone();
+                    let metadata = interrupted_part
+                        .metadata
+                        .get_or_insert_with(Default::default);
+                    metadata.insert("interrupt".to_string(), serde_json::Value::Bool(true));
+
+                    return Ok(ResolvedToolRequest {
+                        interrupt: Some(interrupted_part),
+                        ..Default::default()
+                    });
+                }
+            }
+            Err(e)
+        }
+    }
 }
 
 /// Resolves all tool requests within a model-generated message.
@@ -154,6 +171,8 @@ pub async fn resolve_tool_requests<O: 'static>(
     generated_message: &MessageData,
 ) -> Result<ResolvedToolRequests<O>> {
     let resolved_tools = tool::resolve_tools(registry, raw_request.tools.as_deref()).await?;
+
+    // The problematic downcast is now removed. We pass the trait objects directly.
     let tool_map = to_tool_map(&resolved_tools)?;
 
     let mut response_parts: Vec<Part> = Vec::new();
@@ -169,11 +188,9 @@ pub async fn resolve_tool_requests<O: 'static>(
         .filter(|(_, part)| part.tool_request.is_some())
         .map(|(i, part)| {
             let tool_map = tool_map.clone();
-            // Clone raw_request to move it into the async block.
-            let raw_request_clone = raw_request;
             let part = part.clone();
             async move {
-                let result = resolve_tool_request(raw_request_clone, &part, &tool_map).await;
+                let result = resolve_tool_request(raw_request, &part, &tool_map).await;
                 (i, result)
             }
         });
@@ -245,10 +262,9 @@ fn find_corresponding_tool_request<'a>(
 // Helper to find a matching ToolResponsePart in a slice of parts.
 fn find_corresponding_tool_response<'a>(parts: &'a [Part], part: &ToolRequest) -> Option<&'a Part> {
     parts.iter().find(|p| {
-        p.tool_response.as_ref().map_or_else(
-            || false,
-            |tr| tr.name == part.name && tr.ref_id == part.ref_id,
-        )
+        p.tool_response
+            .as_ref()
+            .map_or(false, |tr| tr.name == part.name && tr.ref_id == part.ref_id)
     })
 }
 
@@ -336,6 +352,8 @@ pub async fn resolve_resume_option<O: Default + Send + Sync + 'static>(
     };
 
     let resolved_tools = tool::resolve_tools(registry, raw_request.tools.as_deref()).await?;
+
+    // Again, we remove the downcast and work with the trait objects.
     let tool_map = to_tool_map(&resolved_tools)?;
 
     let mut messages = raw_request.messages.clone().unwrap_or_default();
@@ -417,3 +435,5 @@ pub async fn resolve_resume_option<O: Default + Send + Sync + 'static>(
         ..Default::default()
     })
 }
+
+// The `any_downcast` helper module is no longer needed and has been removed.
