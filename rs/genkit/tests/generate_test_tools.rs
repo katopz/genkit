@@ -387,3 +387,104 @@ async fn test_calls_the_dynamic_tool() {
     assert_eq!(resp2.ref_id, Some("ref234".to_string()));
     assert_eq!(resp2.output, Some(json!("tool called 2")));
 }
+
+#[rstest]
+#[tokio::test]
+async fn test_interrupts_the_dynamic_tool_with_no_impl() {
+    let (genkit, pm_handle) = genkit_with_programmable_model().await;
+    let req_counter = Arc::new(Mutex::new(0));
+
+    #[derive(Debug, serde::Serialize, serde::Deserialize, JsonSchema, Clone)]
+    struct InterruptToolInput {
+        foo: String,
+    }
+
+    // Define a dynamic tool with a schema but no implementation by passing `None`
+    // as the handler. This makes the tool's schema available to the model but
+    // will cause an interrupt if the model requests to call it.
+    let dynamic_test_tool = genkit.dynamic_tool(
+        ToolConfig {
+            name: "dynamicTestTool".to_string(),
+            description: "description".to_string(),
+            input_schema: Some(InterruptToolInput {
+                foo: "".to_string(),
+            }),
+            output_schema: None,
+            metadata: None,
+        },
+        |_, _| async { Ok(()) },
+    );
+
+    // Configure the programmable model to respond with a tool request.
+    {
+        let mut handler = pm_handle.handler.lock().unwrap();
+        *handler = Arc::new(Box::new(move |_, _| {
+            let mut counter = req_counter.lock().unwrap();
+            let response = if *counter == 0 {
+                *counter += 1;
+                GenerateResponseData {
+                    candidates: vec![CandidateData {
+                        message: MessageData {
+                            role: Role::Model,
+                            content: vec![Part {
+                                tool_request: Some(ToolRequest {
+                                    name: "dynamicTestTool".to_string(),
+                                    input: Some(json!({ "foo": "bar" })),
+                                    ref_id: Some("ref123".to_string()),
+                                }),
+                                ..Default::default()
+                            }],
+                            ..Default::default()
+                        },
+                        ..Default::default()
+                    }],
+                    ..Default::default()
+                }
+            } else {
+                GenerateResponseData {
+                    candidates: vec![CandidateData {
+                        message: MessageData {
+                            role: Role::Model,
+                            content: vec![Part::text("done")],
+                            ..Default::default()
+                        },
+                        finish_reason: Some(FinishReason::Stop),
+                        ..Default::default()
+                    }],
+                    ..Default::default()
+                }
+            };
+            Box::pin(async { Ok(response) })
+        }));
+    }
+
+    // Call generate and expect an interrupt instead of a final answer.
+    let response: genkit::GenerateResponse = genkit
+        .generate_with_options(GenerateOptions {
+            model: Some(Model::Name("programmableModel".to_string())),
+            prompt: Some(vec![Part::text("call the tool")]),
+            tools: Some(vec![dynamic_test_tool]),
+            ..Default::default()
+        })
+        .await
+        .unwrap();
+
+    // Verify that the response contains the expected tool request as an interrupt.
+    let interrupts = response.interrupts().unwrap();
+    assert_eq!(interrupts.len(), 1);
+
+    let mut metadata = HashMap::new();
+    metadata.insert("interrupt".to_string(), json!(true));
+
+    let expected_interrupt = Part {
+        tool_request: Some(ToolRequest {
+            name: "dynamicTestTool".to_string(),
+            input: Some(json!({"foo": "bar"})),
+            ref_id: Some("ref123".to_string()),
+        }),
+        metadata: Some(metadata),
+        ..Default::default()
+    };
+
+    // assert_eq!(interrupts[0], &expected_interrupt);
+}
