@@ -22,9 +22,9 @@ use crate::document::{Part, ToolRequest, ToolRequestPart, ToolResponse};
 use crate::generate::GenerateOptions;
 use crate::message::{MessageData, Role};
 use crate::model::GenerateResponseData;
-use crate::tool::{self, is_tool_request, ToolAction};
+use crate::tool::{self, is_tool_request};
 use genkit_core::error::{Error, Result};
-use genkit_core::registry::Registry;
+use genkit_core::registry::{ErasedAction, Registry};
 use serde_json::Value;
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -61,12 +61,15 @@ pub struct ResolveResumeOptionResult<O: 'static> {
     pub tool_message: Option<MessageData>,
 }
 
-/// Converts a slice of `ToolAction`s into a map of short names to actions.
-pub fn to_tool_map(tools: &[Arc<ToolAction>]) -> Result<HashMap<String, Arc<ToolAction>>> {
+/// Converts a slice of `ErasedAction` trait objects into a map of short names to actions.
+/// This is the primary change: we now work with the generic trait object, not the concrete type.
+pub fn to_tool_map(
+    tools: &[Arc<dyn ErasedAction>],
+) -> Result<HashMap<String, Arc<dyn ErasedAction>>> {
     assert_valid_tool_names(tools)?;
     let mut map = HashMap::new();
     for tool in tools {
-        let name = &tool.meta.name;
+        let name = tool.name();
         let short_name = name.split('/').next_back().unwrap_or(name).to_string();
         map.insert(short_name, tool.clone());
     }
@@ -74,12 +77,13 @@ pub fn to_tool_map(tools: &[Arc<ToolAction>]) -> Result<HashMap<String, Arc<Tool
 }
 
 /// Ensures that no two tools in a given slice have the same short name.
-pub fn assert_valid_tool_names(tools: &[Arc<ToolAction>]) -> Result<()> {
+/// This now accepts a slice of trait objects.
+pub fn assert_valid_tool_names(tools: &[Arc<dyn ErasedAction>]) -> Result<()> {
     let mut names = HashMap::new();
     for tool in tools {
-        let name = &tool.meta.name;
+        let name = tool.name();
         let short_name = name.split('/').next_back().unwrap_or(name);
-        if let Some(existing_name) = names.insert(short_name.to_string(), name.clone()) {
+        if let Some(existing_name) = names.insert(short_name.to_string(), name.to_string()) {
             return Err(Error::new_internal(format!(
                 "Cannot provide two tools with the same short name ('{}'): '{}' and '{}'",
                 short_name, name, existing_name
@@ -103,10 +107,11 @@ pub fn to_pending_output(part: &Part, response: &Part) -> Part {
 }
 
 /// Resolves a single tool request by executing it.
+/// This now accepts a map of trait objects.
 pub async fn resolve_tool_request<O: 'static>(
     _raw_request: &GenerateOptions<O>,
     part: &Part,
-    tool_map: &HashMap<String, Arc<ToolAction>>,
+    tool_map: &HashMap<String, Arc<dyn ErasedAction>>,
 ) -> Result<ResolvedToolRequest<O>> {
     let tool_request = part
         .tool_request
@@ -122,8 +127,10 @@ pub async fn resolve_tool_request<O: 'static>(
 
     let request_value = serde_json::to_value(tool_request.input.clone().unwrap_or(Value::Null))
         .map_err(|e| Error::new_internal(format!("Failed to serialize request: {}", e)))?;
-    let response = tool.run_http(request_value, None).await?;
-    let output = response.result;
+
+    // We can call `run_http` directly on the trait object.
+    let response = tool.run_http_json(request_value, None).await?;
+    let output = response;
 
     let response_part = Part {
         tool_response: Some(ToolResponse {
@@ -146,19 +153,9 @@ pub async fn resolve_tool_requests<O: 'static>(
     generated_message: &MessageData,
 ) -> Result<ResolvedToolRequests<O>> {
     let resolved_tools = tool::resolve_tools(registry, raw_request.tools.as_deref()).await?;
-    let tool_actions: Vec<Arc<ToolAction>> = resolved_tools
-        .into_iter()
-        .map(|action| {
-            println!(
-                "resolve_tool_requests: trying to downcast action named `{}` of type {:?}",
-                action.name(),
-                std::any::Any::type_id(&*action)
-            );
-            any_downcast::downcast_arc::<ToolAction>(action)
-                .map_err(|_| Error::new_internal("Failed to downcast to ToolAction".to_string()))
-        })
-        .collect::<Result<_>>()?;
-    let tool_map = to_tool_map(&tool_actions)?;
+
+    // The problematic downcast is now removed. We pass the trait objects directly.
+    let tool_map = to_tool_map(&resolved_tools)?;
 
     let mut response_parts: Vec<Part> = Vec::new();
     let mut has_interrupts = false;
@@ -263,7 +260,7 @@ struct ResumedToolRequestResult {
 async fn resolve_resumed_tool_request<O: 'static>(
     raw_request: &GenerateOptions<O>,
     part: ToolRequestPart,
-    tool_map: &HashMap<String, Arc<ToolAction>>,
+    tool_map: &HashMap<String, Arc<dyn ErasedAction>>,
 ) -> Result<ResumedToolRequestResult> {
     let tool_request = part.tool_request.as_ref().unwrap(); // Safe due to checks before calling
 
@@ -338,19 +335,9 @@ pub async fn resolve_resume_option<O: Default + Send + Sync + 'static>(
     };
 
     let resolved_tools = tool::resolve_tools(registry, raw_request.tools.as_deref()).await?;
-    let tool_actions: Vec<Arc<ToolAction>> = resolved_tools
-        .into_iter()
-        .map(|action| {
-            println!(
-                "resolve_resume_option: trying to downcast action named `{}` of type {:?}",
-                action.name(),
-                std::any::Any::type_id(&*action)
-            );
-            any_downcast::downcast_arc::<ToolAction>(action)
-                .map_err(|_| Error::new_internal("Failed to downcast to ToolAction".to_string()))
-        })
-        .collect::<Result<_>>()?;
-    let tool_map = to_tool_map(&tool_actions)?;
+
+    // Again, we remove the downcast and work with the trait objects.
+    let tool_map = to_tool_map(&resolved_tools)?;
 
     let mut messages = raw_request.messages.clone().unwrap_or_default();
     let last_message = match messages.last_mut() {
@@ -432,22 +419,4 @@ pub async fn resolve_resume_option<O: Default + Send + Sync + 'static>(
     })
 }
 
-// `any_downcast` helper module
-mod any_downcast {
-    use genkit_core::registry::ErasedAction;
-    use std::sync::Arc;
-
-    pub fn downcast_arc<T: 'static>(
-        arc: Arc<dyn ErasedAction>,
-    ) -> std::result::Result<Arc<T>, Arc<dyn ErasedAction>> {
-        if arc.as_any().is::<T>() {
-            unsafe {
-                let raw = Arc::into_raw(arc);
-                let ptr = raw as *const T;
-                Ok(Arc::from_raw(ptr))
-            }
-        } else {
-            Err(arc)
-        }
-    }
-}
+// The `any_downcast` helper module is no longer needed and has been removed.
