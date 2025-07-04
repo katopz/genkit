@@ -8,20 +8,20 @@ repository.workspace = true
 version.workspace    = true
 
 [dependencies]
-async-trait.workspace = true
-base64.workspace      = true
-gcp_auth              = "0.12"
-genkit-ai             = { path = "../../ai", version = "0.1.0" }
-genkit-core           = { path = "../../core", version = "0.1.0" }
-log.workspace         = true
-reqwest               = { workspace = true, features = ["json"] }
-schemars.workspace    = true
-serde.workspace       = true
-serde_json.workspace  = true
-sha2                  = "0.10.9"
-strum                 = { version = "0.27", features = ["derive"] }
-strum_macros          = "0.27"
-thiserror.workspace   = true
+async-trait.workspace  = true
+base64.workspace       = true
+gcp_auth               = "0.12"
+genkit-ai              = { path = "../../ai", version = "0.1.0" }
+genkit-core            = { path = "../../core", version = "0.1.0" }
+log.workspace          = true
+reqwest                = { workspace = true, features = ["json"] }
+schemars.workspace     = true
+serde.workspace        = true
+serde_json.workspace   = true
+sha2                   = "0.10.9"
+strum                  = { workspace = true, features = ["derive"] }
+strum_macros.workspace = true
+thiserror.workspace    = true
 
 [dev-dependencies]
 anyhow.workspace     = true
