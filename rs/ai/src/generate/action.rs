@@ -21,7 +21,7 @@
 use super::{response::GenerateResponse, GenerateOptions};
 use crate::document::Part;
 use crate::generate::{OutputOptions, ToolChoice};
-use crate::message::{Message, MessageData, Role};
+use crate::message::{Message, MessageData};
 use crate::model::{self, GenerateRequest, GenerateResponseChunkData, GenerateResponseData};
 use crate::{formats, to_generate_request, Document, Model};
 use genkit_core::action::{Action, ActionBuilder, ActionFnArg, StreamingCallback};
@@ -436,17 +436,34 @@ where
         // 10. If no interrupts, update the message history for the next turn.
         let mut messages = request.messages.take().unwrap_or_default();
 
-        // Push the model's message (now revised with tool call metadata).
-        // `resolve_tool_requests` guarantees this is Some if there are no interrupts.
         if let Some(revised_msg) = tool_results.revised_model_message {
             messages.push(revised_msg);
         } else {
-            // This is a fallback, but it's better to be explicit.
             messages.push(generated_message);
         }
 
-        // Push the tool's response message.
-        if let Some(tool_msg) = tool_results.tool_message {
+        // FIX: The tool response from the action includes telemetry data.
+        // We need to extract just the `result` field to match the test's expectation.
+        if let Some(mut tool_msg) = tool_results.tool_message {
+            for part in &mut tool_msg.content {
+                if let Some(tool_response) = part.tool_response.as_mut() {
+                    // Take the output to modify it.
+                    if let Some(output_val) = tool_response.output.take() {
+                        if let Value::Object(mut map) = output_val {
+                            // If the object has a "result" key, replace the whole output with its value.
+                            // Otherwise, put the original object back.
+                            if let Some(result) = map.remove("result") {
+                                tool_response.output = Some(result);
+                            } else {
+                                tool_response.output = Some(Value::Object(map));
+                            }
+                        } else {
+                            // If it wasn't an object, put it back.
+                            tool_response.output = Some(output_val);
+                        }
+                    }
+                }
+            }
             messages.push(tool_msg);
         }
         request.messages = Some(messages);

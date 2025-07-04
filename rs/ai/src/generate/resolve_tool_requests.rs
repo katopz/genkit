@@ -69,7 +69,7 @@ pub fn to_tool_map(
     let mut map = HashMap::new();
     for tool in tools {
         let name = tool.name();
-        let short_name = name.split('/').last().unwrap_or(name).to_string();
+        let short_name = name.split('/').next_back().unwrap_or(name).to_string();
         map.insert(short_name, tool.clone());
     }
     Ok(map)
@@ -80,7 +80,7 @@ pub fn assert_valid_tool_names(tools: &[Arc<dyn ErasedAction>]) -> Result<()> {
     let mut names = HashMap::new();
     for tool in tools {
         let name = tool.name();
-        let short_name = name.split('/').last().unwrap_or(name);
+        let short_name = name.split('/').next_back().unwrap_or(name);
         if let Some(existing_name) = names.insert(short_name.to_string(), name.to_string()) {
             return Err(Error::new_internal(format!(
                 "Cannot provide two tools with the same short name ('{}'): '{}' and '{}'",
@@ -119,7 +119,7 @@ pub async fn resolve_tool_request<O: 'static>(
     let short_name = tool_request
         .name
         .split('/')
-        .last()
+        .next_back()
         .unwrap_or(&tool_request.name);
     let tool = tool_map
         .get(short_name)
