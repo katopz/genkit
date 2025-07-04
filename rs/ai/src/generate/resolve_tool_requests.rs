@@ -106,7 +106,7 @@ pub fn to_pending_output(part: &Part, response: &Part) -> Part {
 
 /// Resolves a single tool request by executing it.
 pub async fn resolve_tool_request<O: 'static>(
-    _raw_request: &GenerateOptions<O>,
+    raw_request: &GenerateOptions<O>,
     part: &Part,
     tool_map: &HashMap<String, Arc<dyn ErasedAction>>,
 ) -> Result<ResolvedToolRequest<O>> {
@@ -115,7 +115,6 @@ pub async fn resolve_tool_request<O: 'static>(
         .as_ref()
         .ok_or_else(|| Error::new_internal("resolve_tool_request called on a non-tool part"))?;
 
-    // FIX: Look up using the short name, which is how the map is keyed.
     let short_name = tool_request
         .name
         .split('/')
@@ -125,13 +124,13 @@ pub async fn resolve_tool_request<O: 'static>(
         .get(short_name)
         .ok_or_else(|| Error::new_internal(format!("Tool '{}' not found", &tool_request.name)))?;
 
-    // TODO: Implement is_prompt_action and preamble logic.
-    // TODO: A proper implementation would catch a specific ToolInterruptError.
-
     let request_value = serde_json::to_value(tool_request.input.clone().unwrap_or(Value::Null))
         .map_err(|e| Error::new_internal(format!("Failed to serialize request: {}", e)))?;
 
-    let response = tool.run_http_json(request_value, None).await?;
+    // FIX: Pass the context from the GenerateOptions to the tool's execution.
+    let response = tool
+        .run_http_json(request_value, raw_request.context.clone())
+        .await?;
     let output = response;
 
     let response_part = Part {
@@ -154,17 +153,7 @@ pub async fn resolve_tool_requests<O: 'static>(
     raw_request: &GenerateOptions<O>,
     generated_message: &MessageData,
 ) -> Result<ResolvedToolRequests<O>> {
-    println!(
-        "[DEBUG] Entering resolve_tool_requests with message: {:?}",
-        generated_message
-    );
-
     let resolved_tools = tool::resolve_tools(registry, raw_request.tools.as_deref()).await?;
-    println!(
-        "[DEBUG] Resolved {} tools from request.",
-        resolved_tools.len()
-    );
-
     let tool_map = to_tool_map(&resolved_tools)?;
 
     let mut response_parts: Vec<Part> = Vec::new();
@@ -173,37 +162,27 @@ pub async fn resolve_tool_requests<O: 'static>(
 
     let mut revised_model_message = generated_message.clone();
 
-    let tool_requests_to_process: Vec<(usize, Part)> = revised_model_message
+    let futures = revised_model_message
         .content
         .iter()
         .enumerate()
         .filter(|(_, part)| part.tool_request.is_some())
-        .map(|(i, p)| (i, p.clone()))
-        .collect();
-
-    println!(
-        "[DEBUG] Found {} tool requests to process.",
-        tool_requests_to_process.len()
-    );
-
-    let futures = tool_requests_to_process.into_iter().map(|(i, part)| {
-        let tool_map = tool_map.clone();
-        async move {
-            println!(
-                "[DEBUG] Resolving tool request part: {:?}",
-                part.tool_request
-            );
-            let result = resolve_tool_request(raw_request, &part, &tool_map).await;
-            (i, result)
-        }
-    });
+        .map(|(i, part)| {
+            let tool_map = tool_map.clone();
+            // Clone raw_request to move it into the async block.
+            let raw_request_clone = raw_request;
+            let part = part.clone();
+            async move {
+                let result = resolve_tool_request(raw_request_clone, &part, &tool_map).await;
+                (i, result)
+            }
+        });
 
     let results = futures_util::future::join_all(futures).await;
 
     for (index, result) in results {
         match result {
             Ok(resolved) => {
-                println!("[DEBUG] Successfully resolved tool at index {}.", index);
                 if let Some(preamble) = resolved.preamble {
                     if transfer_preamble.is_some() {
                         return Err(Error::new_internal(
@@ -213,27 +192,21 @@ pub async fn resolve_tool_requests<O: 'static>(
                     transfer_preamble = Some(preamble);
                 }
                 if let Some(response) = resolved.response {
-                    println!("[DEBUG] Tool response part: {:?}", response.tool_response);
                     let original_part = &revised_model_message.content[index].clone();
                     revised_model_message.content[index] =
                         to_pending_output(original_part, &response);
                     response_parts.push(response);
                 }
                 if let Some(interrupt) = resolved.interrupt {
-                    println!("[DEBUG] Tool at index {} caused an interrupt.", index);
                     revised_model_message.content[index] = interrupt;
                     has_interrupts = true;
                 }
             }
-            Err(e) => {
-                println!("[DEBUG] Error resolving tool at index {}: {:?}", index, e);
-                return Err(e);
-            }
+            Err(e) => return Err(e),
         }
     }
 
     if has_interrupts {
-        println!("[DEBUG] Exiting resolve_tool_requests with interrupts.");
         Ok(ResolvedToolRequests {
             revised_model_message: Some(revised_model_message),
             tool_message: None,
@@ -249,11 +222,6 @@ pub async fn resolve_tool_requests<O: 'static>(
         } else {
             None
         };
-
-        println!("[DEBUG] Exiting resolve_tool_requests. Returning revised model message and tool message.");
-        println!("[DEBUG] Revised model message: {:?}", revised_model_message);
-        println!("[DEBUG] Tool message: {:?}", tool_message);
-
         Ok(ResolvedToolRequests {
             revised_model_message: Some(revised_model_message),
             tool_message,

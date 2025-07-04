@@ -24,9 +24,11 @@ use genkit_ai::{
     model::{CandidateData, GenerateResponseData},
     GenerateOptions, MessageData, ToolRequest,
 };
+use genkit_core::context::ActionContext;
 use rstest::{fixture, rstest};
 use schemars::JsonSchema;
 use serde_json::json;
+use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
 
 //
@@ -130,4 +132,113 @@ async fn test_tools_call_the_tool() {
         tool_response.output,
         Some(serde_json::to_value("tool called").unwrap())
     );
+}
+
+#[rstest]
+#[tokio::test]
+async fn test_tools_call_the_tool_with_context() {
+    let (genkit, pm_handle) = genkit_with_programmable_model().await;
+    let req_counter = Arc::new(Mutex::new(0));
+
+    // Define a tool that stringifies its context.
+    genkit.define_tool(
+        ToolConfig {
+            name: "testTool".to_string(),
+            description: "description".to_string(),
+            input_schema: Some(TestToolInput {}),
+            output_schema: Some(json!("")), // Output is a string
+            metadata: None,
+        },
+        // The tool handler now uses the context.
+        |_, ctx| async move {
+            // Due to `serde(flatten)`, serializing the whole context object
+            // will produce the desired JSON string.
+            Ok(json!(serde_json::to_string(&ctx.context).unwrap()))
+        },
+    );
+
+    // Set up the programmable model's behavior.
+    {
+        let mut handler = pm_handle.handler.lock().unwrap();
+        *handler = Arc::new(Box::new(move |_, _| {
+            let mut counter = req_counter.lock().unwrap();
+            let response = if *counter == 0 {
+                *counter += 1;
+                let tool_request = Some(ToolRequest {
+                    name: "testTool".to_string(),
+                    input: Some(serde_json::to_value(TestToolInput {}).unwrap()),
+                    ref_id: Some("ref123".to_string()),
+                });
+                GenerateResponseData {
+                    candidates: vec![CandidateData {
+                        message: MessageData {
+                            role: Role::Model,
+                            content: vec![Part {
+                                tool_request,
+                                ..Default::default()
+                            }],
+                            ..Default::default()
+                        },
+                        ..Default::default()
+                    }],
+                    ..Default::default()
+                }
+            } else {
+                GenerateResponseData {
+                    candidates: vec![CandidateData {
+                        message: MessageData {
+                            role: Role::Model,
+                            content: vec![Part::text("done")],
+                            ..Default::default()
+                        },
+                        finish_reason: Some(FinishReason::Stop),
+                        ..Default::default()
+                    }],
+                    ..Default::default()
+                }
+            };
+            Box::pin(async { Ok(response) })
+        }));
+    }
+
+    // Create the context data.
+    let mut context_map = HashMap::new();
+    context_map.insert("something".to_string(), json!("extra"));
+
+    // Call generate with context.
+    let _response: genkit::GenerateResponse = genkit
+        .generate_with_options(GenerateOptions {
+            model: Some(Model::Name("programmableModel".to_string())),
+            prompt: Some(vec![Part::text("call the tool")]),
+            tools: Some(vec![ToolArgument::from("testTool")]),
+            context: Some(ActionContext {
+                auth: None,
+                additional_context: context_map,
+            }),
+            ..Default::default()
+        })
+        .await
+        .unwrap();
+
+    // Assert on the messages sent to the second model call.
+    let last_request = pm_handle.last_request.lock().unwrap();
+    let messages = &last_request.as_ref().unwrap().messages;
+
+    // The TS test asserts on messages[2], which is the tool response.
+    let tool_response_message = &messages[2];
+
+    let expected_tool_message = MessageData {
+        role: Role::Tool,
+        content: vec![Part {
+            tool_response: Some(genkit_ai::ToolResponse {
+                name: "testTool".to_string(),
+                ref_id: Some("ref123".to_string()),
+                output: Some(json!("{\"something\":\"extra\"}")),
+            }),
+            ..Default::default()
+        }],
+        metadata: None,
+    };
+
+    assert_eq!(tool_response_message, &expected_tool_message);
 }
