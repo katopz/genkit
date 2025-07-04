@@ -23,12 +23,12 @@ use genkit::{
 use genkit_ai::{
     dynamic_tool,
     model::{CandidateData, GenerateResponseData},
-    GenerateOptions, MessageData, ToolRequest,
+    GenerateOptions, MessageData, OutputOptions, ToolRequest,
 };
 use genkit_core::context::ActionContext;
 use rstest::{fixture, rstest};
 use schemars::JsonSchema;
-use serde_json::json;
+use serde_json::{json, Value};
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
 
@@ -472,19 +472,125 @@ async fn test_interrupts_the_dynamic_tool_with_no_impl() {
     // Verify that the response contains the expected tool request as an interrupt.
     let interrupts = response.interrupts().unwrap();
     assert_eq!(interrupts.len(), 1);
+    let interrupt = interrupts[0];
 
     let mut metadata = HashMap::new();
     metadata.insert("interrupt".to_string(), json!(true));
 
-    let expected_interrupt = Part {
-        tool_request: Some(ToolRequest {
-            name: "dynamicTestTool".to_string(),
-            input: Some(json!({"foo": "bar"})),
-            ref_id: Some("ref123".to_string()),
-        }),
-        metadata: Some(metadata),
-        ..Default::default()
-    };
+    let expected_tool_request = json!({
+        "name": "dynamicTestTool",
+        "input": {"foo": "bar"},
+        "ref_id": "ref123",
+    });
 
-    // assert_eq!(interrupts[0], &expected_interrupt);
+    // TODO
+    // assert_eq!(
+    //     serde_json::to_value(interrupt.tool_request.as_ref().unwrap()).unwrap(),
+    //     expected_tool_request
+    // );
+    // assert_eq!(interrupt.metadata.as_ref().unwrap(), &metadata);
+}
+
+#[rstest]
+#[tokio::test]
+async fn test_call_the_tool_with_output_schema() {
+    let (genkit, pm_handle) = genkit_with_programmable_model().await;
+    let req_counter = Arc::new(Mutex::new(0));
+
+    // Define a struct that will be used for schema validation.
+    #[derive(Debug, serde::Serialize, serde::Deserialize, JsonSchema, Clone, PartialEq)]
+    struct TestSchema {
+        foo: String,
+    }
+
+    // Define a tool that uses the schema for its input and output.
+    genkit.define_tool(
+        ToolConfig {
+            name: "testTool".to_string(),
+            description: "description".to_string(),
+            input_schema: Some(TestSchema {
+                foo: "".to_string(),
+            }),
+            output_schema: Some(TestSchema {
+                foo: "".to_string(),
+            }),
+            metadata: None,
+        },
+        |_, _| async {
+            Ok(TestSchema {
+                foo: "bar".to_string(),
+            })
+        },
+    );
+
+    // Configure the programmable model's two-step response.
+    {
+        let mut handler = pm_handle.handler.lock().unwrap();
+        *handler = Arc::new(Box::new(move |_, _| {
+            let mut counter = req_counter.lock().unwrap();
+            let response = if *counter == 0 {
+                // On the first call, request to use the tool.
+                *counter += 1;
+                GenerateResponseData {
+                    candidates: vec![CandidateData {
+                        message: MessageData {
+                            role: Role::Model,
+                            content: vec![Part {
+                                tool_request: Some(ToolRequest {
+                                    name: "testTool".to_string(),
+                                    input: Some(json!({"foo": "fromTool"})),
+                                    ref_id: Some("ref123".to_string()),
+                                }),
+                                ..Default::default()
+                            }],
+                            ..Default::default()
+                        },
+                        ..Default::default()
+                    }],
+                    ..Default::default()
+                }
+            } else {
+                // On the second call, return the final text response,
+                // which is a string containing JSON.
+                GenerateResponseData {
+                    candidates: vec![CandidateData {
+                        message: MessageData {
+                            role: Role::Model,
+                            content: vec![Part::text("```json\n{\"foo\": \"fromModel\"}\n```")],
+                            ..Default::default()
+                        },
+                        finish_reason: Some(FinishReason::Stop),
+                        ..Default::default()
+                    }],
+                    ..Default::default()
+                }
+            };
+            Box::pin(async { Ok(response) })
+        }));
+    }
+
+    // Call generate with an output schema specified. This instructs the
+    // framework to parse the model's final text response.
+    let response = genkit
+        .generate_with_options(GenerateOptions {
+            model: Some(Model::Name("programmableModel".to_string())),
+            prompt: Some(vec![Part::text("call the tool")]),
+            tools: Some(vec![ToolArgument::from("testTool")]),
+            output: Some(OutputOptions {
+                schema: Some(serde_json::to_value(schemars::schema_for!(TestSchema)).unwrap()),
+                ..Default::default()
+            }),
+            ..Default::default()
+        })
+        .await
+        .unwrap();
+
+    // Assert that the raw text and the parsed output are both correct.
+    assert_eq!(
+        response.text().unwrap(),
+        "```json\n{\"foo\": \"fromModel\"}\n```"
+    );
+
+    let output_value: Value = response.output().unwrap();
+    assert_eq!(output_value, json!({"foo": "fromModel"}));
 }
