@@ -143,6 +143,17 @@ impl Error {
     }
 }
 
+/// Converts a `serde_json::Error` into a `genkit_core::Error`.
+/// This allows for the use of the `?` operator on `Result`s from `serde_json`.
+impl From<serde_json::Error> for Error {
+    fn from(err: serde_json::Error) -> Self {
+        Error::Internal {
+            message: format!("JSON operation failed: {}", err),
+            source: Some(Box::new(err)),
+        }
+    }
+}
+
 /// Asserts that the required API stability level is met.
 ///
 /// In Rust, this is often better handled with feature flags at compile time.
