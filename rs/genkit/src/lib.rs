@@ -90,8 +90,8 @@ pub use genkit_ai::session::{Session, SessionStore};
 use genkit_ai::tool::ToolFnOptions;
 pub use genkit_ai::GenerateStreamResponse;
 use genkit_ai::{
-    define_background_model, define_model, BaseEvalDataPoint, EmbedRequest, EmbedResponse,
-    EvalResponse, GenerateResponseChunkData, ModelAction,
+    define_background_model, define_model, dynamic_tool, BaseEvalDataPoint, EmbedRequest,
+    EmbedResponse, EvalResponse, GenerateResponseChunkData, ModelAction,
 };
 pub use genkit_core::context::ActionContext;
 pub use genkit_core::registry::Registry;
@@ -105,9 +105,9 @@ use std::sync::Arc;
 
 /// The main entry point for the Genkit framework.
 pub struct Genkit {
-    options: GenkitOptions,
-    registry: Registry,
-    context: Option<ActionContext>,
+    pub options: GenkitOptions,
+    pub registry: Registry,
+    pub context: Option<ActionContext>,
 }
 
 /// Options for Genkit initialization.
@@ -175,7 +175,19 @@ impl Genkit {
         Fut: Future<Output = Result<O>> + Send + 'static,
     {
         let mut registry = self.registry.clone();
-        define_tool(&mut registry, config, runner);
+        define_tool(&mut registry, config, runner)
+    }
+
+    /// Defines a new dynamic tool and registers it with the Genkit registry.
+    pub fn dynamic_tool<I, O, F, Fut>(&self, config: ToolConfig<I, O>, runner: F) -> ToolArgument
+    where
+        I: JsonSchema + Serialize + DeserializeOwned + Send + Sync + Clone + 'static,
+        O: JsonSchema + Serialize + DeserializeOwned + Send + Sync + 'static,
+        F: Fn(I, ToolFnOptions) -> Fut + Send + Sync + Clone + 'static,
+        Fut: Future<Output = Result<O>> + Send + 'static,
+    {
+        let mut registry = self.registry.clone();
+        dynamic_tool(config, runner).attach(&mut registry)
     }
 
     /// Defines and registers a flow function.

@@ -21,6 +21,7 @@ use genkit::{
     Genkit, Model, ToolArgument, ToolConfig,
 };
 use genkit_ai::{
+    dynamic_tool,
     model::{CandidateData, GenerateResponseData},
     GenerateOptions, MessageData, ToolRequest,
 };
@@ -241,4 +242,147 @@ async fn test_tools_call_the_tool_with_context() {
     };
 
     assert_eq!(tool_response_message, &expected_tool_message);
+}
+
+#[derive(Debug, serde::Serialize, serde::Deserialize, JsonSchema, Clone)]
+struct DynamicToolInput {
+    foo: String,
+}
+
+#[rstest]
+#[tokio::test]
+async fn test_calls_the_dynamic_tool() {
+    let (genkit, pm_handle) = genkit_with_programmable_model().await;
+    let req_counter = Arc::new(Mutex::new(0));
+
+    let mut registry = genkit.registry.clone();
+    let dynamic_test_tool_1 = dynamic_tool(
+        ToolConfig {
+            name: "dynamicTestTool1".to_string(),
+            description: "description".to_string(),
+            input_schema: Some(DynamicToolInput {
+                foo: "".to_string(),
+            }),
+            output_schema: Some(json!("")),
+            metadata: None,
+        },
+        |_, _| async { Ok(json!("tool called 1")) },
+    ) // Rust explicit about registry
+    .attach(&mut registry);
+
+    let dynamic_test_tool_2 = genkit.dynamic_tool(
+        ToolConfig {
+            name: "dynamicTestTool2".to_string(),
+            description: "description 2".to_string(),
+            input_schema: Some(DynamicToolInput {
+                foo: "".to_string(),
+            }),
+            output_schema: Some(json!("")),
+            metadata: None,
+        },
+        |_, _| async { Ok(json!("tool called 2")) },
+    );
+
+    {
+        let mut handler = pm_handle.handler.lock().unwrap();
+        *handler = Arc::new(Box::new(move |_, _| {
+            let mut counter = req_counter.lock().unwrap();
+            let response = if *counter == 0 {
+                *counter += 1;
+                GenerateResponseData {
+                    candidates: vec![CandidateData {
+                        message: MessageData {
+                            role: Role::Model,
+                            content: vec![
+                                Part {
+                                    tool_request: Some(ToolRequest {
+                                        name: "dynamicTestTool1".to_string(),
+                                        input: Some(json!({"foo": "bar"})),
+                                        ref_id: Some("ref123".to_string()),
+                                    }),
+                                    ..Default::default()
+                                },
+                                Part {
+                                    tool_request: Some(ToolRequest {
+                                        name: "dynamicTestTool2".to_string(),
+                                        input: Some(json!({"foo": "baz"})),
+                                        ref_id: Some("ref234".to_string()),
+                                    }),
+                                    ..Default::default()
+                                },
+                            ],
+                            ..Default::default()
+                        },
+                        ..Default::default()
+                    }],
+                    ..Default::default()
+                }
+            } else {
+                GenerateResponseData {
+                    candidates: vec![CandidateData {
+                        message: MessageData {
+                            role: Role::Model,
+                            content: vec![Part::text("done")],
+                            ..Default::default()
+                        },
+                        finish_reason: Some(FinishReason::Stop),
+                        ..Default::default()
+                    }],
+                    ..Default::default()
+                }
+            };
+            Box::pin(async { Ok(response) })
+        }));
+    }
+
+    let response: genkit::GenerateResponse = genkit
+        .generate_with_options(GenerateOptions {
+            model: Some(Model::Name("programmableModel".to_string())),
+            prompt: Some(vec![Part::text("call the tool")]),
+            tools: Some(vec![dynamic_test_tool_1, dynamic_test_tool_2]),
+            ..Default::default()
+        })
+        .await
+        .unwrap();
+
+    assert_eq!(response.text().unwrap(), "done");
+
+    let last_request = pm_handle.last_request.lock().unwrap();
+    let messages = &last_request.as_ref().unwrap().messages;
+    assert_eq!(messages.len(), 3);
+
+    let tool_responses = &messages[2].content;
+    assert_eq!(tool_responses.len(), 2);
+
+    // Find and verify the first tool's response.
+    let resp1 = tool_responses
+        .iter()
+        .find(|p| {
+            p.tool_response
+                .as_ref()
+                .is_some_and(|tr| tr.name == "dynamicTestTool1")
+        })
+        .unwrap()
+        .tool_response
+        .as_ref()
+        .unwrap();
+
+    assert_eq!(resp1.ref_id, Some("ref123".to_string()));
+    assert_eq!(resp1.output, Some(json!("tool called 1")));
+
+    // Find and verify the second tool's response.
+    let resp2 = tool_responses
+        .iter()
+        .find(|p| {
+            p.tool_response
+                .as_ref()
+                .is_some_and(|tr| tr.name == "dynamicTestTool2")
+        })
+        .unwrap()
+        .tool_response
+        .as_ref()
+        .unwrap();
+
+    assert_eq!(resp2.ref_id, Some("ref234".to_string()));
+    assert_eq!(resp2.output, Some(json!("tool called 2")));
 }

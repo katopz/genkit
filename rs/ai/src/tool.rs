@@ -314,34 +314,64 @@ where
     });
 }
 
-/// Defines a dynamic tool that is not registered with the framework globally.
-pub fn dynamic_tool<I, O, F, Fut>(config: ToolConfig<I, O>, runner: F) -> ToolArgument
+/// Represents a tool definition that is not yet registered with the framework.
+pub struct DynamicTool<I, O, F, Fut>
 where
     I: JsonSchema + Serialize + DeserializeOwned + Send + Sync + Clone + 'static,
     O: JsonSchema + Serialize + DeserializeOwned + Send + Sync + 'static,
     F: Fn(I, ToolFnOptions) -> Fut + Send + Sync + Clone + 'static,
     Fut: Future<Output = Result<O>> + Send + 'static,
 {
-    let runner_arc = Arc::new(runner);
-    let action = detached_action(
-        ActionType::Tool,
-        config.name.clone(),
-        move |input, args: ActionFnArg<()>| {
-            let runner_clone = runner_arc.clone();
-            let options = ToolFnOptions {
-                interrupt: Box::new(|metadata| {
-                    Error::new_internal(format!(
-                        "INTERRUPT::{}",
-                        serde_json::to_string(&metadata.unwrap_or(Value::Null)).unwrap()
-                    ))
-                }),
-                context: args.context.unwrap_or_default(),
-            };
-            async move { runner_clone(input, options).await }
-        },
-    );
+    config: ToolConfig<I, O>,
+    runner: F,
+}
 
-    ToolArgument::from(ToolAction(action))
+impl<I, O, F, Fut> DynamicTool<I, O, F, Fut>
+where
+    I: JsonSchema + Serialize + DeserializeOwned + Send + Sync + Clone + 'static,
+    O: JsonSchema + Serialize + DeserializeOwned + Send + Sync + 'static,
+    F: Fn(I, ToolFnOptions) -> Fut + Send + Sync + Clone + 'static,
+    Fut: Future<Output = Result<O>> + Send + 'static,
+{
+    /// Attaches the dynamic tool to a registry, making it an executable action.
+    pub fn attach(self, registry: &mut Registry) -> ToolArgument {
+        let runner_arc = Arc::new(self.runner);
+        let action = detached_action(
+            ActionType::Tool,
+            self.config.name.clone(),
+            move |input, args: ActionFnArg<()>| {
+                let runner_clone = runner_arc.clone();
+                let options = ToolFnOptions {
+                    interrupt: Box::new(|metadata| {
+                        Error::new_internal(format!(
+                            "INTERRUPT::{}",
+                            serde_json::to_string(&metadata.unwrap_or(serde_json::Value::Null))
+                                .unwrap()
+                        ))
+                    }),
+                    context: args.context.unwrap_or_default(),
+                };
+                async move { runner_clone(input, options).await }
+            },
+        );
+
+        registry
+            .register_action(&self.config.name, action.clone())
+            .unwrap();
+
+        ToolArgument::from(ToolAction(action))
+    }
+}
+
+/// Defines a dynamic tool that is not registered with the framework globally.
+pub fn dynamic_tool<I, O, F, Fut>(config: ToolConfig<I, O>, runner: F) -> DynamicTool<I, O, F, Fut>
+where
+    I: JsonSchema + Serialize + DeserializeOwned + Send + Sync + Clone + 'static,
+    O: JsonSchema + Serialize + DeserializeOwned + Send + Sync + 'static,
+    F: Fn(I, ToolFnOptions) -> Fut + Send + Sync + Clone + 'static,
+    Fut: Future<Output = Result<O>> + Send + 'static,
+{
+    DynamicTool { config, runner }
 }
 
 /// Resolves a slice of `ToolArgument`s into a `Vec` of `ToolAction`s.
