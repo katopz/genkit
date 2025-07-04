@@ -62,7 +62,6 @@ pub struct ResolveResumeOptionResult<O: 'static> {
 }
 
 /// Converts a slice of `ErasedAction` trait objects into a map of short names to actions.
-/// This is the primary change: we now work with the generic trait object, not the concrete type.
 pub fn to_tool_map(
     tools: &[Arc<dyn ErasedAction>],
 ) -> Result<HashMap<String, Arc<dyn ErasedAction>>> {
@@ -70,19 +69,18 @@ pub fn to_tool_map(
     let mut map = HashMap::new();
     for tool in tools {
         let name = tool.name();
-        let short_name = name.split('/').next_back().unwrap_or(name).to_string();
+        let short_name = name.split('/').last().unwrap_or(name).to_string();
         map.insert(short_name, tool.clone());
     }
     Ok(map)
 }
 
 /// Ensures that no two tools in a given slice have the same short name.
-/// This now accepts a slice of trait objects.
 pub fn assert_valid_tool_names(tools: &[Arc<dyn ErasedAction>]) -> Result<()> {
     let mut names = HashMap::new();
     for tool in tools {
         let name = tool.name();
-        let short_name = name.split('/').next_back().unwrap_or(name);
+        let short_name = name.split('/').last().unwrap_or(name);
         if let Some(existing_name) = names.insert(short_name.to_string(), name.to_string()) {
             return Err(Error::new_internal(format!(
                 "Cannot provide two tools with the same short name ('{}'): '{}' and '{}'",
@@ -107,7 +105,6 @@ pub fn to_pending_output(part: &Part, response: &Part) -> Part {
 }
 
 /// Resolves a single tool request by executing it.
-/// This now accepts a map of trait objects.
 pub async fn resolve_tool_request<O: 'static>(
     _raw_request: &GenerateOptions<O>,
     part: &Part,
@@ -118,8 +115,14 @@ pub async fn resolve_tool_request<O: 'static>(
         .as_ref()
         .ok_or_else(|| Error::new_internal("resolve_tool_request called on a non-tool part"))?;
 
+    // FIX: Look up using the short name, which is how the map is keyed.
+    let short_name = tool_request
+        .name
+        .split('/')
+        .last()
+        .unwrap_or(&tool_request.name);
     let tool = tool_map
-        .get(&tool_request.name)
+        .get(short_name)
         .ok_or_else(|| Error::new_internal(format!("Tool '{}' not found", &tool_request.name)))?;
 
     // TODO: Implement is_prompt_action and preamble logic.
@@ -128,7 +131,6 @@ pub async fn resolve_tool_request<O: 'static>(
     let request_value = serde_json::to_value(tool_request.input.clone().unwrap_or(Value::Null))
         .map_err(|e| Error::new_internal(format!("Failed to serialize request: {}", e)))?;
 
-    // We can call `run_http` directly on the trait object.
     let response = tool.run_http_json(request_value, None).await?;
     let output = response;
 
@@ -152,9 +154,17 @@ pub async fn resolve_tool_requests<O: 'static>(
     raw_request: &GenerateOptions<O>,
     generated_message: &MessageData,
 ) -> Result<ResolvedToolRequests<O>> {
-    let resolved_tools = tool::resolve_tools(registry, raw_request.tools.as_deref()).await?;
+    println!(
+        "[DEBUG] Entering resolve_tool_requests with message: {:?}",
+        generated_message
+    );
 
-    // The problematic downcast is now removed. We pass the trait objects directly.
+    let resolved_tools = tool::resolve_tools(registry, raw_request.tools.as_deref()).await?;
+    println!(
+        "[DEBUG] Resolved {} tools from request.",
+        resolved_tools.len()
+    );
+
     let tool_map = to_tool_map(&resolved_tools)?;
 
     let mut response_parts: Vec<Part> = Vec::new();
@@ -163,25 +173,37 @@ pub async fn resolve_tool_requests<O: 'static>(
 
     let mut revised_model_message = generated_message.clone();
 
-    let futures = revised_model_message
+    let tool_requests_to_process: Vec<(usize, Part)> = revised_model_message
         .content
         .iter()
         .enumerate()
         .filter(|(_, part)| part.tool_request.is_some())
-        .map(|(i, part)| {
-            let tool_map = tool_map.clone();
-            let part = part.clone();
-            async move {
-                let result = resolve_tool_request(raw_request, &part, &tool_map).await;
-                (i, result)
-            }
-        });
+        .map(|(i, p)| (i, p.clone()))
+        .collect();
+
+    println!(
+        "[DEBUG] Found {} tool requests to process.",
+        tool_requests_to_process.len()
+    );
+
+    let futures = tool_requests_to_process.into_iter().map(|(i, part)| {
+        let tool_map = tool_map.clone();
+        async move {
+            println!(
+                "[DEBUG] Resolving tool request part: {:?}",
+                part.tool_request
+            );
+            let result = resolve_tool_request(raw_request, &part, &tool_map).await;
+            (i, result)
+        }
+    });
 
     let results = futures_util::future::join_all(futures).await;
 
     for (index, result) in results {
         match result {
             Ok(resolved) => {
+                println!("[DEBUG] Successfully resolved tool at index {}.", index);
                 if let Some(preamble) = resolved.preamble {
                     if transfer_preamble.is_some() {
                         return Err(Error::new_internal(
@@ -191,21 +213,27 @@ pub async fn resolve_tool_requests<O: 'static>(
                     transfer_preamble = Some(preamble);
                 }
                 if let Some(response) = resolved.response {
+                    println!("[DEBUG] Tool response part: {:?}", response.tool_response);
                     let original_part = &revised_model_message.content[index].clone();
                     revised_model_message.content[index] =
                         to_pending_output(original_part, &response);
                     response_parts.push(response);
                 }
                 if let Some(interrupt) = resolved.interrupt {
+                    println!("[DEBUG] Tool at index {} caused an interrupt.", index);
                     revised_model_message.content[index] = interrupt;
                     has_interrupts = true;
                 }
             }
-            Err(e) => return Err(e),
+            Err(e) => {
+                println!("[DEBUG] Error resolving tool at index {}: {:?}", index, e);
+                return Err(e);
+            }
         }
     }
 
     if has_interrupts {
+        println!("[DEBUG] Exiting resolve_tool_requests with interrupts.");
         Ok(ResolvedToolRequests {
             revised_model_message: Some(revised_model_message),
             tool_message: None,
@@ -221,8 +249,13 @@ pub async fn resolve_tool_requests<O: 'static>(
         } else {
             None
         };
+
+        println!("[DEBUG] Exiting resolve_tool_requests. Returning revised model message and tool message.");
+        println!("[DEBUG] Revised model message: {:?}", revised_model_message);
+        println!("[DEBUG] Tool message: {:?}", tool_message);
+
         Ok(ResolvedToolRequests {
-            revised_model_message: None,
+            revised_model_message: Some(revised_model_message),
             tool_message,
             transfer_preamble,
         })
@@ -335,8 +368,6 @@ pub async fn resolve_resume_option<O: Default + Send + Sync + 'static>(
     };
 
     let resolved_tools = tool::resolve_tools(registry, raw_request.tools.as_deref()).await?;
-
-    // Again, we remove the downcast and work with the trait objects.
     let tool_map = to_tool_map(&resolved_tools)?;
 
     let mut messages = raw_request.messages.clone().unwrap_or_default();
@@ -418,5 +449,3 @@ pub async fn resolve_resume_option<O: Default + Send + Sync + 'static>(
         ..Default::default()
     })
 }
-
-// The `any_downcast` helper module is no longer needed and has been removed.

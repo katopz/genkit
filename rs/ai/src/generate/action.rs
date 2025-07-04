@@ -105,162 +105,13 @@ pub fn define_generate_action(registry: &mut Registry) -> Arc<GenerateAction> {
                     "generate".to_string(),
                     Some(attrs),
                     move |_trace_context| async move {
-                        let mut request = req;
-                        // The action does not support streaming callbacks directly.
-                        let on_chunk = request.on_chunk.take();
-                        let mut current_turn = 0;
-                        let mut message_index = 0;
-
-                        let response_data_result = loop {
-                            let max_turns = request.max_turns.unwrap_or(5);
-                            if current_turn >= max_turns {
-                                break Err(Error::new_internal(format!(
-                                    "Exceeded maximum tool call iterations ({})",
-                                    max_turns
-                                )));
-                            }
-
-                            let resume_result =
-                                super::resolve_tool_requests::resolve_resume_option(
-                                    registry.as_ref(),
-                                    request,
-                                )
-                                .await?;
-                            if let Some(interrupted_response) = resume_result.interrupted_response {
-                                break Ok(interrupted_response);
-                            }
-                            request = resume_result.revised_request.unwrap();
-                            if let Some(tool_msg) = resume_result.tool_message {
-                                if let Some(cb) = &on_chunk {
-                                    let chunk = super::chunk::GenerateResponseChunk::new(
-                                        GenerateResponseChunkData {
-                                            index: message_index,
-                                            content: tool_msg.content,
-                                            ..Default::default()
-                                        },
-                                        super::chunk::GenerateResponseChunkOptions {
-                                            role: Some(Role::Tool),
-                                            ..Default::default()
-                                        },
-                                    );
-                                    cb(chunk)?;
-                                }
-                            }
-
-                            let model_ref = request.model.as_ref().ok_or_else(|| {
-                                Error::new_internal("Model not specified".to_string())
-                            })?;
-                            let model_name = match model_ref {
-                                model::Model::Reference(r) => r.name.clone(),
-                                model::Model::Name(n) => n.clone(),
-                            };
-                            let erased_action = registry
-                                .lookup_action(&format!("/model/{}", model_name))
-                                .await
-                                .ok_or_else(|| {
-                                    Error::new_internal(format!("Model '{}' not found", model_name))
-                                })?;
-                            let model_action = erased_action;
-
-                            if let Some(format) =
-                                formats::resolve_format(&registry, request.output.as_ref()).await
-                            {
-                                let schema_value = request
-                                    .output
-                                    .as_ref()
-                                    .and_then(|opts| opts.schema.as_ref());
-                                let schema: Option<schemars::Schema> = schema_value
-                                    .and_then(|v| serde_json::from_value(v.clone()).ok());
-                                let instructions_option = request
-                                    .output
-                                    .as_ref()
-                                    .and_then(|opts| opts.instructions.as_ref());
-
-                                let instructions = formats::resolve_instructions(
-                                    Some(format.as_ref()),
-                                    schema.as_ref(),
-                                    instructions_option,
-                                );
-                                if instructions.is_some() {
-                                    let messages = request.messages.get_or_insert_with(Vec::new);
-                                    let updated_messages =
-                                        formats::inject_instructions(messages, instructions);
-                                    request.messages = Some(updated_messages);
-                                }
-
-                                if let Some(output_opts) = request.output.as_mut() {
-                                    output_opts.format = Some(format.name.clone());
-                                    output_opts.content_type = format.config.content_type.clone();
-                                    output_opts.constrained = format.config.constrained;
-                                }
-                            }
-
-                            let generate_request = to_generate_request(&registry, &request).await?;
-
-                            let req_value = serde_json::to_value(generate_request).unwrap();
-                            let resp_value = model_action.run_http_json(req_value, None).await?;
-                            let response_data: GenerateResponseData =
-                                serde_json::from_value(resp_value).map_err(|e| {
-                                    Error::new_internal(format!(
-                                        "Failed to deserialize model response: {}",
-                                        e
-                                    ))
-                                })?;
-
-                            let generated_message = match response_data.candidates.first() {
-                                Some(c) => c.message.clone(),
-                                None => {
-                                    break Err(Error::new_internal(
-                                        "Model did not return a candidate".to_string(),
-                                    ))
-                                }
-                            };
-
-                            let tool_requests: Vec<_> = generated_message
-                                .content
-                                .iter()
-                                .filter(|part| part.tool_request.is_some())
-                                .collect();
-
-                            if tool_requests.is_empty()
-                                || request.return_tool_requests == Some(true)
-                            {
-                                break Ok(response_data);
-                            }
-
-                            let tool_results = super::resolve_tool_requests::resolve_tool_requests(
-                                &registry,
-                                &request,
-                                &generated_message,
-                            )
-                            .await?;
-
-                            if let Some(revised_model_message) = tool_results.revised_model_message
-                            {
-                                let mut final_response = response_data;
-                                if let Some(candidate) = final_response.candidates.get_mut(0) {
-                                    candidate.message = revised_model_message;
-                                    candidate.finish_reason =
-                                        Some(model::FinishReason::Interrupted);
-                                    candidate.finish_message = Some(
-                                        "One or more tool calls resulted in interrupts."
-                                            .to_string(),
-                                    );
-                                }
-                                break Ok(final_response);
-                            }
-
-                            let mut messages = request.messages.take().unwrap_or_default();
-                            messages.push(generated_message);
-                            if let Some(tool_message) = tool_results.tool_message {
-                                messages.push(tool_message);
-                            }
-                            request.messages = Some(messages);
-
-                            current_turn += 1;
-                            message_index += 1;
+                        let helper_options = GenerateHelperOptions {
+                            raw_request: req,
+                            middleware: Vec::new(), // Middleware not supported in this path yet.
+                            current_turn: 0,
+                            message_index: 0,
                         };
-                        response_data_result
+                        generate_internal(registry, helper_options).await
                     },
                 )
                 .await?;
@@ -434,7 +285,6 @@ where
         + Clone,
 {
     Box::pin(async move {
-        // Destructuring no longer includes `on_chunk`
         let GenerateHelperOptions {
             raw_request,
             middleware,
@@ -443,7 +293,17 @@ where
         } = options;
         let mut request = raw_request;
 
-        // 1. Resolve model.
+        // 1. Pre-process messages (prompt, system, etc.)
+        if let Some(prompt_parts) = request.prompt.take() {
+            let messages = request.messages.get_or_insert_with(Vec::new);
+            messages.push(crate::message::MessageData {
+                role: crate::message::Role::User,
+                content: prompt_parts,
+                ..Default::default()
+            });
+        }
+
+        // 2. Resolve model.
         let model_ref = request
             .model
             .as_ref()
@@ -458,7 +318,7 @@ where
             .ok_or_else(|| Error::new_internal(format!("Model '{}' not found", model_name)))?;
         let model_action = erased_action;
 
-        // 2. Resolve and apply format.
+        // 3. Resolve and apply format.
         if let Some(format) = formats::resolve_format(&registry, request.output.as_ref()).await {
             let schema_value = request
                 .output
@@ -489,7 +349,7 @@ where
             }
         }
 
-        // 3. Handle tool loop recursion check.
+        // 4. Handle tool loop recursion check.
         let max_turns = request.max_turns.unwrap_or(5);
         if current_turn >= max_turns {
             return Err(Error::new_internal(format!(
@@ -498,7 +358,7 @@ where
             )));
         }
 
-        // 4. Apply resume logic BEFORE the main model call.
+        // 5. Apply resume logic BEFORE the main model call.
         let resume_result =
             super::resolve_tool_requests::resolve_resume_option(registry.as_ref(), request).await?;
         if let Some(interrupted_response) = resume_result.interrupted_response {
@@ -506,7 +366,6 @@ where
         }
         let mut request = resume_result.revised_request.unwrap();
 
-        // This block now gets the callback from the context.
         if let Some(tool_msg) = resume_result.tool_message {
             if let Some(cb) = get_streaming_callback() {
                 let chunk_data = GenerateResponseChunkData {
@@ -520,10 +379,10 @@ where
             }
         }
 
-        // 5. Convert to GenerateRequest (the type the model action expects).
+        // 6. Convert to GenerateRequest (the type the model action expects).
         let generate_request = to_generate_request(&registry, &request).await?;
 
-        // 6. Call the model action (no longer passing the callback).
+        // 7. Call the model action.
         let response_data =
             run_model_via_middleware(model_action, generate_request, middleware.clone()).await?;
 
@@ -546,7 +405,7 @@ where
             return Ok(response_data);
         }
 
-        // 7. Handle tool requests returned from model
+        // 8. Handle tool requests returned from model
         let tool_results = super::resolve_tool_requests::resolve_tool_requests(
             &registry,
             &request,
@@ -554,10 +413,19 @@ where
         )
         .await?;
 
-        if let Some(revised_model_message) = tool_results.revised_model_message {
+        // 9. Check for interrupts and return early if found.
+        if let Some(revised_with_interrupt) =
+            tool_results.revised_model_message.as_ref().filter(|m| {
+                m.content.iter().any(|p| {
+                    p.metadata
+                        .as_ref()
+                        .is_some_and(|meta| meta.contains_key("interrupt"))
+                })
+            })
+        {
             let mut final_response = response_data;
             if let Some(candidate) = final_response.candidates.get_mut(0) {
-                candidate.message = revised_model_message;
+                candidate.message = revised_with_interrupt.clone();
                 candidate.finish_reason = Some(model::FinishReason::Interrupted);
                 candidate.finish_message =
                     Some("One or more tool calls resulted in interrupts.".to_string());
@@ -565,14 +433,25 @@ where
             return Ok(final_response);
         }
 
+        // 10. If no interrupts, update the message history for the next turn.
         let mut messages = request.messages.take().unwrap_or_default();
-        messages.push(generated_message);
-        if let Some(tool_message) = tool_results.tool_message {
-            messages.push(tool_message);
+
+        // Push the model's message (now revised with tool call metadata).
+        // `resolve_tool_requests` guarantees this is Some if there are no interrupts.
+        if let Some(revised_msg) = tool_results.revised_model_message {
+            messages.push(revised_msg);
+        } else {
+            // This is a fallback, but it's better to be explicit.
+            messages.push(generated_message);
+        }
+
+        // Push the tool's response message.
+        if let Some(tool_msg) = tool_results.tool_message {
+            messages.push(tool_msg);
         }
         request.messages = Some(messages);
 
-        // 8. Recursive call (no longer passing the callback).
+        // 11. Recursive call for the next turn.
         generate_internal(
             registry,
             GenerateHelperOptions {
