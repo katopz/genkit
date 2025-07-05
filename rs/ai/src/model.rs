@@ -171,7 +171,7 @@ pub enum FinishReason {
 }
 
 /// Usage information for a generation request.
-#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, Default)]
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, Default, PartialEq)]
 #[serde(rename_all = "camelCase")]
 pub struct GenerationUsage {
     /// The number of tokens in the input.
@@ -217,7 +217,7 @@ pub struct GenerateResponseData {
 }
 
 /// A chunk of a streaming response from a generative model.
-#[derive(Default, Debug, Clone, Serialize, Deserialize, JsonSchema)]
+#[derive(Default, Debug, Clone, Serialize, Deserialize, JsonSchema, PartialEq)]
 #[serde(rename_all = "camelCase")]
 pub struct GenerateResponseChunkData {
     pub index: u32,
