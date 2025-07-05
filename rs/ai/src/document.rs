@@ -53,7 +53,7 @@ pub struct ToolRequest {
 }
 
 /// Represents the output of a tool, to be sent back to the model.
-#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, PartialEq)]
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, PartialEq, Default)]
 #[serde(rename_all = "camelCase")]
 pub struct ToolResponse {
     /// The identifier of the `ToolRequest` this is a response to.
