@@ -33,6 +33,12 @@ use serde_json::{json, Value};
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
 
+// Define a struct that will be used for schema validation.
+#[derive(Debug, serde::Serialize, serde::Deserialize, JsonSchema, Clone, PartialEq)]
+struct TestSchema {
+    foo: String,
+}
+
 //
 // Tools Tests
 //
@@ -56,10 +62,10 @@ async fn test_tools_call_the_tool() {
             name: "testTool".to_string(),
             description: "description".to_string(),
             input_schema: Some(TestToolInput {}),
-            output_schema: Some(json!("tool called")),
+            output_schema: Some(String::new()),
             metadata: None,
         },
-        |_, _| async { Ok(json!("tool called")) },
+        |_, _| async { Ok("tool called".to_string()) },
     );
 
     {
@@ -263,10 +269,10 @@ async fn test_calls_the_dynamic_tool() {
             input_schema: Some(DynamicToolInput {
                 foo: "".to_string(),
             }),
-            output_schema: Some(json!("")),
+            output_schema: Some(String::new()),
             metadata: None,
         },
-        |_, _| async { Ok(json!("tool called 1")) },
+        |_, _| async { Ok("tool called 1".to_string()) },
     );
 
     let dynamic_test_tool_2 = genkit.dynamic_tool(
@@ -276,10 +282,10 @@ async fn test_calls_the_dynamic_tool() {
             input_schema: Some(DynamicToolInput {
                 foo: "".to_string(),
             }),
-            output_schema: Some(json!("")),
+            output_schema: Some(String::new()),
             metadata: None,
         },
-        |_, _| async { Ok(json!("tool called 2")) },
+        |_, _| async { Ok("tool called 2".to_string()) },
     );
 
     {
@@ -487,12 +493,6 @@ async fn test_interrupts_the_dynamic_tool_with_no_impl() {
 async fn test_call_the_tool_with_output_schema() {
     let (genkit, pm_handle) = genkit_with_programmable_model().await;
     let req_counter = Arc::new(Mutex::new(0));
-
-    // Define a struct that will be used for schema validation.
-    #[derive(Debug, serde::Serialize, serde::Deserialize, JsonSchema, Clone, PartialEq)]
-    struct TestSchema {
-        foo: String,
-    }
 
     // Define a tool that uses the schema for its input and output.
     genkit.define_tool(
@@ -707,4 +707,63 @@ async fn test_should_propagate_context_to_the_tool() {
     // Assert that the final text response is the stringified JSON from the tool,
     // which correctly incorporated the email from the context.
     assert_eq!(response.text().unwrap(), r#"{"foo":"bar a@b.c"}"#);
+}
+
+#[rstest]
+#[tokio::test]
+#[should_panic(expected = "Exceeded maximum tool call iterations (17)")]
+async fn test_throws_when_exceeding_max_tool_call_iterations() {
+    let (genkit, pm_handle) = genkit_with_programmable_model().await;
+
+    // Define a simple tool.
+    genkit.define_tool(
+        ToolConfig {
+            name: "testTool".to_string(),
+            input_schema: Some(json!({})),
+            output_schema: Some(String::new()),
+            ..Default::default()
+        },
+        |_, _| async { Ok("tool called".to_string()) },
+    );
+
+    // Configure the programmable model to always request the same tool,
+    // creating an infinite loop.
+    {
+        let mut handler = pm_handle.handler.lock().unwrap();
+        *handler = Arc::new(Box::new(move |_, _| {
+            let response = GenerateResponseData {
+                candidates: vec![CandidateData {
+                    message: MessageData {
+                        role: Role::Model,
+                        content: vec![Part {
+                            tool_request: Some(ToolRequest {
+                                name: "testTool".to_string(),
+                                input: Some(json!({})),
+                                ref_id: Some("ref123".to_string()),
+                            }),
+                            ..Default::default()
+                        }],
+                        ..Default::default()
+                    },
+                    ..Default::default()
+                }],
+                ..Default::default()
+            };
+            Box::pin(async { Ok(response) })
+        }));
+    }
+
+    // Call generate with a specific limit on tool-calling turns.
+    // This call is expected to fail and panic, which is caught and
+    // verified by the `#[should_panic]` attribute on the test.
+    let _response: genkit::GenerateResponse = genkit
+        .generate_with_options(GenerateOptions {
+            prompt: Some(vec![Part::text("call the tool")]),
+            tools: Some(vec![ToolArgument::from("testTool")]),
+            model: Some(Model::Name("programmableModel".to_string())),
+            max_turns: Some(17),
+            ..Default::default()
+        })
+        .await
+        .unwrap();
 }
