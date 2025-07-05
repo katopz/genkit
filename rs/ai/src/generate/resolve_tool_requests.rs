@@ -18,8 +18,8 @@
 //! executing the corresponding tools, and handling interrupts. It is the Rust
 // equivalent of `generate/resolve-tool-requests.ts`.
 
-use crate::document::{Part, ToolRequest, ToolRequestPart, ToolResponse};
-use crate::generate::{GenerateOptions, ResumeOptions};
+use crate::document::{Part, ToolRequestPart, ToolResponse, ToolResponsePart};
+use crate::generate::GenerateOptions;
 use crate::message::{MessageData, Role};
 use crate::model::GenerateResponseData;
 use crate::tool::{self, is_tool_request};
@@ -31,27 +31,18 @@ use std::collections::HashMap;
 use std::sync::Arc;
 
 /// The result of resolving a single tool request.
-pub struct ResolvedToolRequest<O: 'static> {
-    pub response: Option<Part>,
-    pub interrupt: Option<Part>,
-    pub preamble: Option<GenerateOptions<O>>,
-}
-
-impl<O: 'static> Default for ResolvedToolRequest<O> {
-    fn default() -> Self {
-        Self {
-            response: None,
-            interrupt: None,
-            preamble: None,
-        }
-    }
+/// In TS, this could also contain a `preamble`, which is GenerateOptions for a prompt tool.
+/// This is not supported in the Rust implementation yet.
+#[derive(Default)]
+pub struct ResolvedToolRequest {
+    pub response: Option<ToolResponsePart>,
+    pub interrupt: Option<ToolRequestPart>,
 }
 
 /// The result of resolving all tool requests in a message.
-pub struct ResolvedToolRequests<O: 'static> {
+pub struct ResolvedToolRequests {
     pub revised_model_message: Option<MessageData>,
     pub tool_message: Option<MessageData>,
-    pub transfer_preamble: Option<GenerateOptions<O>>,
 }
 
 /// The result of applying `ResumeOptions` to a generation request.
@@ -63,7 +54,6 @@ pub struct ResolveResumeOptionResult<O: 'static> {
 }
 
 /// Converts a slice of `ErasedAction` trait objects into a map of short names to actions.
-/// This is the primary change: we now work with the generic trait object, not the concrete type.
 pub fn to_tool_map(
     tools: &[Arc<dyn ErasedAction>],
 ) -> Result<HashMap<String, Arc<dyn ErasedAction>>> {
@@ -78,7 +68,6 @@ pub fn to_tool_map(
 }
 
 /// Ensures that no two tools in a given slice have the same short name.
-/// This now accepts a slice of trait objects.
 pub fn assert_valid_tool_names(tools: &[Arc<dyn ErasedAction>]) -> Result<()> {
     let mut names = HashMap::new();
     for tool in tools {
@@ -95,7 +84,7 @@ pub fn assert_valid_tool_names(tools: &[Arc<dyn ErasedAction>]) -> Result<()> {
 }
 
 /// Creates a `ToolRequestPart` that has its output pending in the metadata.
-pub fn to_pending_output(part: &Part, response: &Part) -> Part {
+pub fn to_pending_output(part: &ToolRequestPart, response: &ToolResponsePart) -> ToolRequestPart {
     let mut new_part = part.clone();
     if let Some(tool_response) = &response.tool_response {
         let metadata = new_part.metadata.get_or_insert_with(HashMap::new);
@@ -108,12 +97,11 @@ pub fn to_pending_output(part: &Part, response: &Part) -> Part {
 }
 
 /// Resolves a single tool request by executing it.
-/// This now accepts a map of trait objects.
-pub async fn resolve_tool_request<O: 'static>(
+pub async fn resolve_tool_request<O: Default + Send + Sync + 'static>(
     raw_request: &GenerateOptions<O>,
-    part: &Part,
+    part: &ToolRequestPart,
     tool_map: &HashMap<String, Arc<dyn ErasedAction>>,
-) -> Result<ResolvedToolRequest<O>> {
+) -> Result<ResolvedToolRequest> {
     let tool_request = part
         .tool_request
         .as_ref()
@@ -123,33 +111,29 @@ pub async fn resolve_tool_request<O: 'static>(
         .get(&tool_request.name)
         .ok_or_else(|| Error::new_internal(format!("Tool '{}' not found", &tool_request.name)))?;
 
+    // TODO: In TS, this checks `isPromptAction` and can return a `preamble`.
+    // The Rust architecture doesn't support this dynamic check and return type easily.
+    // This is a known deviation.
+
     let request_value = serde_json::to_value(tool_request.input.clone().unwrap_or(Value::Null))
         .map_err(|e| Error::new_internal(format!("Failed to serialize request: {}", e)))?;
 
     let context_override = part
         .metadata
         .as_ref()
-        .and_then(|m| m.get("restartContext"))
-        .and_then(|v| {
-            if let Value::Object(map) = v {
-                Some(ActionContext {
-                    additional_context: map.clone().into_iter().collect(),
-                    ..Default::default()
-                })
-            } else {
-                None
-            }
-        });
+        .and_then(|m| m.get("resumed"))
+        .and_then(|v| serde_json::from_value::<ActionContext>(v.clone()).ok());
+
     let response_result = tool
         .run_http_json(
             request_value,
-            context_override.or(raw_request.context.clone()),
+            context_override.or_else(|| raw_request.context.clone()),
         )
         .await;
 
     match response_result {
         Ok(response) => {
-            let output = response;
+            let output = response.get("result").cloned().unwrap_or(Value::Null);
 
             let response_part = Part {
                 tool_response: Some(ToolResponse {
@@ -171,7 +155,13 @@ pub async fn resolve_tool_request<O: 'static>(
                     let metadata = interrupted_part
                         .metadata
                         .get_or_insert_with(Default::default);
-                    metadata.insert("interrupt".to_string(), serde_json::Value::Bool(true));
+
+                    let interrupt_metadata_str =
+                        message.strip_prefix("INTERRUPT::").unwrap_or("true");
+                    let interrupt_metadata =
+                        serde_json::from_str(interrupt_metadata_str).unwrap_or(Value::Bool(true));
+
+                    metadata.insert("interrupt".to_string(), interrupt_metadata);
 
                     return Ok(ResolvedToolRequest {
                         interrupt: Some(interrupted_part),
@@ -185,54 +175,57 @@ pub async fn resolve_tool_request<O: 'static>(
 }
 
 /// Resolves all tool requests within a model-generated message.
-pub async fn resolve_tool_requests<O: 'static>(
+pub async fn resolve_tool_requests<O: Default + Send + Sync + 'static>(
     registry: &Registry,
     raw_request: &GenerateOptions<O>,
     generated_message: &MessageData,
-) -> Result<ResolvedToolRequests<O>> {
+) -> Result<ResolvedToolRequests> {
     let resolved_tools = tool::resolve_tools(registry, raw_request.tools.as_deref()).await?;
-
-    // The problematic downcast is now removed. We pass the trait objects directly.
     let tool_map = to_tool_map(&resolved_tools)?;
 
-    let mut response_parts: Vec<Part> = Vec::new();
+    let mut response_parts: Vec<ToolResponsePart> = Vec::new();
     let mut has_interrupts = false;
-    let mut transfer_preamble: Option<GenerateOptions<O>> = None;
-
     let mut revised_model_message = generated_message.clone();
 
-    let futures = revised_model_message
+    let tool_request_indices: Vec<(usize, ToolRequestPart)> = revised_model_message
         .content
         .iter()
         .enumerate()
-        .filter(|(_, part)| part.tool_request.is_some())
-        .map(|(i, part)| {
-            let tool_map = tool_map.clone();
-            let part = part.clone();
-            async move {
-                let result = resolve_tool_request(raw_request, &part, &tool_map).await;
-                (i, result)
+        .filter_map(|(i, part)| {
+            if part.tool_request.is_some() {
+                Some((i, part.clone()))
+            } else {
+                None
             }
-        });
+        })
+        .collect();
+
+    let futures = tool_request_indices.iter().map(|(i, part)| {
+        let tool_map_clone = tool_map.clone();
+        let raw_request_clone = raw_request;
+        async move {
+            (
+                *i,
+                resolve_tool_request(raw_request_clone, part, &tool_map_clone).await,
+            )
+        }
+    });
 
     let results = futures_util::future::join_all(futures).await;
 
     for (index, result) in results {
         match result {
             Ok(resolved) => {
-                if let Some(preamble) = resolved.preamble {
-                    if transfer_preamble.is_some() {
-                        return Err(Error::new_internal(
-                            "Model attempted to transfer to multiple prompt tools.".to_string(),
-                        ));
-                    }
-                    transfer_preamble = Some(preamble);
-                }
                 if let Some(response) = resolved.response {
-                    let original_part = &revised_model_message.content[index].clone();
-                    revised_model_message.content[index] =
-                        to_pending_output(original_part, &response);
-                    response_parts.push(response);
+                    response_parts.push(response.clone());
+                    revised_model_message.content[index] = to_pending_output(
+                        &tool_request_indices
+                            .iter()
+                            .find(|(i, _)| *i == index)
+                            .unwrap()
+                            .1,
+                        &response,
+                    );
                 }
                 if let Some(interrupt) = resolved.interrupt {
                     revised_model_message.content[index] = interrupt;
@@ -244,124 +237,151 @@ pub async fn resolve_tool_requests<O: 'static>(
     }
 
     if has_interrupts {
-        Ok(ResolvedToolRequests {
+        return Ok(ResolvedToolRequests {
             revised_model_message: Some(revised_model_message),
             tool_message: None,
-            transfer_preamble,
-        })
-    } else {
-        let tool_message = if !response_parts.is_empty() {
-            Some(MessageData {
-                role: Role::Tool,
-                content: response_parts,
-                metadata: None,
-            })
-        } else {
-            None
-        };
-        Ok(ResolvedToolRequests {
-            revised_model_message: Some(revised_model_message),
-            tool_message,
-            transfer_preamble,
-        })
+        });
     }
-}
 
-// Helper to find a matching ToolRequestPart in a slice of parts.
-fn find_corresponding_tool_request<'a>(
-    parts: &'a [ToolRequestPart],
-    part: &ToolRequest,
-) -> Option<&'a ToolRequestPart> {
-    parts.iter().find(|p| {
-        p.tool_request
-            .as_ref()
-            .is_some_and(|tr| tr.name == part.name && tr.ref_id == part.ref_id)
+    Ok(ResolvedToolRequests {
+        revised_model_message: Some(revised_model_message),
+        tool_message: Some(MessageData {
+            role: Role::Tool,
+            content: response_parts,
+            ..Default::default()
+        }),
     })
 }
 
-// Helper to find a matching ToolResponsePart in a slice of parts.
-fn find_corresponding_tool_response<'a>(parts: &'a [Part], part: &ToolRequest) -> Option<&'a Part> {
+fn find_corresponding_tool_request<'a>(
+    parts: &'a [ToolRequestPart],
+    part: &ToolRequestPart,
+) -> Option<&'a ToolRequestPart> {
+    let name = &part.tool_request.as_ref()?.name;
+    let ref_id = &part.tool_request.as_ref()?.ref_id;
+    parts.iter().find(|p| {
+        p.tool_request
+            .as_ref()
+            .is_some_and(|tr| &tr.name == name && &tr.ref_id == ref_id)
+    })
+}
+
+fn find_corresponding_tool_response<'a>(
+    parts: &'a [ToolResponsePart],
+    part: &ToolRequestPart,
+) -> Option<&'a ToolResponsePart> {
+    let name = &part.tool_request.as_ref()?.name;
+    let ref_id = &part.tool_request.as_ref()?.ref_id;
     parts.iter().find(|p| {
         p.tool_response
             .as_ref()
-            .is_some_and(|tr| tr.name == part.name && tr.ref_id == part.ref_id)
+            .is_some_and(|tr| &tr.name == name && &tr.ref_id == ref_id)
     })
 }
 
 struct ResumedToolRequestResult {
     tool_request: ToolRequestPart,
-    tool_response: Part,
+    tool_response: ToolResponsePart,
 }
 
-// Helper to resolve a single tool request that was interrupted.
-async fn resolve_resumed_tool_request<O: 'static>(
+async fn resolve_resumed_tool_request<O: Default + Send + Sync + 'static>(
     raw_request: &GenerateOptions<O>,
-    resume_opts: &ResumeOptions,
-    part: ToolRequestPart,
+    part: &ToolRequestPart,
     tool_map: &HashMap<String, Arc<dyn ErasedAction>>,
 ) -> Result<ResumedToolRequestResult> {
-    let tool_request = part.tool_request.as_ref().unwrap(); // Safe due to checks before calling
+    if let Some(pending_output) = part.metadata.as_ref().and_then(|m| m.get("pendingOutput")) {
+        let mut metadata = part.metadata.clone().unwrap_or_default();
+        metadata.remove("pendingOutput");
 
-    // Handle provided responses.
-    if let Some(provided_responses) = &resume_opts.respond {
-        if let Some(provided_response) =
-            find_corresponding_tool_response(provided_responses, tool_request)
-        {
+        let tool_response = Part {
+            tool_response: Some(ToolResponse {
+                name: part.tool_request.as_ref().unwrap().name.clone(),
+                ref_id: part.tool_request.as_ref().unwrap().ref_id.clone(),
+                output: Some(pending_output.clone()),
+            }),
+            metadata: Some(
+                [("source".to_string(), Value::String("pending".to_string()))]
+                    .iter()
+                    .cloned()
+                    .collect(),
+            ),
+            ..Default::default()
+        };
+        let tool_request = Part {
+            metadata: Some(metadata),
+            ..part.clone()
+        };
+        return Ok(ResumedToolRequestResult {
+            tool_request,
+            tool_response,
+        });
+    }
+
+    if let Some(provided_response) = raw_request
+        .resume
+        .as_ref()
+        .and_then(|r| r.respond.as_ref())
+        .and_then(|responses| find_corresponding_tool_response(responses, part))
+    {
+        let mut metadata = part.metadata.clone().unwrap_or_default();
+        if let Some(interrupt_meta) = metadata.remove("interrupt") {
+            metadata.insert("resolvedInterrupt".to_string(), interrupt_meta);
+        }
+        return Ok(ResumedToolRequestResult {
+            tool_response: provided_response.clone(),
+            tool_request: Part {
+                metadata: Some(metadata),
+                ..part.clone()
+            },
+        });
+    }
+
+    if let Some(restart_request) = raw_request
+        .resume
+        .as_ref()
+        .and_then(|r| r.restart.as_ref())
+        .and_then(|restarts| find_corresponding_tool_request(restarts, part))
+    {
+        let resolved = resolve_tool_request(raw_request, restart_request, tool_map).await?;
+        if resolved.interrupt.is_some() {
+            return Err(Error::new_internal(
+                "A restarted tool triggered an interrupt, which is not allowed.",
+            ));
+        }
+        if let Some(response) = resolved.response {
             let mut metadata = part.metadata.clone().unwrap_or_default();
             if let Some(interrupt_meta) = metadata.remove("interrupt") {
                 metadata.insert("resolvedInterrupt".to_string(), interrupt_meta);
             }
             return Ok(ResumedToolRequestResult {
+                tool_response: response,
                 tool_request: Part {
                     metadata: Some(metadata),
-                    ..part
+                    ..part.clone()
                 },
-                tool_response: provided_response.clone(),
             });
         }
     }
 
-    // Handle restarts.
-    if let Some(restart_requests) = &resume_opts.restart {
-        if let Some(restart_request) =
-            find_corresponding_tool_request(restart_requests, tool_request)
-        {
-            let resolved = resolve_tool_request(raw_request, restart_request, tool_map).await?;
-            if resolved.interrupt.is_some() {
-                // A restarted tool cannot immediately interrupt again.
-                return Err(Error::new_internal(
-                    "A restarted tool triggered an interrupt, which is not allowed.",
-                ));
-            }
-            if let Some(response) = resolved.response {
-                let mut metadata = part.metadata.clone().unwrap_or_default();
-                if let Some(interrupt_meta) = metadata.remove("interrupt") {
-                    metadata.insert("resolvedInterrupt".to_string(), interrupt_meta);
-                }
-                return Ok(ResumedToolRequestResult {
-                    tool_request: Part {
-                        metadata: Some(metadata),
-                        ..part
-                    },
-                    tool_response: response,
-                });
-            }
-        }
-    }
-
+    let tool_req_details = part.tool_request.as_ref().unwrap();
     Err(Error::new_internal(format!(
-        "Unresolved tool request '{}' was not handled by the 'resume' argument.",
-        tool_request.name
+        "Unresolved tool request '{}'{} was not handled by the 'resume' argument.",
+        tool_req_details.name,
+        tool_req_details
+            .ref_id
+            .as_ref()
+            .map(|r| format!("#{}", r))
+            .unwrap_or_default()
     )))
 }
 
 /// Amends message history to handle `resume` arguments.
-pub async fn resolve_resume_option<O: Default + Send + Sync + 'static>(
+pub async fn resolve_resume_option<O: Default + Clone + Send + Sync + 'static>(
     registry: &Registry,
     mut raw_request: GenerateOptions<O>,
 ) -> Result<ResolveResumeOptionResult<O>> {
-    let resume_opts = match raw_request.resume.take() {
-        Some(opts) => opts,
+    let resume_opts = match raw_request.resume.as_ref() {
+        Some(opts) => opts.clone(),
         None => {
             return Ok(ResolveResumeOptionResult {
                 revised_request: Some(raw_request),
@@ -370,18 +390,12 @@ pub async fn resolve_resume_option<O: Default + Send + Sync + 'static>(
         }
     };
 
-    let resolved_tools = tool::resolve_tools(registry, raw_request.tools.as_deref()).await?;
+    let tool_map =
+        to_tool_map(&tool::resolve_tools(registry, raw_request.tools.as_deref()).await?)?;
 
-    // Again, we remove the downcast and work with the trait objects.
-    let tool_map = to_tool_map(&resolved_tools)?;
-
-    let mut messages = raw_request.messages.clone().unwrap_or_default();
+    let mut messages = raw_request.messages.take().unwrap_or_default();
     let last_message = match messages.last_mut() {
-        Some(msg)
-            if msg.role == Role::Model && msg.content.iter().any(|p| p.tool_request.is_some()) =>
-        {
-            msg
-        }
+        Some(msg) if msg.role == Role::Model && msg.content.iter().any(is_tool_request) => msg,
         _ => {
             return Err(Error::new_internal(
                 "Cannot 'resume' generation unless the last message is a model message with tool requests.",
@@ -389,21 +403,19 @@ pub async fn resolve_resume_option<O: Default + Send + Sync + 'static>(
         }
     };
 
-    let mut tool_responses: Vec<Part> = Vec::new();
-    let mut new_content: Vec<Part> = Vec::new();
+    let mut tool_responses: Vec<ToolResponsePart> = Vec::new();
     let mut interrupted = false;
+    let mut new_content = Vec::new();
+    let old_content = std::mem::take(&mut last_message.content);
 
-    for part in std::mem::take(&mut last_message.content) {
+    for part in old_content {
         if is_tool_request(&part) {
-            match resolve_resumed_tool_request(&raw_request, &resume_opts, part.clone(), &tool_map)
-                .await
-            {
+            match resolve_resumed_tool_request(&raw_request, &part, &tool_map).await {
                 Ok(resolved) => {
                     new_content.push(resolved.tool_request);
                     tool_responses.push(resolved.tool_response);
                 }
                 Err(_) => {
-                    // Assuming any error here means an interrupt.
                     new_content.push(part);
                     interrupted = true;
                 }
@@ -412,11 +424,9 @@ pub async fn resolve_resume_option<O: Default + Send + Sync + 'static>(
             new_content.push(part);
         }
     }
-
     last_message.content = new_content;
 
     if interrupted {
-        // Create a response indicating that an interrupt occurred during resumption.
         let interrupted_response = GenerateResponseData {
             candidates: vec![crate::model::CandidateData {
                 index: 0,
@@ -432,23 +442,34 @@ pub async fn resolve_resume_option<O: Default + Send + Sync + 'static>(
         });
     }
 
-    let mut tool_message_metadata = HashMap::new();
-    if let Some(meta) = resume_opts.metadata {
-        tool_message_metadata.insert("resumed".to_string(), meta);
+    let num_tool_requests = last_message
+        .content
+        .iter()
+        .filter(|p| p.tool_request.is_some())
+        .count();
+    if tool_responses.len() != num_tool_requests {
+        return Err(Error::new_internal(format!(
+            "Expected {} tool responses but resolved to {}",
+            num_tool_requests,
+            tool_responses.len()
+        )));
     }
+
+    let mut metadata = HashMap::new();
+    metadata.insert(
+        "resumed".to_string(),
+        resume_opts.metadata.unwrap_or(Value::Bool(true)),
+    );
 
     let tool_message = MessageData {
         role: Role::Tool,
         content: tool_responses,
-        metadata: if tool_message_metadata.is_empty() {
-            None
-        } else {
-            Some(tool_message_metadata)
-        },
+        metadata: Some(metadata),
     };
 
     messages.push(tool_message.clone());
     raw_request.messages = Some(messages);
+    raw_request.resume = None;
 
     Ok(ResolveResumeOptionResult {
         revised_request: Some(raw_request),
@@ -457,4 +478,37 @@ pub async fn resolve_resume_option<O: Default + Send + Sync + 'static>(
     })
 }
 
-// The `any_downcast` helper module is no longer needed and has been removed.
+pub async fn resolve_restarted_tools<O: Default + Clone + Send + Sync + 'static>(
+    registry: &Registry,
+    raw_request: &GenerateOptions<O>,
+) -> Result<Vec<ToolRequestPart>> {
+    let tool_map =
+        to_tool_map(&tool::resolve_tools(registry, raw_request.tools.as_deref()).await?)?;
+    let last_message = match raw_request.messages.as_ref().and_then(|m| m.last()) {
+        Some(msg) if msg.role == Role::Model => msg,
+        _ => return Ok(Vec::new()),
+    };
+
+    let restarts: Vec<ToolRequestPart> = last_message
+        .content
+        .iter()
+        .filter(|p| {
+            p.tool_request.is_some()
+                && p.metadata
+                    .as_ref()
+                    .is_some_and(|m| m.contains_key("resumed"))
+        })
+        .cloned()
+        .collect();
+
+    let mut new_parts = Vec::new();
+    for p in restarts {
+        let resolved = resolve_tool_request(raw_request, &p, &tool_map).await?;
+        if let Some(interrupt) = resolved.interrupt {
+            new_parts.push(interrupt);
+        } else if let Some(response) = resolved.response {
+            new_parts.push(to_pending_output(&p, &response));
+        }
+    }
+    Ok(new_parts)
+}

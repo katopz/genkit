@@ -276,13 +276,13 @@ fn generate_internal<O>(
 ) -> std::pin::Pin<Box<dyn std::future::Future<Output = Result<GenerateResponseData>> + Send>>
 where
     O: Default
+        + Clone
         + for<'de> DeserializeOwned
         + Serialize
         + Send
         + Sync
         + std::fmt::Debug
-        + 'static
-        + Clone,
+        + 'static,
 {
     Box::pin(async move {
         let GenerateHelperOptions {
@@ -443,28 +443,7 @@ where
             messages.push(generated_message);
         }
 
-        // FIX: The tool response from the action includes telemetry data.
-        // We need to extract just the `result` field to match the test's expectation.
-        if let Some(mut tool_msg) = tool_results.tool_message {
-            for part in &mut tool_msg.content {
-                if let Some(tool_response) = part.tool_response.as_mut() {
-                    // Take the output to modify it.
-                    if let Some(output_val) = tool_response.output.take() {
-                        if let Value::Object(mut map) = output_val {
-                            // If the object has a "result" key, replace the whole output with its value.
-                            // Otherwise, put the original object back.
-                            if let Some(result) = map.remove("result") {
-                                tool_response.output = Some(result);
-                            } else {
-                                tool_response.output = Some(Value::Object(map));
-                            }
-                        } else {
-                            // If it wasn't an object, put it back.
-                            tool_response.output = Some(output_val);
-                        }
-                    }
-                }
-            }
+        if let Some(tool_msg) = tool_results.tool_message {
             messages.push(tool_msg);
         }
         request.messages = Some(messages);
