@@ -3,13 +3,12 @@
 mod helpers;
 
 use genkit::{
-    model::{FinishReason, Part, Role},
+    model::{Part, Role},
     GenerateResponse, Genkit, Model, ToolArgument, ToolConfig,
 };
 use genkit_ai::{
-    generate::ResumeOptions,
     model::{CandidateData, GenerateResponseData},
-    tool::{InterruptConfig, Resumable, ToolFnOptions},
+    tool::ToolFnOptions,
     GenerateOptions, MessageData, ToolRequest,
 };
 
