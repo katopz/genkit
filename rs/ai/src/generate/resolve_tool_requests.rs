@@ -19,10 +19,11 @@
 // equivalent of `generate/resolve-tool-requests.ts`.
 
 use crate::document::{Part, ToolRequest, ToolRequestPart, ToolResponse};
-use crate::generate::GenerateOptions;
+use crate::generate::{GenerateOptions, ResumeOptions};
 use crate::message::{MessageData, Role};
 use crate::model::GenerateResponseData;
 use crate::tool::{self, is_tool_request};
+use genkit_core::context::ActionContext;
 use genkit_core::error::{Error, Result};
 use genkit_core::registry::{ErasedAction, Registry};
 use serde_json::Value;
@@ -125,8 +126,25 @@ pub async fn resolve_tool_request<O: 'static>(
     let request_value = serde_json::to_value(tool_request.input.clone().unwrap_or(Value::Null))
         .map_err(|e| Error::new_internal(format!("Failed to serialize request: {}", e)))?;
 
+    let context_override = part
+        .metadata
+        .as_ref()
+        .and_then(|m| m.get("restartContext"))
+        .and_then(|v| {
+            if let Value::Object(map) = v {
+                Some(ActionContext {
+                    additional_context: map.clone().into_iter().collect(),
+                    ..Default::default()
+                })
+            } else {
+                None
+            }
+        });
     let response_result = tool
-        .run_http_json(request_value, raw_request.context.clone())
+        .run_http_json(
+            request_value,
+            context_override.or(raw_request.context.clone()),
+        )
         .await;
 
     match response_result {
@@ -278,12 +296,11 @@ struct ResumedToolRequestResult {
 // Helper to resolve a single tool request that was interrupted.
 async fn resolve_resumed_tool_request<O: 'static>(
     raw_request: &GenerateOptions<O>,
+    resume_opts: &ResumeOptions,
     part: ToolRequestPart,
     tool_map: &HashMap<String, Arc<dyn ErasedAction>>,
 ) -> Result<ResumedToolRequestResult> {
     let tool_request = part.tool_request.as_ref().unwrap(); // Safe due to checks before calling
-
-    let resume_opts = raw_request.resume.as_ref().unwrap();
 
     // Handle provided responses.
     if let Some(provided_responses) = &resume_opts.respond {
@@ -378,7 +395,9 @@ pub async fn resolve_resume_option<O: Default + Send + Sync + 'static>(
 
     for part in std::mem::take(&mut last_message.content) {
         if is_tool_request(&part) {
-            match resolve_resumed_tool_request(&raw_request, part.clone(), &tool_map).await {
+            match resolve_resumed_tool_request(&raw_request, &resume_opts, part.clone(), &tool_map)
+                .await
+            {
                 Ok(resolved) => {
                     new_content.push(resolved.tool_request);
                     tool_responses.push(resolved.tool_response);

@@ -16,7 +16,7 @@ use genkit_ai::{
 use rstest::{fixture, rstest};
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
-use serde_json::{json, Value};
+use serde_json::json;
 use std::sync::{Arc, Mutex};
 
 #[fixture]
