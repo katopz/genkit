@@ -371,6 +371,7 @@ where
                 let chunk_data = GenerateResponseChunkData {
                     index: message_index,
                     content: tool_msg.content,
+                    role: Some(tool_msg.role.clone()),
                     ..Default::default()
                 };
                 let chunk_value = serde_json::to_value(chunk_data)

@@ -143,7 +143,7 @@ where
             content: self.content.clone(),
             usage: None, // Usage is typically aggregated at the end.
             custom: self.custom.clone(),
-            role: None,
+            role: self.role.clone(),
         }
     }
 }
