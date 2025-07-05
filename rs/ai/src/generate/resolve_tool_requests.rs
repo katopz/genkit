@@ -109,7 +109,7 @@ pub fn to_pending_output(part: &Part, response: &Part) -> Part {
 /// Resolves a single tool request by executing it.
 /// This now accepts a map of trait objects.
 pub async fn resolve_tool_request<O: 'static>(
-    _raw_request: &GenerateOptions<O>,
+    raw_request: &GenerateOptions<O>,
     part: &Part,
     tool_map: &HashMap<String, Arc<dyn ErasedAction>>,
 ) -> Result<ResolvedToolRequest<O>> {
@@ -125,7 +125,9 @@ pub async fn resolve_tool_request<O: 'static>(
     let request_value = serde_json::to_value(tool_request.input.clone().unwrap_or(Value::Null))
         .map_err(|e| Error::new_internal(format!("Failed to serialize request: {}", e)))?;
 
-    let response_result = tool.run_http_json(request_value, None).await;
+    let response_result = tool
+        .run_http_json(request_value, raw_request.context.clone())
+        .await;
 
     match response_result {
         Ok(response) => {
@@ -264,7 +266,7 @@ fn find_corresponding_tool_response<'a>(parts: &'a [Part], part: &ToolRequest) -
     parts.iter().find(|p| {
         p.tool_response
             .as_ref()
-            .map_or(false, |tr| tr.name == part.name && tr.ref_id == part.ref_id)
+            .is_some_and(|tr| tr.name == part.name && tr.ref_id == part.ref_id)
     })
 }
 
