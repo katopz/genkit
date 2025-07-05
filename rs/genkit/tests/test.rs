@@ -7,23 +7,17 @@ use genkit::{
     Genkit, Model, ToolArgument, ToolConfig,
 };
 use genkit_ai::{
+    generate::ResumeOptions,
     model::{CandidateData, GenerateResponseData},
+    tool::{InterruptConfig, Resumable, ToolFnOptions},
     GenerateOptions, MessageData, ToolRequest,
 };
 
-use genkit_core::context::ActionContext;
 use rstest::{fixture, rstest};
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
-use serde_json::json;
+use serde_json::{json, Value};
 use std::sync::{Arc, Mutex};
-
-//
-// Tools Tests
-//
-
-#[derive(Debug, serde::Serialize, serde::Deserialize, JsonSchema, Clone)]
-struct TestToolInput {}
 
 #[fixture]
 async fn genkit_with_programmable_model() -> (Arc<Genkit>, helpers::ProgrammableModel) {
@@ -43,8 +37,6 @@ async fn test_calls_the_dynamic_tool() {
     }
 
     // Create the first dynamic tool.
-    // The `dynamic_tool` function creates a tool definition with its handler,
-    // and `.to_tool_argument()` makes it suitable for passing to generate_with_options.
     let dynamic_test_tool_1 = genkit.dynamic_tool(
         ToolConfig {
             name: "dynamicTestTool1".to_string(),
@@ -52,13 +44,13 @@ async fn test_calls_the_dynamic_tool() {
             input_schema: Some(DynamicToolInput {
                 foo: "".to_string(),
             }),
-            output_schema: Some(json!("")), // Expects a string output
+            output_schema: Some(String::new()),
             metadata: None,
         },
         // The handler for the first tool.
         |input: DynamicToolInput, _| async move {
             assert_eq!(input.foo, "bar");
-            Ok(json!("tool called 1"))
+            Ok("tool called 1".to_string())
         },
     );
 
@@ -70,13 +62,13 @@ async fn test_calls_the_dynamic_tool() {
             input_schema: Some(DynamicToolInput {
                 foo: "".to_string(),
             }),
-            output_schema: Some(json!("")),
+            output_schema: Some(String::new()),
             metadata: None,
         },
         // The handler for the second tool.
         |input: DynamicToolInput, _| async move {
             assert_eq!(input.foo, "baz");
-            Ok(json!("tool called 2"))
+            Ok("tool called 2".to_string())
         },
     );
 
@@ -193,117 +185,163 @@ async fn test_calls_the_dynamic_tool() {
     assert_eq!(resp2.output, Some(json!("tool called 2")));
 }
 
+use genkit_ai::tool::ToolAction;
+
 #[rstest]
 #[tokio::test]
-async fn test_should_propagate_context_to_the_tool() {
+async fn test_can_resume_generation() {
     let (genkit, pm_handle) = genkit_with_programmable_model().await;
-    let req_counter = Arc::new(Mutex::new(0));
 
-    #[derive(Debug, Serialize, Deserialize, JsonSchema, Clone, PartialEq)]
-    struct TestSchema {
-        foo: String,
-    }
-
-    // A struct for deserializing auth data from the context.
-    #[derive(Default, Serialize, Deserialize, Debug, Clone)]
-    struct AuthData {
-        email: Option<String>,
-    }
-
-    // Define a tool whose handler accesses the authentication context to generate its output.
+    // Define the three tools required for the test.
+    genkit.define_interrupt::<(), i32>(InterruptConfig {
+        name: "interrupter".to_string(),
+        description: "always interrupts".to_string(),
+        ..Default::default()
+    });
     genkit.define_tool(
         ToolConfig {
-            name: "testTool".to_string(),
-            description: "description".to_string(),
-            input_schema: Some(TestSchema {
-                foo: "".to_string(),
-            }),
-            output_schema: Some(TestSchema {
-                foo: "".to_string(),
-            }),
-            metadata: None,
+            name: "truth".to_string(),
+            description: "always returns true".to_string(),
+            output_schema: Some(true),
+            ..Default::default()
         },
-        // The handler deserializes auth data from the context and includes it in the response.
-        |_, options| async move {
-            let email = options
-                .context
-                .auth
-                .and_then(|a| serde_json::from_value::<AuthData>(a).ok())
-                .and_then(|auth| auth.email)
-                .unwrap_or_else(|| "unknown".to_string());
-            let output_foo = format!("bar {}", email);
-            Ok(TestSchema { foo: output_foo })
+        |_: (), _: ToolFnOptions| async { Ok(true) },
+    );
+    genkit.define_tool(
+        ToolConfig {
+            name: "resumable".to_string(),
+            description: "interrupts unless resumed".to_string(),
+            output_schema: Some(true),
+            ..Default::default()
+        },
+        // In this test, we only care about resuming, so the initial
+        // implementation just interrupts.
+        |_: (), options: ToolFnOptions| async move {
+            if options.context.additional_context.contains_key("restart") {
+                Ok(true)
+            } else {
+                Err((options.interrupt)(None))
+            }
         },
     );
 
-    // Configure the programmable model to first call the tool, and then on the
-    // second call, to echo the tool's JSON output back as a raw string.
+    // Create a message history representing a paused generation.
+    let messages: Vec<MessageData> = vec![
+        MessageData {
+            role: Role::User,
+            content: vec![Part::text("hello")],
+            ..Default::default()
+        },
+        MessageData {
+            role: Role::Model,
+            content: vec![
+                Part {
+                    tool_request: Some(ToolRequest {
+                        name: "interrupter".to_string(),
+                        input: Some(json!({})),
+                        ref_id: Some("1".to_string()),
+                    }),
+                    metadata: Some(serde_json::from_str(r#"{"interrupt":true}"#).unwrap()),
+                    ..Default::default()
+                },
+                Part {
+                    tool_request: Some(ToolRequest {
+                        name: "truth".to_string(),
+                        input: Some(json!({})),
+                        ref_id: Some("2".to_string()),
+                    }),
+                    metadata: Some(serde_json::from_str(r#"{"pendingOutput":true}"#).unwrap()),
+                    ..Default::default()
+                },
+                Part {
+                    tool_request: Some(ToolRequest {
+                        name: "resumable".to_string(),
+                        input: Some(json!({})),
+                        ref_id: Some("3".to_string()),
+                    }),
+                    metadata: Some(serde_json::from_str(r#"{"interrupt":true}"#).unwrap()),
+                    ..Default::default()
+                },
+            ],
+            ..Default::default()
+        },
+    ];
+
+    // Look up the tool actions to call .respond() and .restart() on them.
+    let interrupter_action = genkit
+        .registry()
+        .lookup_action("/tool/interrupter")
+        .await
+        .unwrap();
+    let interrupter_tool = interrupter_action
+        .as_any()
+        .downcast_ref::<ToolAction<(), i32>>()
+        .unwrap();
+    let resumable_action = genkit
+        .registry()
+        .lookup_action("/tool/resumable")
+        .await
+        .unwrap();
+    let resumable_tool = resumable_action
+        .as_any()
+        .downcast_ref::<ToolAction<(), bool>>()
+        .unwrap();
+
+    // Configure the programmable model to simply echo back the final set of messages.
     {
         let mut handler = pm_handle.handler.lock().unwrap();
-        *handler = Arc::new(Box::new(move |req, _| {
-            let mut counter = req_counter.lock().unwrap();
-            let response = if *counter == 0 {
-                *counter += 1;
-                GenerateResponseData {
-                    candidates: vec![CandidateData {
-                        message: MessageData {
-                            role: Role::Model,
-                            content: vec![Part {
-                                tool_request: Some(ToolRequest {
-                                    name: "testTool".to_string(),
-                                    input: Some(json!({"foo": "fromTool"})),
-                                    ref_id: Some("ref123".to_string()),
-                                }),
-                                ..Default::default()
-                            }],
-                            ..Default::default()
-                        },
-                        ..Default::default()
-                    }],
+        *handler = Arc::new(Box::new(|req, _| {
+            let response = GenerateResponseData {
+                candidates: vec![CandidateData {
+                    message: req.messages.last().unwrap().clone(),
+                    finish_reason: Some(FinishReason::Stop),
                     ..Default::default()
-                }
-            } else {
-                let last_message = req.messages.last().expect("Should have previous message");
-                let tool_output = last_message.content[0]
-                    .tool_response
-                    .as_ref()
-                    .expect("Should be a tool response")
-                    .output
-                    .as_ref()
-                    .expect("Tool should have output");
-                let response_text =
-                    serde_json::to_string(tool_output).expect("Should serialize to string");
-
-                GenerateResponseData {
-                    candidates: vec![CandidateData {
-                        message: MessageData {
-                            role: Role::Model,
-                            content: vec![Part::text(response_text)],
-                            ..Default::default()
-                        },
-                        finish_reason: Some(FinishReason::Stop),
-                        ..Default::default()
-                    }],
-                    ..Default::default()
-                }
+                }],
+                ..Default::default()
             };
             Box::pin(async { Ok(response) })
         }));
     }
 
-    // Call generate with context that includes authentication information.
-    let response: genkit::GenerateResponse<serde_json::Value> = genkit
+    // Call generate with the paused history and instructions on how to resume.
+    let response: genkit::GenerateResponse = genkit
         .generate_with_options(GenerateOptions {
             model: Some(Model::Name("programmableModel".to_string())),
-            prompt: Some(vec![Part::text("call the tool")]),
-            tools: Some(vec![ToolArgument::from("testTool")]),
-            context: Some(ActionContext {
-                auth: Some(
-                    serde_json::to_value(AuthData {
-                        email: Some("a@b.c".to_string()),
-                    })
-                    .unwrap(),
-                ),
+            messages: Some(messages),
+            tools: Some(vec![
+                ToolArgument::from("interrupter"),
+                ToolArgument::from("resumable"),
+                ToolArgument::from("truth"),
+            ]),
+            resume: Some(ResumeOptions {
+                // Provide a direct response for the 'interrupter' tool.
+                respond: Some(vec![interrupter_tool
+                    .respond(
+                        &Part {
+                            tool_request: Some(ToolRequest {
+                                name: "interrupter".to_string(),
+                                ref_id: Some("1".to_string()),
+                                ..Default::default()
+                            }),
+                            ..Default::default()
+                        },
+                        23,
+                    )
+                    .unwrap()]),
+                // Restart the 'resumable' tool with new metadata.
+                restart: Some(vec![resumable_tool
+                    .restart(
+                        &Part {
+                            tool_request: Some(ToolRequest {
+                                name: "resumable".to_string(),
+                                ref_id: Some("3".to_string()),
+                                ..Default::default()
+                            }),
+                            ..Default::default()
+                        },
+                        Some(json!({ "status": "ok" })),
+                    )
+                    .unwrap()]),
                 ..Default::default()
             }),
             ..Default::default()
@@ -311,7 +349,39 @@ async fn test_should_propagate_context_to_the_tool() {
         .await
         .unwrap();
 
-    // Assert that the final text response is the stringified JSON from the tool,
-    // which correctly incorporated the email from the context.
-    assert_eq!(response.text().unwrap(), r#"{"foo":"bar a@b.c"}"#);
+    let final_messages = response.messages().unwrap();
+    let tool_message = final_messages.get(final_messages.len() - 2).unwrap();
+
+    let expected_tool_content = vec![
+        Part {
+            tool_response: Some(genkit_ai::ToolResponse {
+                name: "interrupter".to_string(),
+                ref_id: Some("1".to_string()),
+                output: Some(json!(23)),
+            }),
+            metadata: Some(serde_json::from_str(r#"{"interruptResponse":true}"#).unwrap()),
+            ..Default::default()
+        },
+        Part {
+            tool_response: Some(genkit_ai::ToolResponse {
+                name: "truth".to_string(),
+                ref_id: Some("2".to_string()),
+                output: Some(json!(true)),
+            }),
+            metadata: Some(serde_json::from_str(r#"{"source":"pending"}"#).unwrap()),
+            ..Default::default()
+        },
+        Part {
+            tool_response: Some(genkit_ai::ToolResponse {
+                name: "resumable".to_string(),
+                ref_id: Some("3".to_string()),
+                output: Some(json!(true)),
+            }),
+            ..Default::default()
+        },
+    ];
+
+    // Assert that the generated tool message contains the correct resolved outputs.
+    assert_eq!(tool_message.role, Role::Tool);
+    assert_eq!(tool_message.content, expected_tool_content);
 }
