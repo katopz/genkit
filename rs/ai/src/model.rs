@@ -141,18 +141,32 @@ pub struct GenerateRequest {
 #[serde(rename_all = "SCREAMING_SNAKE_CASE")]
 #[derive(Default)]
 pub enum FinishReason {
-    /// The model finished generating the response.
+    /// The model finished generating the response naturally.
+    /// Maps from Gemini's `STOP`.
     Stop,
+
     /// The model reached the maximum number of tokens.
+    /// Maps from Gemini's `MAX_TOKENS`.
     Length,
-    /// The model was blocked due to a safety setting.
+
+    /// The model was blocked due to a safety setting or recitation violation.
+    /// Maps from Gemini's `SAFETY` and `RECITATION`.
     Blocked,
+
     /// The model finished for some other reason.
+    /// Maps from Gemini's `OTHER`.
     Other,
-    /// The finish reason is unknown.
+
+    /// The model stopped to call one or more tools.
+    /// This is the typical reason when `toolRequest` parts are present.
+    ToolUse,
+
+    /// The finish reason is unknown or not specified.
     #[default]
     Unknown,
-    /// The model was interrupted.
+
+    /// The model's execution was interrupted by the framework,
+    /// typically to await user input for a resumable tool.
     Interrupted,
 }
 
