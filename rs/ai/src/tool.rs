@@ -251,7 +251,7 @@ impl From<Arc<dyn ErasedAction>> for ToolArgument {
 
 /// Configuration for defining a tool.
 /// Configuration for defining a tool.
-#[derive(Default)]
+#[derive(Default, JsonSchema)]
 pub struct ToolConfig<I = (), O = ()> {
     pub name: String,
     pub description: String,

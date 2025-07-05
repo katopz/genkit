@@ -79,6 +79,8 @@ pub use self::tool::{
     define_interrupt, define_tool, to_tool_definition, ToolAction, ToolArgument, ToolConfig,
     ToolDefinition,
 };
+use genkit_ai::formats::types::{FormatHandler, Formatter};
+use genkit_ai::formats::{define_format, FormatterConfig};
 pub use genkit_ai::generate::GenerateOptions;
 use genkit_ai::generate::{generate as _generate, generate_stream as _generate_stream};
 // Re-export key types directly from the underlying crates for a flat, convenient API.
@@ -87,11 +89,13 @@ use genkit_ai::model::{BackgroundModelAction, DefineBackgroundModelOptions, Defi
 use genkit_ai::reranker::{RerankerRequest, RerankerResponse};
 use genkit_ai::retriever::{IndexerRequest, RetrieverRequest, RetrieverResponse};
 pub use genkit_ai::session::{Session, SessionStore};
-use genkit_ai::tool::{dynamic_tool_without_runner, ToolFnOptions};
+use genkit_ai::tool::{dynamic_tool_without_runner, InterruptConfig, ToolFnOptions};
 pub use genkit_ai::GenerateStreamResponse;
 use genkit_ai::{
-    define_background_model, define_model, dynamic_tool, BaseEvalDataPoint, EmbedRequest,
-    EmbedResponse, EvalResponse, GenerateResponseChunkData, ModelAction,
+    define_background_model, define_model, define_resource, dynamic_tool, generate_operation,
+    BaseEvalDataPoint, EmbedRequest, EmbedResponse, EvalResponse, GenerateResponseChunkData,
+    GenerateResponseData, ModelAction, ResourceAction, ResourceInput, ResourceOptions,
+    ResourceOutput,
 };
 pub use genkit_core::context::ActionContext;
 pub use genkit_core::registry::Registry;
@@ -326,6 +330,52 @@ impl Genkit {
         Fut: Future<Output = Result<RerankerResponse>> + Send + 'static,
     {
         define_reranker(&mut self.registry.clone(), name, runner)
+    }
+
+    pub fn define_format(
+        &self,
+        name: impl Into<String>,
+        config: FormatterConfig,
+        handler: FormatHandler,
+    ) -> Formatter {
+        define_format(&mut self.registry.clone(), name, config, handler)
+    }
+
+    pub fn define_interrupt<I, O>(&self, config: InterruptConfig<I, O>)
+    where
+        I: JsonSchema + Serialize + DeserializeOwned + Send + Sync + Clone + 'static,
+        O: JsonSchema + Serialize + DeserializeOwned + Send + Sync + 'static,
+    {
+        define_interrupt(&mut self.registry.clone(), config);
+    }
+
+    pub fn define_resource<F, Fut>(
+        &self,
+        opts: ResourceOptions,
+        runner: F,
+    ) -> Result<Arc<ResourceAction>>
+    where
+        F: Fn(ResourceInput, ActionContext) -> Fut + Send + Sync + 'static,
+        Fut: Future<Output = Result<ResourceOutput>> + Send + 'static,
+    {
+        define_resource(&mut self.registry.clone(), opts, runner)
+    }
+
+    pub async fn generate_operation<O>(
+        &self,
+        options: GenerateOptions<O>,
+    ) -> Result<genkit_core::background_action::Operation<GenerateResponseData>>
+    where
+        O: Clone
+            + Default
+            + for<'de> DeserializeOwned
+            + Serialize
+            + Send
+            + Sync
+            + 'static
+            + std::fmt::Debug,
+    {
+        generate_operation(&self.registry, options).await
     }
 
     /// Generates content using a model.
