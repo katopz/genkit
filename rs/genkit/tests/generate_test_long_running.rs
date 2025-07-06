@@ -136,13 +136,16 @@ async fn test_checks_operation_status(
     define_action(
         &mut registry,
         ActionType::CheckOperation,
-        "/checkoperation/bkg-model/check",
-        move |_op: genkit_core::background_action::Operation<serde_json::Value>,
+        "bkg-model/check",
+        move |op_in: genkit_core::background_action::Operation<serde_json::Value>,
               _ctx: ActionFnArg<()>| {
             let completed_op_result = completed_op_result.clone();
             async move {
                 let mut op = Operation {
+                    action: op_in.action,
+                    id: op_in.id,
                     done: true,
+                    output: Some(serde_json::to_value(completed_op_result.clone()).unwrap()),
                     ..Default::default()
                 };
                 op.output = Some(serde_json::to_value(completed_op_result).unwrap());

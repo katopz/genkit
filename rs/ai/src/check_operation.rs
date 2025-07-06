@@ -38,6 +38,21 @@ pub async fn check_operation(
     let check_action_key =
         start_action_key.replace("/background-model/", "/checkoperation/") + "/check";
 
+    println!(
+        "[check_operation] Looking for check action key: {}",
+        check_action_key
+    );
+    let available_actions = registry
+        .list_actions()
+        .await
+        .keys()
+        .cloned()
+        .collect::<Vec<_>>();
+    println!(
+        "[check_operation] Available actions in registry: {:?}",
+        available_actions
+    );
+
     let check_action = registry
         .lookup_action(&check_action_key)
         .await
@@ -51,7 +66,14 @@ pub async fn check_operation(
     let input_value = serde_json::to_value(operation)
         .map_err(|e| Error::new_internal(format!("Failed to serialize operation: {}", e)))?;
     let result_value = check_action.run_http_json(input_value, None).await?;
-    let checked_op: Operation<Value> = serde_json::from_value(result_value)
+    println!(
+        "[check_operation] Received value from action: {}",
+        serde_json::to_string_pretty(&result_value).unwrap_or_default()
+    );
+    let result_field = result_value.get("result").ok_or_else(|| {
+        Error::new_internal("Action response is missing 'result' field".to_string())
+    })?;
+    let checked_op: Operation<Value> = serde_json::from_value(result_field.clone())
         .map_err(|e| Error::new_internal(format!("Failed to deserialize operation: {}", e)))?;
 
     Ok(checked_op)
