@@ -191,3 +191,49 @@ async fn test_custom_format_simulated_constrained(#[future] mut registry: Regist
     assert!(request.tools.is_none());
     assert!(request.config.is_none());
 }
+
+#[rstest]
+#[tokio::test]
+async fn test_override_format_options(#[future] mut registry: Registry) {
+    let mut registry = registry.await;
+    helpers::define_echo_model(&mut registry, "none");
+    let response = generate(
+        &registry,
+        GenerateOptions::<serde_json::Value> {
+            model: Some(genkit::model::Model::Name("echoModel".to_string())),
+            prompt: Some(vec![genkit::model::Part::text("hi")]),
+            output: Some(OutputOptions {
+                format: Some("banana".to_string()),
+                constrained: Some(false),
+                schema: Some(serde_json::json!({ "type": "string" })),
+                ..Default::default()
+            }),
+            ..Default::default()
+        },
+    )
+    .await
+    .unwrap();
+
+    let last_message = response
+        .request
+        .as_ref()
+        .unwrap()
+        .messages
+        .last()
+        .cloned()
+        .unwrap();
+
+    let instruction_part_found = last_message.content.iter().any(|p| {
+        p.metadata
+            .as_ref()
+            .map_or(false, |m| m.get("purpose") == Some(&"output".into()))
+            && p.text
+                .as_ref()
+                .map_or(false, |t| t.contains("Output should be in banana format"))
+    });
+
+    assert!(
+        instruction_part_found,
+        "Instruction part was not found in the request messages"
+    );
+}

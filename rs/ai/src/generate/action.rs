@@ -101,7 +101,7 @@ pub fn define_generate_action(registry: &mut Registry) -> Arc<GenerateAction> {
                 let raw_request_for_response = req.clone();
                 let registry_for_response = registry.clone();
 
-                let (response_data, _telemetry) = tracing::in_new_span(
+                let result = tracing::in_new_span(
                     "generate".to_string(),
                     Some(attrs),
                     move |_trace_context| async move {
@@ -114,12 +114,11 @@ pub fn define_generate_action(registry: &mut Registry) -> Arc<GenerateAction> {
                         generate_internal(registry, helper_options).await
                     },
                 )
-                .await?;
+                .await;
 
-                let request_for_response =
-                    to_generate_request(&registry_for_response, &raw_request_for_response).await?;
-                let mut response =
-                    GenerateResponse::new(&response_data, Some(request_for_response.clone()));
+                let ((response_data, request), _telemetry) = result?;
+
+                let mut response = GenerateResponse::new(&response_data, Some(request));
 
                 response.assert_valid()?;
 
@@ -181,14 +180,15 @@ where
     );
     let raw_request_for_response = options.raw_request.clone();
     let registry_for_response = registry.clone();
-    let (response_data, _telemetry) = tracing::in_new_span(
+    let result = tracing::in_new_span(
         "generate".to_string(),
         Some(attrs),
         move |_trace_context| async move { generate_internal(registry, options).await },
     )
-    .await?;
+    .await;
 
-    let request = to_generate_request(&registry_for_response, &raw_request_for_response).await?;
+    let ((response_data, request), _telemetry) = result?;
+
     let mut response = GenerateResponse::new(&response_data, Some(request.clone()));
 
     response.assert_valid()?;
@@ -279,7 +279,9 @@ async fn run_model_via_middleware(
 fn generate_internal<O>(
     registry: Arc<Registry>,
     options: GenerateHelperOptions<O>,
-) -> std::pin::Pin<Box<dyn std::future::Future<Output = Result<GenerateResponseData>> + Send>>
+) -> std::pin::Pin<
+    Box<dyn std::future::Future<Output = Result<(GenerateResponseData, GenerateRequest)>> + Send>,
+>
 where
     O: Default
         + Clone
@@ -297,7 +299,7 @@ where
             current_turn,
             message_index,
         } = options;
-        let mut request = raw_request;
+        let mut request = raw_request.clone();
 
         // 1. Pre-process messages (prompt, system, etc.)
         if let Some(prompt_parts) = request.prompt.take() {
@@ -326,21 +328,33 @@ where
 
         // 3. Resolve and apply format.
         if let Some(format) = formats::resolve_format(&registry, request.output.as_ref()).await {
+            println!("[generate_internal] Resolved format: {}", &format.name);
             // Get model info from the action's metadata
             let model_info: Option<crate::model::ModelInfo> = model_action
                 .metadata()
                 .metadata
                 .get("metadata")
                 .and_then(|v| serde_json::from_value(v.clone()).ok());
+            println!("[generate_internal] Model info: {:?}", &model_info);
 
             // Check if model supports the format natively
             let model_supports_format = model_info
                 .as_ref()
                 .and_then(|info| info.supports.as_ref())
                 .and_then(|supports| supports.output.as_ref())
-                .is_some_and(|supported_formats| supported_formats.contains(&format.name));
+                .map_or(false, |supported_formats| {
+                    supported_formats.contains(&format.name)
+                });
+            println!(
+                "[generate_internal] Model supports format '{}' natively: {}",
+                &format.name, model_supports_format
+            );
 
             // Only inject instructions if the model does NOT support the format.
+            println!(
+                "[generate_internal] Condition to inject instructions (!model_supports_format): {}",
+                !model_supports_format
+            );
             if !model_supports_format {
                 let schema_value = request
                     .output
@@ -357,10 +371,24 @@ where
                     schema.as_ref(),
                     instructions_option,
                 );
+                println!(
+                    "[generate_internal] Resolved instructions: {:?}",
+                    &instructions
+                );
+
                 if instructions.is_some() {
+                    println!("[generate_internal] Injecting instructions.");
                     let messages = request.messages.get_or_insert_with(Vec::new);
+                    println!(
+                        "[generate_internal] Messages before injection: {:?}",
+                        messages
+                    );
                     let updated_messages = formats::inject_instructions(messages, instructions);
                     request.messages = Some(updated_messages);
+                    println!(
+                        "[generate_internal] Messages after injection: {:?}",
+                        request.messages
+                    );
                 }
             }
 
@@ -384,7 +412,8 @@ where
         let resume_result =
             super::resolve_tool_requests::resolve_resume_option(registry.as_ref(), request).await?;
         if let Some(interrupted_response) = resume_result.interrupted_response {
-            return Ok(interrupted_response);
+            let final_req = to_generate_request(&registry, &raw_request).await?;
+            return Ok((interrupted_response, final_req));
         }
         let mut request = resume_result.revised_request.unwrap();
 
@@ -407,7 +436,8 @@ where
 
         // 7. Call the model action.
         let response_data =
-            run_model_via_middleware(model_action, generate_request, middleware.clone()).await?;
+            run_model_via_middleware(model_action, generate_request.clone(), middleware.clone())
+                .await?;
 
         let generated_message = match response_data.candidates.first() {
             Some(c) => c.message.clone(),
@@ -425,7 +455,7 @@ where
             .collect();
 
         if tool_requests.is_empty() || request.return_tool_requests == Some(true) {
-            return Ok(response_data);
+            return Ok((response_data, generate_request.clone()));
         }
 
         // 8. Handle tool requests returned from model
@@ -453,7 +483,7 @@ where
                 candidate.finish_message =
                     Some("One or more tool calls resulted in interrupts.".to_string());
             }
-            return Ok(final_response);
+            return Ok((final_response, generate_request));
         }
 
         // 10. If no interrupts, update the message history for the next turn.
