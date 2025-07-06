@@ -29,6 +29,10 @@ use std::sync::Arc;
 struct BananaFormat;
 impl genkit_ai::formats::Format for BananaFormat {
     fn parse_message(&self, message: &Message) -> Value {
+        println!(
+            "[BananaFormat::parse_message] called with message text: {}",
+            message.text()
+        );
         Value::String(format!("banana: {}", message.text()))
     }
     fn parse_chunk(&self, chunk: &genkit_ai::generate::GenerateResponseChunk) -> Option<Value> {
@@ -77,7 +81,11 @@ async fn test_custom_format_native_constrained(mut registry: Registry) {
     .await
     .unwrap();
 
-    assert_eq!(response.output().unwrap(), "banana: Echo: hi");
+    println!("response output:{:?}", response);
+
+    let output = response.output().unwrap();
+    println!("response.output() result: {:?}", output);
+    assert_eq!(output, "banana: Echo: hi");
 
     let mut stream_resp = generate_stream(
         &registry,
@@ -96,9 +104,13 @@ async fn test_custom_format_native_constrained(mut registry: Registry) {
     while let Some(chunk) = stream_resp.stream.next().await {
         chunks.push(chunk.unwrap().output().unwrap().clone());
     }
+    println!("chunks:{:?}", chunks);
     assert_eq!(chunks, vec!["banana: 3", "banana: 2", "banana: 1"]);
     let final_response = stream_resp.response.await.unwrap().unwrap();
-    assert_eq!(final_response.output().unwrap(), "banana: Echo: hi");
+    println!("final_response: {:?}", final_response);
+    let final_output = final_response.output().unwrap();
+    println!("final_response.output() result: {:?}", final_output);
+    assert_eq!(final_output, "banana: Echo: hi");
 }
 
 #[rstest]

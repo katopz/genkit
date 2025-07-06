@@ -126,6 +126,10 @@ where
     ///    it as JSON. If that fails, it will attempt to use the raw text if the
     ///    requested type is a string.
     pub fn output(&self) -> Result<O> {
+        println!(
+            "[Message::output] called. Parser is_some: {}",
+            self.parser.is_some()
+        );
         if let Some(parser) = &self.parser {
             return parser(self);
         }

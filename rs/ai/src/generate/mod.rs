@@ -271,7 +271,12 @@ where
     })
     .await?;
 
+    println!(
+        "[generate] Checking for formatter with output_options: {:?}",
+        output_options
+    );
     if let Some(formatter) = formats::resolve_format(registry, output_options.as_ref()).await {
+        println!("[generate] Found formatter: {}", formatter.name);
         let schema: Option<schemars::Schema> = output_options
             .as_ref()
             .and_then(|o| o.schema.as_ref())
@@ -279,18 +284,22 @@ where
 
         let format_impl = (formatter.handler)(schema.as_ref());
 
-        let parser = Arc::new(move |msg: &Message<O>| {
+        let parser_closure = move |msg: &Message<O>| {
             let value_msg = Message::<Value>::new(msg.to_json(), None);
 
             let parsed_value = format_impl.parse_message(&value_msg);
             serde_json::from_value(parsed_value)
                 .map_err(|e| Error::new_internal(format!("Format parser error: {}", e)))
-        });
+        };
 
+        let parser_arc = Arc::new(parser_closure);
+
+        response.parser = Some(parser_arc.clone());
         if let Some(message) = response.message.as_mut() {
-            message.set_parser(parser.clone());
+            message.set_parser(parser_arc);
         }
-        response.parser = Some(parser);
+    } else {
+        println!("[generate] No formatter found.");
     }
 
     Ok(response)

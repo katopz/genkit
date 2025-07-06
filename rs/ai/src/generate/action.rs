@@ -144,7 +144,10 @@ pub fn define_generate_action(registry: &mut Registry) -> Arc<GenerateAction> {
                                 ))
                             })
                         };
-                        response.parser = Some(Arc::new(parser));
+                        let parser = Arc::new(parser);
+                        if let Some(message) = response.message.as_mut() {
+                            message.set_parser(parser.clone());
+                        }
                     }
                 }
 
@@ -209,7 +212,10 @@ where
                     Error::new_internal(format!("Failed to deserialize formatted output: {}", e))
                 })
             };
-            response.parser = Some(Arc::new(parser));
+            let parser = Arc::new(parser);
+            if let Some(message) = response.message.as_mut() {
+                message.set_parser(parser.clone());
+            }
         }
     }
 
