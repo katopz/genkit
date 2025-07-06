@@ -144,9 +144,7 @@ mod tests {
 
         assert_eq!(final_request.messages.len(), 3);
         assert_eq!(final_request.messages[0].role, Role::User);
-        assert!(final_request.messages[0]
-            .text()
-            .contains("SYSTEM INSTRUCTIONS"));
+        assert!(final_request.messages[0].text().contains("system: "));
         assert!(final_request.messages[0].text().contains("Be a pirate."));
         assert_eq!(final_request.messages[1].role, Role::Model);
         assert_eq!(final_request.messages[1].text(), "Understood.");

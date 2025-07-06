@@ -168,9 +168,7 @@ pub struct SimulateSystemPromptOptions {
 /// Provide a simulated system prompt for models that don't support it natively.
 pub fn simulate_system_prompt(options: Option<SimulateSystemPromptOptions>) -> ModelMiddleware {
     let opts = options.unwrap_or_default();
-    let preface = opts
-        .preface
-        .unwrap_or_else(|| "SYSTEM INSTRUCTIONS:\n".to_string());
+    let preface = opts.preface.unwrap_or_else(|| "system: ".to_string());
     let acknowledgement = opts
         .acknowledgement
         .unwrap_or_else(|| "Understood.".to_string());

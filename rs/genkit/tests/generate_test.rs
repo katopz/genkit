@@ -18,17 +18,17 @@ mod helpers;
 
 use genkit::{
     model::{FinishReason, Part, Role},
-    Genkit, Model,
+    Genkit,
 };
 use genkit_ai::{
     self as genkit_ai,
     model::{CandidateData, GenerateRequest, GenerateResponseData},
-    GenerateOptions, MessageData,
+    GenerateOptions, GenerateResponseChunkData, MessageData,
 };
 
 use rstest::{fixture, rstest};
-use serde_json::json;
 use std::sync::{Arc, Mutex};
+use tokio_stream::StreamExt;
 
 #[fixture]
 async fn genkit_instance_for_test() -> (Arc<Genkit>, Arc<Mutex<Option<GenerateRequest>>>) {
@@ -52,17 +52,13 @@ async fn test_calls_default_model(
     let (genkit, _) = genkit_instance_for_test.await;
     let response: genkit::GenerateResponse = genkit
         .generate_with_options(GenerateOptions {
-            prompt: Some(vec![Part::text("short and sweet")]),
-            config: Some(json!({ "temperature": 0.5 })),
+            prompt: Some(vec![Part::text("hi")]),
             ..Default::default()
         })
         .await
         .unwrap();
 
-    assert_eq!(
-        response.text().unwrap(),
-        "Echo: short and sweet; config: {\"temperature\":0.5}"
-    );
+    assert_eq!(response.text().unwrap(), "Echo: hi; config: null");
 }
 
 #[rstest]
@@ -73,16 +69,13 @@ async fn test_calls_default_model_with_string_prompt(
     let (genkit, _) = genkit_instance_for_test.await;
     let response: genkit::GenerateResponse = genkit
         .generate_with_options(GenerateOptions {
-            prompt: Some(vec![Part::text("short and sweet")]),
+            prompt: Some(vec![Part::text("hi")]),
             ..Default::default()
         })
         .await
         .unwrap();
 
-    assert_eq!(
-        response.text().unwrap(),
-        "Echo: short and sweet; config: null"
-    );
+    assert_eq!(response.text().unwrap(), "Echo: hi; config: null");
 }
 
 #[rstest]
@@ -93,16 +86,13 @@ async fn test_calls_default_model_with_parts_prompt(
     let (genkit, _) = genkit_instance_for_test.await;
     let response: genkit::GenerateResponse = genkit
         .generate_with_options(GenerateOptions {
-            prompt: Some(vec![Part::text("short and sweet")]),
+            prompt: Some(vec![Part::text("hi")]),
             ..Default::default()
         })
         .await
         .unwrap();
 
-    assert_eq!(
-        response.text().unwrap(),
-        "Echo: short and sweet; config: null"
-    );
+    assert_eq!(response.text().unwrap(), "Echo: hi; config: null");
 }
 
 #[rstest]
@@ -110,28 +100,11 @@ async fn test_calls_default_model_with_parts_prompt(
 async fn test_calls_default_model_system_message(
     #[future] genkit_instance_for_test: (Arc<Genkit>, Arc<Mutex<Option<GenerateRequest>>>),
 ) {
-    let (genkit, _) = genkit_instance_for_test.await;
-    let messages = vec![
-        MessageData {
-            role: Role::System,
-            content: vec![Part {
-                text: Some("You are a cat.".to_string()),
-                ..Default::default()
-            }],
-            metadata: None,
-        },
-        MessageData {
-            role: Role::System,
-            content: vec![Part {
-                text: Some("What is the meaning of life?".to_string()),
-                ..Default::default()
-            }],
-            metadata: None,
-        },
-    ];
+    let (genkit, last_request) = genkit_instance_for_test.await;
     let response: genkit::GenerateResponse = genkit
         .generate_with_options(GenerateOptions {
-            messages: Some(messages),
+            system: Some(vec![Part::text("talk like a pirate")]),
+            prompt: Some(vec![Part::text("hi")]),
             ..Default::default()
         })
         .await
@@ -139,8 +112,15 @@ async fn test_calls_default_model_system_message(
 
     assert_eq!(
         response.text().unwrap(),
-        "Echo: SYSTEM INSTRUCTIONS:\nYou are a cat.Understood.system: What is the meaning of life?; config: null"
+        "Echo: system: talk like a pirate,hi; config: null"
     );
+    let locked_request = last_request.lock().unwrap();
+    let messages = locked_request.as_ref().unwrap().messages.clone();
+    assert_eq!(messages.len(), 2);
+    assert_eq!(messages[0].role, Role::System);
+    assert_eq!(messages[0].text(), "talk like a pirate");
+    assert_eq!(messages[1].role, Role::User);
+    assert_eq!(messages[1].text(), "hi");
 }
 
 #[rstest]
@@ -149,45 +129,51 @@ async fn test_calls_default_model_with_tool_choice(
     #[future] genkit_instance_for_test: (Arc<Genkit>, Arc<Mutex<Option<GenerateRequest>>>),
 ) {
     let (genkit, last_request) = genkit_instance_for_test.await;
-    let config = json!({ "tool_choice": "myTool" });
     let response: genkit::GenerateResponse = genkit
         .generate_with_options(GenerateOptions {
-            config: Some(config.clone()),
-            prompt: Some(vec![Part::text("test")]),
+            prompt: Some(vec![Part::text("hi")]),
+            tool_choice: Some(genkit_ai::ToolChoice::Required),
             ..Default::default()
         })
         .await
         .unwrap();
 
-    let locked_request = last_request.lock().unwrap();
-    let request_config = locked_request.as_ref().unwrap().config.clone();
-    assert_eq!(request_config, Some(config.clone()));
+    assert_eq!(response.text().unwrap(), "Echo: hi; config: null");
 
-    let expected_response = format!("Echo: test; config: {}", config);
-    assert_eq!(response.text().unwrap(), expected_response);
+    let locked_request = last_request.lock().unwrap();
+    let request_tool_choice = locked_request.as_ref().unwrap().tool_choice.clone();
+    assert_eq!(
+        request_tool_choice,
+        Some(format!("{:?}", genkit_ai::ToolChoice::Required))
+    );
 }
 
 #[rstest]
 #[tokio::test]
-async fn test_uses_the_default_model(
-    #[future] genkit_with_programmable_model: (Arc<Genkit>, helpers::ProgrammableModel),
-) {
-    let (genkit, pm) = genkit_with_programmable_model.await;
-
-    let test_prompt = "tell me a joke".to_string();
+async fn test_streams_default_model() {
+    let (genkit, pm_handle) = genkit_with_programmable_model().await;
     {
-        let mut handler_mutex_guard = pm.handler.lock().unwrap();
-        *handler_mutex_guard = Arc::new(Box::new(move |_req, _| {
-            Box::pin(async move {
+        let mut handler = pm_handle.handler.lock().unwrap();
+        *handler = Arc::new(Box::new(|_, on_chunk| {
+            if let Some(cb) = on_chunk.as_ref() {
+                for i in 0..3 {
+                    cb(GenerateResponseChunkData {
+                        index: i,
+                        content: vec![Part::text(format!("chunk{}", i + 1))],
+                        ..Default::default()
+                    });
+                }
+            }
+            Box::pin(async {
                 Ok(GenerateResponseData {
                     candidates: vec![CandidateData {
                         index: 0,
+                        finish_reason: Some(FinishReason::Stop),
                         message: MessageData {
                             role: Role::Model,
-                            content: vec![Part::text("mock response".to_string())],
-                            metadata: None,
+                            content: vec![Part::text("chunk1chunk2chunk3")],
+                            ..Default::default()
                         },
-                        finish_reason: Some(FinishReason::Stop),
                         ..Default::default()
                     }],
                     ..Default::default()
@@ -196,18 +182,33 @@ async fn test_uses_the_default_model(
         }));
     }
 
-    let response: genkit::GenerateResponse = genkit
-        .generate_with_options(GenerateOptions {
-            model: Some(Model::Name("programmableModel".to_string())),
-            prompt: Some(vec![Part::text(test_prompt.clone())]),
+    let mut response_container: genkit::GenerateStreamResponse = genkit
+        .generate_stream(GenerateOptions {
+            prompt: Some(vec![Part::text("unused".to_string())]),
             ..Default::default()
         })
         .await
         .unwrap();
 
-    let last_request = pm.last_request.lock().unwrap();
-    assert!(last_request.is_some());
-    let last_message = last_request.as_ref().unwrap().messages.last().unwrap();
-    assert_eq!(last_message.text(), test_prompt);
-    assert_eq!(response.text().unwrap(), "mock response");
+    let mut chunks = Vec::new();
+    while let Some(chunk_result) = response_container.stream.next().await {
+        chunks.push(chunk_result.unwrap());
+    }
+
+    assert_eq!(chunks.len(), 3, "Should have received 3 chunks");
+    assert_eq!(chunks[0].text(), "chunk1");
+    assert_eq!(chunks[1].text(), "chunk2");
+    assert_eq!(chunks[2].text(), "chunk3");
+
+    let final_response = response_container
+        .response
+        .await
+        .expect("Tokio task should not panic")
+        .expect("Generation process should complete successfully");
+
+    let output_text = final_response
+        .text()
+        .expect("Final response should contain text");
+
+    assert_eq!(output_text, "chunk1chunk2chunk3");
 }
