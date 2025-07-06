@@ -349,6 +349,14 @@ fn to_genkit_response(resp: VertexGeminiResponse) -> Result<GenerateResponseData
         input_tokens: Some(u.prompt_token_count),
         output_tokens: Some(u.candidates_token_count),
         total_tokens: Some(u.total_token_count),
+        input_characters: todo!(),
+        input_images: todo!(),
+        input_videos: todo!(),
+        input_audio_files: todo!(),
+        output_characters: todo!(),
+        output_images: todo!(),
+        output_videos: todo!(),
+        output_audio_files: todo!(),
     });
 
     Ok(GenerateResponseData {

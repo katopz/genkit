@@ -183,6 +183,30 @@ pub struct GenerationUsage {
     /// The total number of tokens.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub total_tokens: Option<u32>,
+    /// The number of characters in the input.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub input_characters: Option<u32>,
+    /// The number of images in the input.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub input_images: Option<u32>,
+    /// The number of videos in the input.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub input_videos: Option<u32>,
+    /// The number of audio files in the input.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub input_audio_files: Option<u32>,
+    /// The number of characters in the output.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub output_characters: Option<u32>,
+    /// The number of images in the output.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub output_images: Option<u32>,
+    /// The number of videos in the output.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub output_videos: Option<u32>,
+    /// The number of audio files in the output.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub output_audio_files: Option<u32>,
 }
 
 /// A candidate response from a generative model.
@@ -655,5 +679,78 @@ impl From<ModelRef<serde_json::Value>> for Model {
 impl<T> From<ModelRef<T>> for String {
     fn from(m: ModelRef<T>) -> Self {
         m.name
+    }
+}
+
+/// Container for counting usage stats for a single input/output {Part}
+#[derive(Default)]
+struct PartCounts {
+    characters: u32,
+    images: u32,
+    videos: u32,
+    audio: u32,
+}
+
+/// The data for a model response, can be a single message or multiple candidates.
+pub enum ResponseData<'a> {
+    Message(&'a MessageData),
+    Candidates(&'a [CandidateData]),
+}
+
+fn get_part_counts(parts: &[&Part]) -> PartCounts {
+    parts
+        .iter()
+        .fold(PartCounts::default(), |mut counts, part| {
+            counts.characters += part.text.as_ref().map(|s| s.len()).unwrap_or(0) as u32;
+
+            if let Some(media) = &part.media {
+                let is_image = media
+                    .content_type
+                    .as_deref()
+                    .is_some_and(|ct| ct.starts_with("image"))
+                    || media.url.starts_with("data:image");
+                let is_video = media
+                    .content_type
+                    .as_deref()
+                    .is_some_and(|ct| ct.starts_with("video"))
+                    || media.url.starts_with("data:video");
+                let is_audio = media
+                    .content_type
+                    .as_deref()
+                    .is_some_and(|ct| ct.starts_with("audio"))
+                    || media.url.starts_with("data:audio");
+
+                counts.images += if is_image { 1 } else { 0 };
+                counts.videos += if is_video { 1 } else { 0 };
+                counts.audio += if is_audio { 1 } else { 0 };
+            }
+            counts
+        })
+}
+
+/// Calculates basic usage statistics from the given model inputs and outputs.
+pub fn get_basic_usage_stats(input: &[MessageData], response: ResponseData) -> GenerationUsage {
+    let input_parts: Vec<&Part> = input.iter().flat_map(|m| m.content.iter()).collect();
+    let input_counts = get_part_counts(&input_parts);
+
+    let output_parts: Vec<&Part> = match response {
+        ResponseData::Message(m) => m.content.iter().collect(),
+        ResponseData::Candidates(c) => c
+            .iter()
+            .flat_map(|candidate| candidate.message.content.iter())
+            .collect(),
+    };
+    let output_counts = get_part_counts(&output_parts);
+
+    GenerationUsage {
+        input_characters: Some(input_counts.characters),
+        input_images: Some(input_counts.images),
+        input_videos: Some(input_counts.videos),
+        input_audio_files: Some(input_counts.audio),
+        output_characters: Some(output_counts.characters),
+        output_images: Some(output_counts.images),
+        output_videos: Some(output_counts.videos),
+        output_audio_files: Some(output_counts.audio),
+        ..Default::default()
     }
 }

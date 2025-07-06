@@ -21,6 +21,16 @@ use schemars::JsonSchema;
 use serde::{de::DeserializeOwned, Deserialize, Serialize};
 use std::fmt;
 
+#[derive(Clone, Debug, Default, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct Operation {
+    pub id: String,
+    pub done: bool,
+    // The result of a "done" operation is a GenerateResponseData.
+    // Boxed to avoid recursive type.
+    pub result: Option<Box<GenerateResponseData>>,
+}
+
 /// Represents the result from a `generate()` call.
 #[derive(Clone, Default, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "camelCase")]
@@ -31,8 +41,7 @@ pub struct GenerateResponse<O = serde_json::Value> {
     pub usage: Option<GenerationUsage>,
     pub custom: Option<serde_json::Value>,
     pub request: Option<GenerateRequest>,
-    // In Rust, we'll handle operations differently, likely not as a direct field.
-    // pub operation: Option<Operation<GenerateResponseData>>,
+    pub operation: Option<Operation>,
     pub model: Option<String>,
     #[serde(skip)]
     pub parser: Option<MessageParser<O>>,
@@ -47,6 +56,7 @@ impl<O: fmt::Debug> fmt::Debug for GenerateResponse<O> {
             .field("usage", &self.usage)
             .field("custom", &self.custom)
             .field("request", &self.request)
+            .field("operation", &self.operation)
             .field("model", &self.model)
             .field(
                 "parser",
@@ -81,6 +91,11 @@ where
             usage: response.usage.clone(),
             custom: response.custom.clone(),
             request,
+            operation: response.operation.as_ref().map(|id| Operation {
+                id: id.clone(),
+                done: false,
+                result: None,
+            }),
             model: None,  // This would be populated from the request or model action.
             parser: None, // A parser can be attached later.
         }
@@ -236,8 +251,7 @@ where
             candidates,
             usage: self.usage.clone(),
             custom: self.custom.clone(),
-            // Operation and aggregated are not handled here.
-            operation: None,
+            operation: self.operation.as_ref().map(|o| o.id.clone()),
             aggregated: None,
         })
     }
