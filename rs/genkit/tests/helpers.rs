@@ -307,6 +307,10 @@ impl Plugin for TsEchoModelPlugin {
             DefineModelOptions {
                 name: "echoModel".to_string(),
                 label: Some("TS-Compatible Echo Model".to_string()),
+                supports: Some(ModelInfoSupports {
+                    system_role: Some(true),
+                    ..Default::default()
+                }),
                 ..Default::default()
             },
             move |req: GenerateRequest, streaming_callback| {

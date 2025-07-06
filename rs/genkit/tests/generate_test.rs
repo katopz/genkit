@@ -114,8 +114,9 @@ async fn test_calls_default_model_system_message(
         response.text().unwrap(),
         "Echo: system: talk like a pirate,hi; config: null"
     );
+
     let locked_request = last_request.lock().unwrap();
-    let messages = locked_request.as_ref().unwrap().messages.clone();
+    let messages = &locked_request.as_ref().unwrap().messages;
     assert_eq!(messages.len(), 2);
     assert_eq!(messages[0].role, Role::System);
     assert_eq!(messages[0].text(), "talk like a pirate");
