@@ -119,4 +119,12 @@ async fn test_custom_format_native_constrained(#[future] mut registry: Registry)
     let final_output = final_response.output().unwrap();
     println!("final_response.output() result: {:?}", final_output);
     assert_eq!(final_output, "banana: Echo: hi");
+
+    let request = final_response.request.as_ref().unwrap();
+    assert_eq!(request.messages.len(), 1);
+    assert_eq!(request.messages[0].content[0].text.as_deref(), Some("hi"));
+    assert_eq!(request.messages[0].role, genkit_ai::Role::User);
+    assert_eq!(request.output, Some("banana".to_string()));
+    assert!(request.tools.is_none());
+    assert!(request.config.is_none());
 }
