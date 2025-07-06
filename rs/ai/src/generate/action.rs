@@ -276,6 +276,7 @@ async fn run_model_via_middleware(
 }
 
 /// The core, private implementation of the generation logic.
+#[allow(clippy::type_complexity)]
 fn generate_internal<O>(
     registry: Arc<Registry>,
     options: GenerateHelperOptions<O>,
