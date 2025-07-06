@@ -34,7 +34,7 @@ use std::marker::PhantomData;
 /// Represents the state of a long-running background operation.
 ///
 /// This struct is used to track the progress and result of a `BackgroundAction`.
-#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, Default)]
 pub struct Operation<O = Value> {
     /// The key of the action that this operation belongs to.
     pub action: Option<String>,
