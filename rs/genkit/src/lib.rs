@@ -92,11 +92,12 @@ pub use genkit_ai::session::{Session, SessionStore};
 use genkit_ai::tool::{dynamic_tool_without_runner, InterruptConfig, ToolFnOptions};
 pub use genkit_ai::GenerateStreamResponse;
 use genkit_ai::{
-    define_background_model, define_model, define_resource, dynamic_tool, generate_operation,
-    BaseEvalDataPoint, EmbedRequest, EmbedResponse, EvalResponse, GenerateResponseChunkData,
-    GenerateResponseData, ModelAction, ResourceAction, ResourceInput, ResourceOptions,
-    ResourceOutput,
+    check_operation, define_background_model, define_model, define_resource, dynamic_tool,
+    generate_operation, BaseEvalDataPoint, EmbedRequest, EmbedResponse, EvalResponse,
+    GenerateResponseChunkData, GenerateResponseData, ModelAction, ResourceAction, ResourceInput,
+    ResourceOptions, ResourceOutput,
 };
+use genkit_core::background_action::Operation;
 pub use genkit_core::context::ActionContext;
 pub use genkit_core::registry::Registry;
 use genkit_core::{Action, ActionFnArg};
@@ -104,6 +105,7 @@ use schemars::JsonSchema;
 use serde::Deserialize;
 #[cfg(feature = "beta")]
 use serde::{de::DeserializeOwned, Serialize};
+use serde_json::Value;
 use std::future::Future;
 use std::sync::Arc;
 
@@ -433,6 +435,10 @@ impl Genkit {
             + std::fmt::Debug,
     {
         _generate_stream(&self.registry, options).await
+    }
+
+    pub async fn check_operation(&self, operation: &Operation<Value>) -> Result<Operation<Value>> {
+        check_operation(&self.registry, operation).await
     }
 
     /// Creates a new, empty session.
