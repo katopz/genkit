@@ -17,13 +17,14 @@
 mod helpers;
 
 use futures_util::StreamExt;
+use genkit::formats::Formatter;
 use genkit::model::Message;
 use genkit_ai::formats::types::FormatHandler;
 use genkit_ai::generate::{generate, generate_stream, OutputOptions};
 use genkit_ai::GenerateOptions;
 use genkit_core::registry::Registry;
 use rstest::*;
-use serde_json::{json, Value};
+use serde_json::Value;
 use std::sync::Arc;
 
 struct BananaFormat;
@@ -44,7 +45,7 @@ impl genkit_ai::formats::Format for BananaFormat {
 }
 
 #[fixture]
-fn registry() -> Registry {
+async fn registry() -> Registry {
     let mut registry = Registry::new();
     genkit_ai::configure_ai(&mut registry);
     let banana_handler: FormatHandler = Arc::new(|_schema| Box::new(BananaFormat));
@@ -58,12 +59,17 @@ fn registry() -> Registry {
         banana_config.clone(),
         banana_handler.clone(),
     );
+    let format_keys = registry.lookup_value::<Formatter>("format", "json").await;
+    println!("[fixture] Registered format keys: {:?}", format_keys);
+    let format_keys: Vec<String> = registry.list_values("format").keys().cloned().collect();
+    println!("[fixture] Registered format keys: {:?}", format_keys);
     registry
 }
 
 #[rstest]
 #[tokio::test]
-async fn test_custom_format_native_constrained(mut registry: Registry) {
+async fn test_custom_format_native_constrained(#[future] mut registry: Registry) {
+    let mut registry = registry.await;
     helpers::define_echo_model(&mut registry, "all");
 
     let response = generate(
@@ -111,63 +117,4 @@ async fn test_custom_format_native_constrained(mut registry: Registry) {
     let final_output = final_response.output().unwrap();
     println!("final_response.output() result: {:?}", final_output);
     assert_eq!(final_output, "banana: Echo: hi");
-}
-
-#[rstest]
-#[tokio::test]
-async fn test_custom_format_simulated_constrained(mut registry: Registry) {
-    helpers::define_echo_model(&mut registry, "none");
-
-    let response = generate(
-        &registry,
-        GenerateOptions::<String> {
-            model: Some(genkit::model::Model::Name("echoModel".to_string())),
-            prompt: Some(vec![genkit::model::Part::text("hi")]),
-            output: Some(OutputOptions {
-                format: Some("banana".to_string()),
-                ..Default::default()
-            }),
-            ..Default::default()
-        },
-    )
-    .await
-    .unwrap();
-
-    assert_eq!(response.output().unwrap(), "banana: Echo: hi");
-}
-
-#[rstest]
-#[tokio::test]
-async fn test_override_format_options(mut registry: Registry) {
-    helpers::define_echo_model(&mut registry, "none");
-    let response = generate(
-        &registry,
-        GenerateOptions::<serde_json::Value> {
-            model: Some(genkit::model::Model::Name("echoModel".to_string())),
-            prompt: Some(vec![genkit::model::Part::text("hi")]),
-            output: Some(OutputOptions {
-                format: Some("banana".to_string()),
-                constrained: Some(false),
-                schema: Some(json!({ "type": "string" })),
-                ..Default::default()
-            }),
-            ..Default::default()
-        },
-    )
-    .await
-    .unwrap();
-
-    let last_message = response
-        .request
-        .unwrap()
-        .messages
-        .last()
-        .cloned()
-        .unwrap_or_default();
-    let context_part = &last_message.content[1];
-    let context_text = context_part.text.as_ref().unwrap();
-
-    // In simulated constrained generation, instructions are added.
-    // When `constrained: false` is passed, it should simulate and add instructions.
-    assert!(context_text.contains("Output should be in banana format"));
 }

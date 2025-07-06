@@ -208,7 +208,7 @@ struct RegistryState {
     actions: HashMap<String, Arc<dyn ErasedAction>>,
     plugins: HashMap<String, Arc<dyn Plugin>>,
     schemas: HashMap<String, schema::ProvidedSchema>,
-    values: HashMap<String, HashMap<String, Arc<dyn Any + Send + Sync>>>,
+    values: HashMap<String, Arc<dyn Any + Send + Sync>>,
     parent: Option<Registry>,
     default_model: Option<String>,
 }
@@ -324,6 +324,11 @@ impl Registry {
         None
     }
 
+    /// Returns the parent registry, if one exists.
+    pub fn parent(&self) -> Option<Registry> {
+        self.state.lock().unwrap().parent.clone()
+    }
+
     /// Registers an action with the registry.
     ///
     /// The action key is automatically generated from its type and name.
@@ -410,13 +415,18 @@ impl Registry {
     }
 
     /// Registers a generic value with the registry, keyed by type and name.
-    pub fn register_value<T: Any + Send + Sync>(&mut self, value_type: &str, name: &str, value: T) {
-        let mut state = self.state.lock().unwrap();
-        state
+    pub fn register_value<T: 'static + Send + Sync>(
+        &mut self,
+        value_type: &str,
+        name: &str,
+        value: T,
+    ) {
+        let key = format!("{}/{}", value_type, name);
+        self.state
+            .lock()
+            .unwrap()
             .values
-            .entry(value_type.to_string())
-            .or_default()
-            .insert(name.to_string(), Arc::new(value));
+            .insert(key, Arc::new(value));
     }
 
     /// Looks up a generic value from the registry.
@@ -425,13 +435,12 @@ impl Registry {
         value_type: &str,
         name: &str,
     ) -> Option<Arc<T>> {
+        let key = format!("{}/{}", value_type, name);
         let parent = {
             let state = self.state.lock().unwrap();
-            if let Some(values_of_type) = state.values.get(value_type) {
-                if let Some(value) = values_of_type.get(name) {
-                    // Attempt to downcast the `Arc<dyn Any>` to `Arc<T>`.
-                    return value.clone().downcast().ok();
-                }
+            if let Some(value) = state.values.get(&key) {
+                // Attempt to downcast the `Arc<dyn Any>` to `Arc<T>`.
+                return value.clone().downcast().ok();
             }
             state.parent.clone()
         };
@@ -441,6 +450,26 @@ impl Registry {
         }
 
         None
+    }
+
+    pub fn list_values(&self, value_type: &str) -> HashMap<String, Arc<dyn Any + Send + Sync>> {
+        let parent = self.state.lock().unwrap().parent.clone();
+
+        let mut all_values = if let Some(parent) = parent {
+            parent.list_values(value_type)
+        } else {
+            HashMap::new()
+        };
+
+        let state = self.state.lock().unwrap();
+        let prefix = format!("{}/", value_type);
+        for (key, value) in &state.values {
+            if let Some(name) = key.strip_prefix(&prefix) {
+                all_values.insert(name.to_string(), value.clone());
+            }
+        }
+
+        all_values
     }
 }
 
