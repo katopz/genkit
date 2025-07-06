@@ -28,8 +28,9 @@ pub use self::chunk::GenerateResponseChunk;
 pub use self::response::GenerateResponse;
 
 use crate::document::{Document, Part, ToolRequest, ToolRequestPart, ToolResponsePart};
+use crate::formats::{self};
 use crate::generate::action::{run_with_streaming_callback, ModelMiddleware};
-use crate::message::{MessageData, Role};
+use crate::message::{Message, MessageData, Role};
 use crate::model::GenerateRequest;
 use crate::tool::{self, ToolArgument};
 use crate::GenerateResponseData;
@@ -232,10 +233,6 @@ where
         + 'static
         + std::fmt::Debug,
 {
-    println!(
-        "[GENERATE] Called. on_chunk.is_some(): {}",
-        options.on_chunk.is_some()
-    );
     // If no model is specified in the options, try to use the default from the registry.
     if options.model.is_none() {
         if let Some(model_name) = registry.get_default_model() {
@@ -243,15 +240,9 @@ where
         }
     }
 
-    println!(
-        "[GENERATE] Before take(), options.on_chunk.is_some(): {}",
-        options.on_chunk.is_some()
-    );
-    let on_chunk_callback = options.on_chunk.clone();
-    println!(
-        "[GENERATE] After take(), on_chunk_callback.is_some(): {}",
-        on_chunk_callback.is_some()
-    );
+    let output_options = options.output.clone();
+
+    let on_chunk_callback = options.on_chunk.take();
     let registry_clone = registry.clone();
 
     // FIX #1: Add explicit type annotation for the trait object.
@@ -269,7 +260,7 @@ where
     });
 
     // FIX #3: Wrap the async block in a no-argument closure `||`.
-    run_with_streaming_callback(core_streaming_callback, || async move {
+    let mut response = run_with_streaming_callback(core_streaming_callback, || async move {
         let helper_options = action::GenerateHelperOptions {
             middleware: options.r#use.take().unwrap_or_default(),
             raw_request: options,
@@ -278,7 +269,31 @@ where
         };
         action::generate_helper(Arc::new(registry_clone), helper_options).await
     })
-    .await
+    .await?;
+
+    if let Some(formatter) = formats::resolve_format(registry, output_options.as_ref()).await {
+        let schema: Option<schemars::Schema> = output_options
+            .as_ref()
+            .and_then(|o| o.schema.as_ref())
+            .and_then(|v| serde_json::from_value(v.clone()).ok());
+
+        let format_impl = (formatter.handler)(schema.as_ref());
+
+        let parser = Arc::new(move |msg: &Message<O>| {
+            let value_msg = Message::<Value>::new(msg.to_json(), None);
+
+            let parsed_value = format_impl.parse_message(&value_msg);
+            serde_json::from_value(parsed_value)
+                .map_err(|e| Error::new_internal(format!("Format parser error: {}", e)))
+        });
+
+        if let Some(message) = response.message.as_mut() {
+            message.set_parser(parser.clone());
+        }
+        response.parser = Some(parser);
+    }
+
+    Ok(response)
 }
 
 /// Generates content and streams the response.

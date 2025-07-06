@@ -62,7 +62,7 @@ pub struct Message<O = Value> {
     pub content: Vec<Part>,
     pub metadata: Option<HashMap<String, Value>>,
     #[serde(skip)]
-    parser: Option<MessageParser<O>>,
+    pub parser: Option<MessageParser<O>>,
 }
 
 impl<O> std::fmt::Debug for Message<O> {
@@ -87,6 +87,11 @@ where
             metadata: data.metadata,
             parser,
         }
+    }
+
+    /// Sets the parser for this message.
+    pub fn set_parser(&mut self, parser: MessageParser<O>) {
+        self.parser = Some(parser);
     }
 
     /// Normalizes different content formats into a `Vec<Part>`.
@@ -118,7 +123,8 @@ where
     /// 1. If a custom `parser` is provided, it is used.
     /// 2. Otherwise, it looks for a `Part` with a `data` field and returns that.
     /// 3. As a final fallback, it concatenates all `text` parts and tries to parse
-    ///    it as JSON.
+    ///    it as JSON. If that fails, it will attempt to use the raw text if the
+    ///    requested type is a string.
     pub fn output(&self) -> Result<O> {
         if let Some(parser) = &self.parser {
             return parser(self);
@@ -128,8 +134,18 @@ where
                 Error::new_internal(format!("Failed to deserialize data part: {}", e))
             });
         }
-        extract_json(&self.text())?
-            .ok_or_else(|| Error::new_internal("No structured output found in message".to_string()))
+        let text = self.text();
+        match extract_json(&text)? {
+            Some(value) => serde_json::from_value(value).map_err(|e| {
+                Error::new_internal(format!("Failed to deserialize structured output: {}", e))
+            }),
+            None => {
+                // Attempt to treat the whole text as a string output, if that's what is expected.
+                serde_json::from_value(Value::String(text)).map_err(|_| {
+                    Error::new_internal("No structured output found in message".to_string())
+                })
+            }
+        }
     }
 
     /// Extracts and concatenates all `text` from the message's parts.
