@@ -85,6 +85,9 @@ async fn test_starts_the_operation(
         *handler = Arc::new(Box::new(move |_req, _cb| {
             Box::pin(async {
                 Ok(GenerateResponseData {
+                    candidates: vec![Candidate {
+                        ..Default::default()
+                    }],
                     operation: Some("123".to_string()),
                     ..Default::default()
                 })

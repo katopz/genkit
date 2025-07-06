@@ -76,6 +76,10 @@ where
 {
     /// Creates a new `GenerateResponse` from the raw data and options.
     pub fn new(response: &GenerateResponseData, request: Option<GenerateRequest>) -> Self {
+        println!(
+            "[GenerateResponse::new] Received response data: {:?}",
+            response
+        );
         let generated_message = response.candidates.first().map(|c| c.message.clone());
 
         Self {
