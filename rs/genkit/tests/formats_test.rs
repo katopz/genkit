@@ -104,7 +104,9 @@ async fn test_custom_format_native_constrained(#[future] mut registry: Registry)
             }),
             ..Default::default()
         },
-    );
+    )
+    .await
+    .unwrap();
 
     let mut chunks = Vec::new();
     while let Some(chunk) = stream_resp.stream.next().await {

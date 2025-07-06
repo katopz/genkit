@@ -306,10 +306,10 @@ where
 }
 
 /// Generates content and streams the response.
-pub fn generate_stream<O>(
+pub async fn generate_stream<O>(
     registry: &Registry,
-    options: GenerateOptions<O>,
-) -> GenerateStreamResponse<O>
+    mut options: GenerateOptions<O>,
+) -> Result<GenerateStreamResponse<O>>
 where
     O: Clone
         + Default
@@ -324,30 +324,73 @@ where
         "[STREAM] Called. options.on_chunk.is_some(): {}",
         options.on_chunk.is_some()
     );
-    let (tx, rx) = mpsc::channel(128);
-    let mut stream_options = options;
 
-    let tx_for_callback = tx.clone();
+    let output_options = options.output.clone();
+    let chunk_parser =
+        if let Some(formatter) = formats::resolve_format(registry, output_options.as_ref()).await {
+            println!("[STREAM] Found formatter: {}", formatter.name);
+            let schema: Option<schemars::Schema> = output_options
+                .as_ref()
+                .and_then(|o| o.schema.as_ref())
+                .and_then(|v| serde_json::from_value(v.clone()).ok());
+            let format_impl = (formatter.handler)(schema.as_ref());
+
+            let parser_closure = move |chunk: &GenerateResponseChunk<O>| {
+                // Because the chunk parser in formats/ expects a `Value` chunk,
+                // we have to do this conversion.
+                let value_chunk_data = chunk.to_json();
+                let value_chunk = GenerateResponseChunk::<Value>::new(
+                    value_chunk_data,
+                    chunk::GenerateResponseChunkOptions {
+                        previous_chunks: chunk.previous_chunks.clone().unwrap_or_default(),
+                        role: chunk.role.clone(),
+                        index: Some(chunk.index),
+                    },
+                );
+
+                if let Some(parsed_val) = format_impl.parse_chunk(&value_chunk) {
+                    serde_json::from_value(parsed_val).map_err(|e| {
+                        Error::new_internal(format!(
+                            "Failed to deserialize value from chunk parser: {}",
+                            e
+                        ))
+                    })
+                } else {
+                    Err(Error::new_internal(
+                        "Chunk parser returned None".to_string(),
+                    ))
+                }
+            };
+            Some(Arc::new(parser_closure) as chunk::ChunkParser<O>)
+        } else {
+            println!("[STREAM] No formatter found.");
+            None
+        };
+
+    let (tx, rx) = mpsc::channel(128);
+
     // Create a callback that sends chunks into the channel.
-    let on_chunk: OnChunkCallback<O> = Arc::new(move |chunk| {
-        println!("[STREAM] on_chunk callback invoked. Sending chunk to stream channel.");
+    let tx_for_callback = tx.clone();
+    let on_chunk: OnChunkCallback<O> = Arc::new(move |mut chunk| {
+        println!("[STREAM] on_chunk callback invoked. Attaching parser and sending chunk to stream channel.");
+        // Attach the parser we just created.
+        chunk.parser = chunk_parser.clone();
         // We use try_send to avoid blocking.
         let _ = tx_for_callback.try_send(Ok(chunk));
         Ok(())
     });
+    options.on_chunk = Some(on_chunk);
 
-    stream_options.on_chunk = Some(on_chunk);
     let registry_clone = registry.clone();
 
     // Spawn the background generation task.
     println!("[STREAM] Spawning background task to call generate().");
-    let tx_for_error = tx.clone();
     let response_handle = tokio::spawn(async move {
         println!(
             "[STREAM_TASK] Started. Calling generate() with on_chunk.is_some(): {}",
-            stream_options.on_chunk.is_some()
+            options.on_chunk.is_some()
         );
-        let final_result = generate(&registry_clone, stream_options).await;
+        let final_result = generate(&registry_clone, options).await;
         println!(
             "[STREAM_TASK] generate() finished. Result is_ok(): {}",
             final_result.is_ok()
@@ -355,18 +398,17 @@ where
 
         if let Err(e) = &final_result {
             let new_error = Error::new_internal(e.to_string());
-            let _ = tx_for_error.send(Err(new_error)).await;
+            let _ = tx.send(Err(new_error)).await;
         }
-
         final_result
     });
 
     let stream = ReceiverStream::new(rx);
 
-    GenerateStreamResponse {
+    Ok(GenerateStreamResponse {
         stream: Box::pin(stream),
         response: response_handle,
-    }
+    })
 }
 
 /// Starts a long-running generation operation.

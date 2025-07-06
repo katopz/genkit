@@ -418,21 +418,21 @@ impl Genkit {
     }
 
     /// Generates content and streams the response.
-    pub fn generate_stream<O>(
+    pub async fn generate_stream<O>(
         &self,
-        options: GenerateOptions<O>,
-    ) -> genkit_ai::generate::GenerateStreamResponse<O>
+        options: genkit_ai::generate::GenerateOptions<O>,
+    ) -> Result<genkit_ai::generate::GenerateStreamResponse<O>>
     where
         O: Clone
             + Default
-            + for<'de> DeserializeOwned
-            + Serialize
+            + for<'de> serde::de::DeserializeOwned
+            + serde::Serialize
             + Send
             + Sync
             + 'static
             + std::fmt::Debug,
     {
-        _generate_stream(&self.registry, options)
+        _generate_stream(&self.registry, options).await
     }
 
     /// Creates a new, empty session.

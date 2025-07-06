@@ -108,38 +108,13 @@ where
     }
 
     /// Generates a streaming response.
-    pub fn stream(
+    pub async fn stream(
         &self,
         input: I,
         opts: Option<PromptGenerateOptions<O>>,
-    ) -> GenerateStreamResponse<O> {
-        let registry_clone = self.registry.clone();
-        let config_clone = self.config.clone();
-
-        let response_handle = tokio::spawn(async move {
-            let prompt = ExecutablePrompt {
-                config: config_clone,
-                registry: registry_clone,
-            };
-            prompt.render(input, opts).await
-        });
-
-        let (tx, rx) = tokio::sync::mpsc::channel(128);
-        let final_response_handle = tokio::spawn(async move {
-            let render_opts = response_handle.await.unwrap()?;
-            let mut stream_resp = generate_stream::<O>(&Registry::new(), render_opts);
-            while let Some(chunk) = futures_util::StreamExt::next(&mut stream_resp.stream).await {
-                if tx.send(chunk).await.is_err() {
-                    break;
-                }
-            }
-            stream_resp.response.await.unwrap()
-        });
-
-        GenerateStreamResponse {
-            stream: Box::pin(tokio_stream::wrappers::ReceiverStream::new(rx)),
-            response: final_response_handle,
-        }
+    ) -> Result<GenerateStreamResponse<O>> {
+        let render_opts = self.render(input, opts).await?;
+        generate_stream::<O>(&self.registry, render_opts).await
     }
 
     /// Renders the prompt template into a `GenerateOptions` struct.

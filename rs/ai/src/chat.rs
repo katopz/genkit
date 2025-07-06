@@ -233,7 +233,7 @@ impl<S: Serialize + DeserializeOwned + Clone + Send + Sync + 'static> Chat<S> {
     pub async fn send_stream(
         &self,
         input: impl Into<SendInput> + Send + 'static,
-    ) -> GenerateStreamResponse {
+    ) -> Result<GenerateStreamResponse> {
         let resolved_options = resolve_send_options(input.into());
         let state = self.state.lock().await;
         let base_options = state.request_base.clone();
@@ -262,7 +262,7 @@ impl<S: Serialize + DeserializeOwned + Clone + Send + Sync + 'static> Chat<S> {
         // NOTE: This doesn't yet handle state updates after the stream completes.
         // A more complete implementation would spawn a task to await the final
         // response from the stream and then update the chat's message history.
-        generate_stream(&self.session.registry, generate_options)
+        generate_stream(&self.session.registry, generate_options).await
     }
 
     /// Adds a "preamble" message to the beginning of the chat history.

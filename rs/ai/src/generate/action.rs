@@ -326,26 +326,44 @@ where
 
         // 3. Resolve and apply format.
         if let Some(format) = formats::resolve_format(&registry, request.output.as_ref()).await {
-            let schema_value = request
-                .output
-                .as_ref()
-                .and_then(|opts| opts.schema.as_ref());
-            let schema: Option<schemars::Schema> =
-                schema_value.and_then(|v| serde_json::from_value(v.clone()).ok());
-            let instructions_option = request
-                .output
-                .as_ref()
-                .and_then(|opts| opts.instructions.as_ref());
+            // Get model info from the action's metadata
+            let model_info: Option<crate::model::ModelInfo> = model_action
+                .metadata()
+                .metadata
+                .get("metadata")
+                .and_then(|v| serde_json::from_value(v.clone()).ok());
 
-            let instructions = formats::resolve_instructions(
-                Some(format.as_ref()),
-                schema.as_ref(),
-                instructions_option,
-            );
-            if instructions.is_some() {
-                let messages = request.messages.get_or_insert_with(Vec::new);
-                let updated_messages = formats::inject_instructions(messages, instructions);
-                request.messages = Some(updated_messages);
+            // Check if model supports the format natively
+            let model_supports_format = model_info
+                .as_ref()
+                .and_then(|info| info.supports.as_ref())
+                .and_then(|supports| supports.output.as_ref())
+                .map_or(false, |supported_formats| {
+                    supported_formats.contains(&format.name)
+                });
+
+            // Only inject instructions if the model does NOT support the format.
+            if !model_supports_format {
+                let schema_value = request
+                    .output
+                    .as_ref()
+                    .and_then(|opts| opts.schema.as_ref());
+                let schema: Option<schemars::Schema> =
+                    schema_value.and_then(|v| serde_json::from_value(v.clone()).ok());
+                let instructions_option = request
+                    .output
+                    .as_ref()
+                    .and_then(|opts| opts.instructions.as_ref());
+                let instructions = formats::resolve_instructions(
+                    Some(format.as_ref()),
+                    schema.as_ref(),
+                    instructions_option,
+                );
+                if instructions.is_some() {
+                    let messages = request.messages.get_or_insert_with(Vec::new);
+                    let updated_messages = formats::inject_instructions(messages, instructions);
+                    request.messages = Some(updated_messages);
+                }
             }
 
             if let Some(output_opts) = request.output.as_mut() {

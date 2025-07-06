@@ -103,11 +103,13 @@ async fn test_streams_default_model() {
         }));
     }
 
-    let mut response_container: genkit::GenerateStreamResponse =
-        genkit.generate_stream(GenerateOptions {
+    let mut response_container: genkit::GenerateStreamResponse = genkit
+        .generate_stream(GenerateOptions {
             prompt: Some(vec![Part::text("unused".to_string())]),
             ..Default::default()
-        });
+        })
+        .await
+        .unwrap();
 
     let mut chunks = Vec::new();
     while let Some(chunk_result) = response_container.stream.next().await {
@@ -144,11 +146,14 @@ async fn test_streaming_rethrows_response_errors() {
     .unwrap();
 
     let model = Some(Model::Name("blockingModel".to_string()));
-    let stream_response: genkit::GenerateStreamResponse = genkit.generate_stream(GenerateOptions {
-        model,
-        prompt: Some(vec![Part::text("short and sweet".to_string())]),
-        ..Default::default()
-    });
+    let stream_response: genkit::GenerateStreamResponse = genkit
+        .generate_stream(GenerateOptions {
+            model,
+            prompt: Some(vec![Part::text("short and sweet".to_string())]),
+            ..Default::default()
+        })
+        .await
+        .unwrap();
 
     assert!(stream_response.response.await.unwrap().is_err());
 }
@@ -159,11 +164,14 @@ async fn test_generate_stream_rethrows_initialization_errors() {
     let (genkit, _) = helpers::genkit_instance_for_test().await;
 
     // Call generate_stream with a model that doesn't exist.
-    let mut resp: genkit::GenerateStreamResponse = genkit.generate_stream(GenerateOptions {
-        model: Some(Model::Name("modelNotFound".to_string())),
-        prompt: Some(vec![Part::text("hi")]),
-        ..Default::default()
-    });
+    let mut resp: genkit::GenerateStreamResponse = genkit
+        .generate_stream(GenerateOptions {
+            model: Some(Model::Name("modelNotFound".to_string())),
+            prompt: Some(vec![Part::text("hi")]),
+            ..Default::default()
+        })
+        .await
+        .unwrap();
 
     // Try to get the first item from the stream.
     // This is where the initialization error should now appear.
