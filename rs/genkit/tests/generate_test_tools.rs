@@ -943,11 +943,17 @@ async fn test_can_resume_generation() {
         // In this test, we only care about resuming, so the initial
         // implementation just interrupts.
         |_: (), options: ToolFnOptions| async move {
-            if options.context.additional_context.contains_key("restart") {
-                Ok(true)
-            } else {
-                Err((options.interrupt)(None))
+            if let Some(status) = options
+                .context
+                .additional_context
+                .get("status")
+                .and_then(|v| v.as_str())
+            {
+                if status == "ok" {
+                    return Ok(true);
+                }
             }
+            Err((options.interrupt)(None))
         },
     );
 
@@ -1076,7 +1082,46 @@ async fn test_can_resume_generation() {
         .unwrap();
 
     let final_messages = response.messages().unwrap();
+    let revised_model_message = final_messages.get(final_messages.len() - 3).unwrap();
     let tool_message = final_messages.get(final_messages.len() - 2).unwrap();
+
+    let expected_revised_model_content = vec![
+        Part {
+            tool_request: Some(ToolRequest {
+                name: "interrupter".to_string(),
+                input: Some(json!({})),
+                ref_id: Some("1".to_string()),
+            }),
+            metadata: Some(serde_json::from_str(r#"{"resolvedInterrupt":true}"#).unwrap()),
+            ..Default::default()
+        },
+        Part {
+            tool_request: Some(ToolRequest {
+                name: "truth".to_string(),
+                input: Some(json!({})),
+                ref_id: Some("2".to_string()),
+            }),
+            // NOTE: The TS implementation removes `pendingOutput` metadata here. The Rust
+            // implementation currently does not, so a passing test would assert
+            // `{"pendingOutput":true}`. We assert for empty metadata to align with the
+            // TS test's expectation.
+            metadata: Some(serde_json::from_str(r#"{}"#).unwrap()),
+            ..Default::default()
+        },
+        Part {
+            tool_request: Some(ToolRequest {
+                name: "resumable".to_string(),
+                input: Some(json!({})),
+                ref_id: Some("3".to_string()),
+            }),
+            metadata: Some(serde_json::from_str(r#"{"resolvedInterrupt":true}"#).unwrap()),
+            ..Default::default()
+        },
+    ];
+    assert_eq!(
+        revised_model_message.content,
+        expected_revised_model_content
+    );
 
     let expected_tool_content = vec![
         Part {
