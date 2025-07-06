@@ -18,7 +18,7 @@
 //! expose an OpenAI-compatible API, such as various versions of Llama.
 
 use crate::common::VertexAIPluginOptions;
-use genkit_ai::model::{GenerateResponseChunkData, ModelAction, ModelInfo, ModelRef};
+use genkit_ai::model::{GenerateResponseChunkData, ModelAction, ModelRef};
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 

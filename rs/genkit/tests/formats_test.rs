@@ -226,10 +226,10 @@ async fn test_override_format_options(#[future] mut registry: Registry) {
     let instruction_part_found = last_message.content.iter().any(|p| {
         p.metadata
             .as_ref()
-            .map_or(false, |m| m.get("purpose") == Some(&"output".into()))
+            .is_some_and(|m| m.get("purpose") == Some(&"output".into()))
             && p.text
                 .as_ref()
-                .map_or(false, |t| t.contains("Output should be in banana format"))
+                .is_some_and(|t| t.contains("Output should be in banana format"))
     });
 
     assert!(

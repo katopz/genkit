@@ -34,7 +34,7 @@ use self::model::gemini::define_gemini_model;
 use self::model::imagen::define_imagen_model;
 use self::model::SUPPORTED_EMBEDDER_MODELS;
 use async_trait::async_trait;
-use genkit_ai::{embedder_ref, EmbedderRef, ModelInfo, ModelRef};
+use genkit_ai::{embedder_ref, EmbedderRef, ModelRef};
 use genkit_core::{plugin::Plugin, registry::Registry};
 use serde_json::Value;
 use std::sync::Arc;
@@ -128,7 +128,7 @@ pub fn vertex_ai(options: VertexAIPluginOptions) -> Arc<dyn Plugin> {
 }
 
 /// Helper function to create a `ModelRef` for a Gemini model.
-pub fn gemini(name: &str) -> ModelRef<Value> {
+pub fn gemini(_name: &str) -> ModelRef<Value> {
     todo!();
     // model_ref(ModelInfo {
     //     name: format!("vertexai/{}", name).to_owned(),
@@ -137,7 +137,7 @@ pub fn gemini(name: &str) -> ModelRef<Value> {
 }
 
 /// Helper function to create a `ModelRef` for an Imagen model.
-pub fn imagen(name: &str) -> ModelRef<Value> {
+pub fn imagen(_name: &str) -> ModelRef<Value> {
     todo!();
     // model_ref(ModelInfo {
     //     name: format!("vertexai/{}", name).to_owned(),

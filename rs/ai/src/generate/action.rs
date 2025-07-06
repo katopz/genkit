@@ -342,9 +342,7 @@ where
                 .as_ref()
                 .and_then(|info| info.supports.as_ref())
                 .and_then(|supports| supports.output.as_ref())
-                .map_or(false, |supported_formats| {
-                    supported_formats.contains(&format.name)
-                });
+                .is_some_and(|supported_formats| supported_formats.contains(&format.name));
             println!(
                 "[generate_internal] Model supports format '{}' natively: {}",
                 &format.name, model_supports_format

@@ -21,7 +21,7 @@ use crate::common::{get_derived_params, VertexAIPluginOptions};
 use crate::{Error, Result};
 use genkit_ai::model::{
     define_model, CandidateData, FinishReason, GenerateRequest, GenerateResponseData, ModelAction,
-    ModelInfo, ModelInfoSupports, ModelRef,
+    ModelRef,
 };
 use genkit_ai::{Part, Role};
 use genkit_core::Registry;
