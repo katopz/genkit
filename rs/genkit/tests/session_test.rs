@@ -51,7 +51,7 @@ async fn test_maintains_history_in_the_session(
     let response2 = chat.send("bye").await.unwrap();
     assert_eq!(
         response2.text().unwrap(),
-        "Echo: hi; config: nullEcho: hi; config: nullbye; config: null"
+        "Echo: hi,Echo: hi; config: null,bye; config: null"
     );
 
     // Verify message history
@@ -69,6 +69,6 @@ async fn test_maintains_history_in_the_session(
     assert_eq!(history[3].role, Role::Model);
     assert_eq!(
         history[3].text(),
-        "Echo: hi; config: nullEcho: hi; config: nullbye; config: null"
+        "Echo: hi,Echo: hi; config: null,bye; config: null"
     );
 }

@@ -204,6 +204,10 @@ impl<S: Serialize + DeserializeOwned + Clone + Send + Sync + 'static> Chat<S> {
                         ..Default::default()
                     };
 
+                    println!(
+                        "[Chat::send] Generating with messages: {}",
+                        serde_json::to_string_pretty(&generate_opts.messages).unwrap_or_default()
+                    );
                     let response = generate(&self.session.registry, generate_opts).await?;
 
                     // Update state with any changes from the generation call.
@@ -216,6 +220,7 @@ impl<S: Serialize + DeserializeOwned + Clone + Send + Sync + 'static> Chat<S> {
                     }
 
                     let final_messages = response.messages()?;
+                    state.request_base.messages = final_messages.clone();
                     drop(state); // Unlock before calling async update_messages
 
                     self.update_messages(&final_messages).await?;

@@ -345,7 +345,7 @@ impl Plugin for TsEchoModelPlugin {
                             format!("{}{}", prefix, content)
                         })
                         .collect::<Vec<_>>()
-                        .join("");
+                        .join(",");
 
                     let config_str =
                         serde_json::to_string(&req.config).unwrap_or_else(|_| "null".to_string());
