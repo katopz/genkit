@@ -10,8 +10,8 @@ version.workspace    = true
 
 [dependencies]
 # Local Genkit dependencies
-genkit-ai   = { path = "../ai", public = true, version = "0.1.0" }
-genkit-core = { path = "../core", public = true, version = "0.1.0" }
+genkit-ai   = { path = "../ai", version = "0.1.0" }
+genkit-core = { path = "../core", version = "0.1.0" }
 
 # Dependencies for top-level Genkit APIs and struct
 async-trait.workspace       = true
