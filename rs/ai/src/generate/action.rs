@@ -338,9 +338,7 @@ where
                 .as_ref()
                 .and_then(|info| info.supports.as_ref())
                 .and_then(|supports| supports.output.as_ref())
-                .map_or(false, |supported_formats| {
-                    supported_formats.contains(&format.name)
-                });
+                .is_some_and(|supported_formats| supported_formats.contains(&format.name));
 
             // Only inject instructions if the model does NOT support the format.
             if !model_supports_format {
