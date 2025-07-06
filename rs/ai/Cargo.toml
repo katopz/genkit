@@ -26,16 +26,34 @@ serde_json.workspace = true
 thiserror.workspace = true
 
 # Other utilities
-base64.workspace       = true
-colored.workspace      = true
-futures-util.workspace = true
-jsonschema.workspace   = true
-reqwest                = { workspace = true, features = ["json"] }
-strum.workspace        = true
-strum_macros.workspace = true
-tokio-stream.workspace = true
-uritemplate.workspace  = true
-uuid.workspace         = true
+base64.workspace        = true
+colored.workspace       = true
+futures-util.workspace  = true
+jsonschema.workspace    = true
+reqwest                 = { workspace = true, features = ["json"] }
+rstest.workspace        = true
+rstest_macros.workspace = true
+strum.workspace         = true
+strum_macros.workspace  = true
+tokio-stream.workspace  = true
+uritemplate.workspace   = true
+uuid.workspace          = true
 
 [dev-dependencies]
 tokio-test.workspace = true
+
+[[test]]
+name = "action_test"
+path = "tests/generate/action_test.rs"
+
+[[test]]
+name = "chunk_test"
+path = "tests/generate/chunk_test.rs"
+
+[[test]]
+name = "middleware_test"
+path = "tests/model/middleware_test.rs"
+
+[[test]]
+name = "prompt_helpers_test"
+path = "tests/prompt/prompt_helpers_test.rs"
