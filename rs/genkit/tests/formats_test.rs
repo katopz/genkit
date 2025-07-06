@@ -128,3 +128,66 @@ async fn test_custom_format_native_constrained(#[future] mut registry: Registry)
     assert!(request.tools.is_none());
     assert!(request.config.is_none());
 }
+
+#[rstest]
+#[tokio::test]
+async fn test_custom_format_simulated_constrained(#[future] mut registry: Registry) {
+    let mut registry = registry.await;
+    helpers::define_echo_model(&mut registry, "none");
+
+    let response = generate(
+        &registry,
+        GenerateOptions::<String> {
+            model: Some(genkit::model::Model::Name("echoModel".to_string())),
+            prompt: Some(vec![genkit::model::Part::text("hi")]),
+            output: Some(OutputOptions {
+                format: Some("banana".to_string()),
+                ..Default::default()
+            }),
+            ..Default::default()
+        },
+    )
+    .await
+    .unwrap();
+
+    println!("response output:{:?}", response);
+
+    let output = response.output().unwrap();
+    println!("response.output() result: {:?}", output);
+    assert_eq!(output, "banana: Echo: hi");
+
+    let mut stream_resp = generate_stream(
+        &registry,
+        GenerateOptions::<String> {
+            model: Some(genkit::model::Model::Name("echoModel".to_string())),
+            prompt: Some(vec![genkit::model::Part::text("hi")]),
+            output: Some(OutputOptions {
+                format: Some("banana".to_string()),
+                ..Default::default()
+            }),
+            ..Default::default()
+        },
+    )
+    .await
+    .unwrap();
+
+    let mut chunks = Vec::new();
+    while let Some(chunk) = stream_resp.stream.next().await {
+        chunks.push(chunk.unwrap().output().unwrap().clone());
+    }
+    println!("chunks:{:?}", chunks);
+    assert_eq!(chunks, vec!["banana: 3", "banana: 2", "banana: 1"]);
+    let final_response = stream_resp.response.await.unwrap().unwrap();
+    println!("final_response: {:?}", final_response);
+    let final_output = final_response.output().unwrap();
+    println!("final_response.output() result: {:?}", final_output);
+    assert_eq!(final_output, "banana: Echo: hi");
+
+    let request = final_response.request.as_ref().unwrap();
+    assert_eq!(request.messages.len(), 1);
+    assert_eq!(request.messages[0].content[0].text.as_deref(), Some("hi"));
+    assert_eq!(request.messages[0].role, genkit_ai::Role::User);
+    assert_eq!(request.output, Some("banana".to_string()));
+    assert!(request.tools.is_none());
+    assert!(request.config.is_none());
+}

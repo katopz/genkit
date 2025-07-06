@@ -1,7 +1,7 @@
 use async_trait::async_trait;
 use genkit::{error::Result, registry::Registry};
 use genkit::{
-    model::{Candidate, FinishReason, Message, Part, Role},
+    model::{Candidate, FinishReason, Part, Role},
     plugin::Plugin,
     Genkit, GenkitOptions,
 };
@@ -46,7 +46,7 @@ pub fn define_echo_model(registry: &mut Registry, constrained_support: &str) {
         ..Default::default()
     };
     define_model(registry, model_opts, |req, streaming_callback| async move {
-        let last_msg_text = req.messages.last().cloned().unwrap_or_default();
+        let last_msg = req.messages.last().cloned().unwrap_or_default();
 
         // If a streaming callback is provided, we send down the countdown chunks.
         if let Some(cb) = streaming_callback {
@@ -73,11 +73,25 @@ pub fn define_echo_model(registry: &mut Registry, constrained_support: &str) {
             }
         }
 
+        // Filter out instructional parts before creating the echo text.
+        let filtered_text = last_msg
+            .content
+            .iter()
+            .filter(|p| {
+                p.metadata.as_ref().map_or_else(
+                    || true,
+                    |meta| {
+                        meta.get("purpose")
+                            != Some(&serde_json::Value::String("output".to_string()))
+                    },
+                )
+            })
+            .filter_map(|p| p.text.as_deref())
+            .collect::<Vec<&str>>()
+            .join("");
+
         // Both streaming and non-streaming calls return a final response.
-        let text = format!(
-            "Echo: {}",
-            Message::<String>::new(last_msg_text, None).text()
-        );
+        let text = format!("Echo: {}", filtered_text);
         Ok(GenerateResponseData {
             candidates: vec![Candidate {
                 index: 0,
