@@ -67,6 +67,14 @@ path = "tests/document_test.rs"
 name = "middleware_test"
 path = "tests/model/middleware_test.rs"
 
+[[test]]
+name = "middleware_test_simulate_system_prompt"
+path = "tests/model/middleware_test_simulate_system_prompt.rs"
+
+[[test]]
+name = "middleware_test_simulate_constrained_generation"
+path = "tests/model/middleware_test_simulate_constrained_generation.rs"
+
 # [[test]]
 # name = "action_test"
 # path = "tests/generate/action_test.rs"
