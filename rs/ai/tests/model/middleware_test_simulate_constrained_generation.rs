@@ -26,6 +26,7 @@ mod helpers;
 
 #[cfg(test)]
 mod test {
+    use genkit_ai::model::middleware::ModelMiddleware;
     use serde::{Deserialize, Serialize};
 
     use super::*;
@@ -35,10 +36,13 @@ mod test {
         let captured_req = Arc::new(Mutex::new(None));
         let captured_req_clone = captured_req.clone();
 
-        let next = move |req: GenerateRequest| -> genkit_ai::model::BoxFuture<'static, Result<GenerateResponseData>> {
+        let next = move |req: GenerateRequest| {
             let mut guard = captured_req_clone.lock().unwrap();
             *guard = Some(req);
             Box::pin(async { Ok(Default::default()) })
+                as std::pin::Pin<
+                    Box<dyn std::future::Future<Output = Result<GenerateResponseData>> + Send>,
+                >
         };
 
         let middleware = simulate_constrained_generation(None);
@@ -177,7 +181,6 @@ mod test {
 
     #[rstest]
     #[tokio::test]
-    #[ignore]
     async fn test_injects_instructions_into_request_idempotently() {
         use self::helpers::{registry_with_programmable_model, ProgrammableModelHandler};
         use genkit_ai::document::Part;
@@ -220,20 +223,19 @@ mod test {
             "$schema": "http://json-schema.org/draft-07/schema#"
         });
 
-        let renderer = move |s: &serde_json::Value| {
-            format!("must be json: {}", serde_json::to_string(s).unwrap())
-        };
+        let renderer: Box<dyn Fn(&serde_json::Value) -> String + Send + Sync> =
+            Box::new(move |s| format!("must be json: {}", serde_json::to_string(s).unwrap()));
         let options = SimulatedConstrainedGenerationOptions {
-            instructions_renderer: Some(Box::new(renderer)),
+            instructions_renderer: Some(renderer),
         };
-        let middleware = simulate_constrained_generation(Some(options));
+        let middleware: ModelMiddleware = simulate_constrained_generation(Some(options));
 
         let result = generate(
             &registry,
             GenerateOptions::<Value> {
                 model: Some(Model::Name("programmableModel".to_string())),
                 prompt: Some(vec![Part::text("generate json")]),
-                r#use: todo!(), // Some(vec![middleware]),
+                r#use: Some(vec![middleware]),
                 output: Some(OutputOptions {
                     schema: Some(schema_value.clone()),
                     format: Some("json".to_string()),

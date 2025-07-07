@@ -25,6 +25,7 @@ use crate::{
 use base64::{engine::general_purpose, Engine};
 use genkit_core::error::{Error, Result};
 use serde::{Deserialize, Serialize};
+use serde_json::Value;
 use std::{future::Future, pin::Pin, sync::Arc};
 
 /// A boxed, pinned future.
@@ -375,54 +376,62 @@ fn default_constrained_generation_instructions(schema: &serde_json::Value) -> St
     )
 }
 
-/// Model middleware that simulates constrained generation by injecting generation
-/// instructions into the user message.
+/// A `ModelMiddleware` that simulates constrained (e.g., JSON) output by providing instructions.
 pub fn simulate_constrained_generation(
     options: Option<SimulatedConstrainedGenerationOptions>,
 ) -> ModelMiddleware {
-    let options = Arc::new(options.unwrap_or_default());
+    let renderer = Arc::new(
+        options
+            .and_then(|o| o.instructions_renderer)
+            .unwrap_or_else(|| Box::new(default_constrained_generation_instructions)),
+    );
+
     Arc::new(
         move |mut req: GenerateRequest, next: ModelMiddlewareNext<'_>| {
-            let options = Arc::clone(&options);
+            let renderer = Arc::clone(&renderer);
             Box::pin(async move {
-                if let Some(output_value) = &req.output {
-                    if let Ok(mut output_meta) =
-                        serde_json::from_value::<OutputMetadata>(output_value.clone())
-                    {
-                        let should_simulate = if output_meta.instructions == Some(true) {
-                            true
-                        } else {
-                            !matches!(output_meta.constrained, Some(true))
-                        };
+                let output_meta: Option<OutputMetadata> = req
+                    .output
+                    .as_ref()
+                    .and_then(|v| serde_json::from_value(v.clone()).ok());
 
-                        if should_simulate {
-                            if let Some(schema) = &output_meta.schema {
-                                let rendered_instructions =
-                                    if let Some(renderer) = &options.instructions_renderer {
-                                        renderer(schema)
-                                    } else {
-                                        default_constrained_generation_instructions(schema)
-                                    };
+                if let Some(meta) = output_meta {
+                    let force_instructions = meta.instructions.as_ref().unwrap_or(&false);
+                    if meta.constrained.unwrap_or(false) && !force_instructions {
+                        // Pass through, model is expected to handle it.
+                        return next(req).await;
+                    }
 
-                                if let Some(user_message) =
-                                    req.messages.iter_mut().rfind(|m| m.role == Role::User)
-                                {
-                                    let mut metadata = std::collections::HashMap::new();
-                                    metadata.insert("purpose".to_string(), "output".into());
-                                    user_message.content.push(Part {
-                                        text: Some(rendered_instructions),
-                                        metadata: Some(metadata),
-                                        ..Default::default()
-                                    });
-                                }
-                                output_meta.constrained = Some(false);
-                                if output_meta.instructions != Some(true) {
-                                    output_meta.format = None;
-                                    output_meta.schema = None;
-                                }
-                                req.output = serde_json::to_value(output_meta).ok();
-                            }
+                    if let Some(schema) = meta.schema {
+                        let instructions = renderer(&schema);
+                        if let Some(last_user_msg) =
+                            req.messages.iter_mut().rev().find(|m| m.role == Role::User)
+                        {
+                            last_user_msg.content.push(Part {
+                                text: Some(instructions),
+                                metadata: Some(
+                                    [("purpose".to_string(), Value::String("output".to_string()))]
+                                        .into(),
+                                ),
+                                ..Default::default()
+                            });
                         }
+
+                        // Modify output options for the underlying model.
+                        let mut output_map = req
+                            .output
+                            .as_ref()
+                            .and_then(|v| v.as_object())
+                            .cloned()
+                            .unwrap_or_default();
+                        output_map.insert("constrained".to_string(), Value::Bool(false));
+                        if !force_instructions {
+                            output_map.remove("format");
+                            output_map.remove("schema");
+                        }
+                        output_map.remove("contentType");
+
+                        req.output = Some(Value::Object(output_map));
                     }
                 }
                 next(req).await

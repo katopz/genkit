@@ -39,9 +39,7 @@ use std::sync::Arc;
 use tokio_stream::StreamExt;
 
 pub type NextFn = Box<
-    dyn FnOnce(
-            GenerateRequest,
-        ) -> Pin<Box<dyn Future<Output = Result<GenerateResponseData>> + Send>>
+    dyn Fn(GenerateRequest) -> Pin<Box<dyn Future<Output = Result<GenerateResponseData>> + Send>>
         + Send,
 >;
 
@@ -278,7 +276,8 @@ async fn run_model_via_middleware(
         let model_action = model_action.clone();
 
         Box::pin(async move {
-            let req_value = serde_json::to_value(req).unwrap();
+            let req_value = serde_json::to_value(req)
+                .map_err(|e| Error::new_internal(format!("Failed to serialize request: {}", e)))?;
 
             // Get the callback from the context instead of a parameter.
             if let Some(chunk_callback) = get_streaming_callback() {
@@ -313,8 +312,20 @@ async fn run_model_via_middleware(
 
     // Wrap the chain with each middleware, in reverse order.
     for mw in middleware.into_iter().rev() {
-        let next_fn = chain;
-        chain = Box::new(move |req| Box::pin(mw(req, next_fn)));
+        let prev_chain = chain;
+        // This stateful closure allows us to pass a FnOnce-like behavior (consuming the previous chain)
+        // while satisfying the Fn trait bound required by NextFn. This works because we know
+        // the final chain is only executed once.
+        let state = std::sync::Mutex::new(Some(prev_chain));
+        chain = Box::new(move |req| {
+            let f = state
+                .lock()
+                .unwrap() // Panics if the mutex is poisoned.
+                .take()
+                .expect("Middleware chain can only be called once.");
+            // The middleware consumes the previous function in the chain.
+            mw(req, f)
+        });
     }
 
     // Execute the full chain.
