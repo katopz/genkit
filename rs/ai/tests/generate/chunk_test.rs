@@ -14,54 +14,29 @@
 
 //! # Streaming Generation Chunk Tests
 
-use genkit_ai::document::Part;
-use genkit_ai::generate::chunk::{GenerateResponseChunk, GenerateResponseChunkOptions};
-use genkit_ai::message::Role;
-use genkit_ai::model::GenerateResponseChunkData;
+use genkit_ai::generate::chunk::GenerateResponseChunk;
 
 #[cfg(test)]
 mod test {
     use super::*;
+    use serde_json::json;
 
     #[test]
     fn test_text_accumulation() {
-        let options = GenerateResponseChunkOptions {
-            previous_chunks: vec![
-                GenerateResponseChunkData {
-                    index: 0,
-                    role: Some(Role::Model),
-                    content: vec![Part {
-                        text: Some("old1".to_string()),
-                        ..Default::default()
-                    }],
-                    ..Default::default()
-                },
-                GenerateResponseChunkData {
-                    index: 0,
-                    role: Some(Role::Model),
-                    content: vec![Part {
-                        text: Some("old2".to_string()),
-                        ..Default::default()
-                    }],
-                    ..Default::default()
-                },
-            ],
-            role: Some(Role::Model),
-            index: Some(0),
-        };
-
-        let current_chunk_data = GenerateResponseChunkData {
-            index: 0,
-            role: Some(Role::Model),
-            content: vec![Part {
-                text: Some("new".to_string()),
-                ..Default::default()
-            }],
-            ..Default::default()
-        };
-
-        let test_chunk: GenerateResponseChunk =
-            GenerateResponseChunk::new(current_chunk_data, options);
+        let test_chunk: GenerateResponseChunk<()> = GenerateResponseChunk::from_json(
+            json!({
+                "index": 0,
+                "role": "model",
+                "content": [{ "text": "new" }]
+            }),
+            json!({
+                "previousChunks": [
+                    { "index": 0, "role": "model", "content": [{ "text": "old1" }] },
+                    { "index": 0, "role": "model", "content": [{ "text": "old2" }] },
+                ]
+            }),
+        )
+        .unwrap();
 
         assert_eq!(test_chunk.previous_text(), "old1old2");
         assert_eq!(test_chunk.accumulated_text(), "old1old2new");
