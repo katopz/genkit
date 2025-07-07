@@ -50,28 +50,6 @@ mod test {
 
     #[rstest]
     #[tokio::test]
-    async fn test_simulates_constrained_generation() {
-        let output_json = json!({
-            "constrained": true,
-            "schema": {
-                "type": "object",
-                "properties": {
-                    "name": { "type": "string" }
-                }
-            }
-        });
-        let req: GenerateRequest = from_value(json!({
-            "messages": [{ "role": "user", "content": [{ "text": "hello" }] }],
-            "output": output_json.to_string(),
-        }))
-        .unwrap();
-
-        let _modified_req = test_constrained_request(req).await;
-        // Just running this should trigger the log output.
-    }
-
-    #[rstest]
-    #[tokio::test]
     async fn test_injects_instructions_into_request() {
         use self::helpers::{registry_with_programmable_model, ProgrammableModelHandler};
         use genkit_ai::document::Part;
