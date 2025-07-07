@@ -59,7 +59,9 @@ pub fn extract_json<T: DeserializeOwned>(text: &str) -> Result<Option<T>> {
         }
 
         if char == '"' {
-            in_string = !in_string;
+            if start_pos.is_some() {
+                in_string = !in_string;
+            }
             continue;
         }
 
@@ -86,17 +88,9 @@ pub fn extract_json<T: DeserializeOwned>(text: &str) -> Result<Option<T>> {
             }
         }
     }
-    // If we exit the loop and found a start but no end, it's partial JSON.
-    // Attempt to parse the partial string. If it fails, propagate the error.
     if let Some(start) = start_pos {
         if nesting_count > 0 {
             let partial_str = &text[start..];
-            // Note: This specific check for `in_string` when exiting the loop (meaning
-            // the JSON structure is incomplete and ends within a string literal)
-            // is added to align with the stricter error-throwing behavior of the
-            // TypeScript `partial-json` library. Without this, `json5` might leniently
-            // parse such inputs (e.g., `{"a": "`) as valid (e.g., `{"a": null}`),
-            // which would cause a discrepancy with the TS implementation's error expectation.
             if in_string {
                 return Err(Error::new_internal(
                     "Unclosed string literal in partial JSON structure".to_string(),
@@ -139,12 +133,10 @@ pub struct ExtractItemsResult {
 pub fn extract_items(text: &str, mut cursor: usize) -> ExtractItemsResult {
     let mut items = Vec::new();
 
-    // On the first run, find the start of the array.
     if cursor == 0 {
         if let Some(array_start) = text.find('[') {
             cursor = array_start + 1;
         } else {
-            // No array found yet, return empty.
             return ExtractItemsResult {
                 items,
                 cursor: text.len(),
@@ -156,6 +148,7 @@ pub fn extract_items(text: &str, mut cursor: usize) -> ExtractItemsResult {
     let mut brace_count = 0;
     let mut in_string = false;
     let mut escape_next = false;
+    let mut last_processed_cursor = cursor;
 
     for (i, char) in text.chars().enumerate().skip(cursor) {
         if escape_next {
@@ -189,118 +182,20 @@ pub fn extract_items(text: &str, mut cursor: usize) -> ExtractItemsResult {
                         let obj_str = &text[start..=i];
                         if let Ok(item) = json5::from_str(obj_str) {
                             items.push(item);
+                            last_processed_cursor = i + 1;
                         }
-                        // This object is now processed.
                         object_start = None;
                     }
                 }
             }
         } else if char == ']' && brace_count == 0 {
-            // End of the top-level array.
-            cursor = i + 1;
+            last_processed_cursor = i + 1;
             break;
         }
-        cursor = i + 1;
     }
 
-    ExtractItemsResult { items, cursor }
-}
-
-#[cfg(test)]
-mod tests {
-    use std::collections::HashMap;
-
-    use super::*;
-    use serde::Deserialize;
-    use serde_json::json;
-
-    #[derive(Deserialize, Debug, PartialEq)]
-    struct SimpleObject {
-        a: i32,
-    }
-
-    #[test]
-    fn test_extract_json_simple_object() {
-        let text = "Here is some JSON: {\"a\": 1}. That's all.";
-        let result: Option<SimpleObject> = extract_json(text).unwrap();
-        assert_eq!(result, Some(SimpleObject { a: 1 }));
-    }
-
-    #[test]
-    fn test_extract_json_simple_array() {
-        let text = "An array: [1, 2, 3].";
-        let result: Option<Vec<i32>> = extract_json(text).unwrap();
-        assert_eq!(result, Some(vec![1, 2, 3]));
-    }
-
-    #[test]
-    fn test_extract_json_no_json() {
-        let text = "There is no json here.";
-        let result: Option<Value> = extract_json(text).unwrap();
-        assert_eq!(result, None);
-    }
-
-    #[test]
-    fn test_extract_json_nested() {
-        #[derive(Deserialize, Debug, PartialEq)]
-        struct Nested {
-            b: Vec<i32>,
-        }
-        #[derive(Deserialize, Debug, PartialEq)]
-        struct Outer {
-            a: Nested,
-        }
-        let text = "text{\"a\":{\"b\":[1,2]}}more";
-        let result: Option<Outer> = extract_json(text).unwrap();
-        assert_eq!(
-            result,
-            Some(Outer {
-                a: Nested { b: vec![1, 2] }
-            })
-        );
-    }
-
-    #[test]
-    fn test_extract_json_with_braces_in_string() {
-        let text = "{\"text\": \"this is {not} a nested object\"}";
-        let result: Option<HashMap<String, String>> = extract_json(text).unwrap();
-        assert_eq!(
-            result.unwrap().get("text").unwrap(),
-            "this is {not} a nested object"
-        );
-    }
-
-    #[test]
-    fn test_extract_json_malformed() {
-        let text = "Here is bad json: {\"a\": \"";
-        let result: Result<Option<Value>> = extract_json(text);
-        assert!(result.is_err());
-    }
-
-    #[test]
-    fn test_extract_items_streaming() {
-        let mut text = String::new();
-        let mut cursor = 0;
-
-        // First chunk
-        text.push_str("Some text... [{\"a\": 1},");
-        let result1 = extract_items(&text, cursor);
-        assert_eq!(result1.items.len(), 1);
-        assert_eq!(result1.items[0], json!({"a": 1}));
-        cursor = result1.cursor;
-
-        // Second chunk
-        text.push_str(" {\"b\": 2}");
-        let result2 = extract_items(&text, cursor);
-        assert_eq!(result2.items.len(), 1);
-        assert_eq!(result2.items[0], json!({"b": 2}));
-        cursor = result2.cursor;
-
-        // Third chunk, closing the array
-        text.push(']');
-        let result3 = extract_items(&text, cursor);
-        assert_eq!(result3.items.len(), 0);
-        cursor = result3.cursor;
-        assert!(text.get(cursor..).unwrap_or("").is_empty());
+    ExtractItemsResult {
+        items,
+        cursor: last_processed_cursor,
     }
 }

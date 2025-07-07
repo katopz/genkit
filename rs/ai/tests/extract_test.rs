@@ -16,164 +16,227 @@
 
 use genkit_ai::extract::{extract_items, extract_json, parse_partial_json};
 use serde::Deserialize;
-use serde_json::{json, Value};
-use std::collections::HashMap;
+use serde_json::{from_value, json, Value};
 
-#[cfg(test)]
-mod test {
-    use super::*;
+//-////////////////////////////////////////////////////////////////////////-
+// Test Case Structs
+//-////////////////////////////////////////////////////////////////////////-
 
-    //-////////////////////////////////////////////////////////////////////////-
-    // extract_json tests
-    //-////////////////////////////////////////////////////////////////////////-
+#[derive(Deserialize, Debug)]
+struct ExtractJsonTestCase {
+    name: String,
+    input: String,
+    expected: Option<Value>,
+    throws: Option<bool>,
+}
 
-    #[derive(Deserialize, Debug, PartialEq)]
-    struct SimpleObject {
-        a: i32,
-    }
+#[derive(Deserialize, Debug)]
+struct ParsePartialJsonTestCase {
+    name: String,
+    input: String,
+    expected: Option<Value>,
+    throws: bool,
+}
 
-    #[test]
-    fn test_extract_json_simple_object() {
-        let text = "prefix{\"a\":1}suffix";
-        let result: Option<SimpleObject> = extract_json(text).unwrap();
-        assert_eq!(result, Some(SimpleObject { a: 1 }));
-    }
+#[derive(Deserialize, Debug)]
+struct ExtractItemsTestStep {
+    chunk: String,
+    want: Vec<Value>,
+}
 
-    #[test]
-    fn test_extract_json_simple_array() {
-        let text = "prefix[1,2,3]suffix";
-        let result: Option<Vec<i32>> = extract_json(text).unwrap();
-        assert_eq!(result, Some(vec![1, 2, 3]));
-    }
+#[derive(Deserialize, Debug)]
+struct ExtractItemsTestCase {
+    name: String,
+    steps: Vec<ExtractItemsTestStep>,
+}
 
-    #[test]
-    fn test_extract_json_nested() {
-        #[derive(Deserialize, Debug, PartialEq)]
-        struct Nested {
-            b: Vec<i32>,
+//-////////////////////////////////////////////////////////////////////////-
+// extract_json tests
+//-////////////////////////////////////////////////////////////////////////-
+
+#[test]
+fn test_extract_json_all_cases() {
+    let cases: Vec<ExtractJsonTestCase> = from_value(json!([
+        {
+            "name": "extracts simple object",
+            "input": "prefix{\"a\":1}suffix",
+            "expected": { "a": 1 }
+        },
+        {
+            "name": "extracts simple array",
+            "input": "prefix[1,2,3]suffix",
+            "expected": [1, 2, 3]
+        },
+        {
+            "name": "handles nested structures",
+            "input": "text{\"a\":{\"b\":[1,2]}}more",
+            "expected": { "a": { "b": [1, 2] } }
+        },
+        {
+            "name": "handles strings with braces",
+            "input": "{\"text\": \"not {a} json\"}",
+            "expected": { "text": "not {a} json" }
+        },
+        {
+            "name": "returns null for non-json",
+            "input": "not json at all",
+            "expected": null
+        },
+        {
+            "name": "throws for malformed json (unclosed string)",
+            "input": "prefix{\"a\": \"",
+            "expected": null,
+            "throws": true
         }
-        #[derive(Deserialize, Debug, PartialEq)]
-        struct Outer {
-            a: Nested,
+    ]))
+    .unwrap();
+
+    for case in cases {
+        let result: genkit_core::error::Result<Option<Value>> = extract_json(&case.input);
+        if case.throws.unwrap_or(false) {
+            assert!(
+                result.is_err(),
+                "Test case '{}' should have failed",
+                case.name
+            );
+        } else {
+            assert!(
+                result.is_ok(),
+                "Test case '{}' failed: {:?}",
+                case.name,
+                result.err()
+            );
+            assert_eq!(
+                result.unwrap(),
+                case.expected,
+                "Test case '{}' failed",
+                case.name
+            );
         }
-        let text = "text{\"a\":{\"b\":[1,2]}}more";
-        let result: Option<Outer> = extract_json(text).unwrap();
-        assert_eq!(
-            result,
-            Some(Outer {
-                a: Nested { b: vec![1, 2] }
-            })
-        );
     }
+}
 
-    #[test]
-    fn test_extract_json_with_braces_in_string() {
-        let text = "{\"text\": \"not {a} json\"}";
-        let result: Option<HashMap<String, String>> = extract_json(text).unwrap();
-        assert_eq!(result.unwrap().get("text").unwrap(), "not {a} json");
+//-////////////////////////////////////////////////////////////////////////-
+// parse_partial_json tests
+//-////////////////////////////////////////////////////////////////////////-
+
+#[test]
+fn test_parse_partial_json_all_cases() {
+    let cases: Vec<ParsePartialJsonTestCase> = from_value(json!([
+        {
+            "name": "parses complete object",
+            "input": "{\"a\":1,\"b\":2}",
+            "expected": { "a": 1, "b": 2 },
+            "throws": false
+        },
+        // The following tests are updated to reflect Rust's stricter parsing.
+        // `json5` crate does not recover partial data like the `partial-json` TS library.
+        {
+            "name": "fails on partial object",
+            "input": "{\"a\":1,\"b\":",
+            "expected": null,
+            "throws": true
+        },
+        {
+            "name": "fails on partial array",
+            "input": "[1,2,3,",
+            "expected": null,
+            "throws": true
+        },
+        {
+            "name": "fails on severely malformed json",
+            "input": "{\"a\":{\"b\":1,\"c\":]}}",
+            "expected": null,
+            "throws": true
+        }
+    ]))
+    .unwrap();
+
+    for case in cases {
+        let result: genkit_core::error::Result<Value> = parse_partial_json(&case.input);
+        if case.throws {
+            assert!(
+                result.is_err(),
+                "Test case '{}' should have failed",
+                case.name
+            );
+        } else {
+            assert!(
+                result.is_ok(),
+                "Test case '{}' failed: {:?}",
+                case.name,
+                result.err()
+            );
+            assert_eq!(
+                result.unwrap(),
+                case.expected.unwrap(),
+                "Test case '{}' failed",
+                case.name
+            );
+        }
     }
+}
 
-    #[test]
-    fn test_extract_json_no_json() {
-        let text = "not json at all";
-        let result: Option<Value> = extract_json(text).unwrap();
-        assert_eq!(result, None);
-    }
+//-////////////////////////////////////////////////////////////////////////-
+// extract_items tests
+//-////////////////////////////////////////////////////////////////////////-
 
-    /// This test ensures that `extract_json` correctly returns an error for inputs
-    /// that are clearly malformed, specifically mirroring the stricter error
-    /// handling behavior of the TypeScript `partial-json` library for cases
-    /// like unclosed string literals.
-    #[test]
-    fn test_extract_json_malformed_throws() {
-        // The Rust implementation returns an error, which we assert on.
-        let text = "prefix{\"a\": \"";
-        let result: genkit_core::error::Result<Option<Value>> = extract_json(text);
-        assert!(result.is_err());
-    }
+#[test]
+fn test_extract_items_all_cases() {
+    let cases: Vec<ExtractItemsTestCase> = from_value(json!([
+        {
+            "name": "handles simple array in chunks",
+            "steps": [
+                { "chunk": "[", "want": [] },
+                { "chunk": "{\"a\": 1},", "want": [{ "a": 1 }] },
+                { "chunk": "{\"b\": 2}", "want": [{ "b": 2 }] },
+                { "chunk": "]", "want": [] }
+            ]
+        },
+        {
+            "name": "handles nested objects",
+            "steps": [
+                { "chunk": "[{\"outer\": {", "want": [] },
+                { "chunk": "\"inner\": \"value\"}},", "want": [{ "outer": { "inner": "value" } }] },
+                { "chunk": "{\"next\": true}]", "want": [{ "next": true }] }
+            ]
+        },
+        {
+            "name": "handles escaped characters",
+            "steps": [
+                { "chunk": "[{\"text\": \"line1\\n", "want": [] },
+                { "chunk": "line2\"},", "want": [{ "text": "line1\nline2" }] },
+                { "chunk": "{\"text\": \"tab\\there\"}]", "want": [{ "text": "tab\there" }] }
+            ]
+        },
+        {
+            "name": "ignores content before first array",
+            "steps": [
+                { "chunk": "Here is an array:\n```json\n\n[", "want": [] },
+                { "chunk": "{\"a\": 1},", "want": [{ "a": 1 }] },
+                { "chunk": "{\"b\": 2}]\n```\nDid you like my array?", "want": [{ "b": 2 }] }
+            ]
+        },
+        {
+            "name": "handles whitespace",
+            "steps": [
+                { "chunk": "[\n  ", "want": [] },
+                { "chunk": "{\"a\": 1},\n  ", "want": [{ "a": 1 }] },
+                { "chunk": "{\"b\": 2}\n]", "want": [{ "b": 2 }] }
+            ]
+        }
+    ]))
+    .unwrap();
 
-    //-////////////////////////////////////////////////////////////////////////-
-    // parse_partial_json tests
-    //-////////////////////////////////////////////////////////////////////////-
-
-    #[test]
-    fn test_parse_partial_json_complete_object() {
-        let input = "{\"a\":1,\"b\":2}";
-        let result: genkit_core::error::Result<Value> = parse_partial_json(input);
-        assert_eq!(result.unwrap(), json!({"a": 1, "b": 2}));
-    }
-
-    #[test]
-    fn test_parse_partial_json_incomplete_object() {
-        // json5 handles trailing commas, so this should parse.
-        let input = "{\"a\":1,";
-        let result: genkit_core::error::Result<Value> = parse_partial_json(input);
-        assert!(result.is_err());
-    }
-
-    #[test]
-    fn test_parse_partial_json_incomplete_array() {
-        let input = "[1, 2, 3,";
-        let result: genkit_core::error::Result<Value> = parse_partial_json(input);
-        assert!(result.is_err());
-    }
-
-    #[test]
-    fn test_parse_partial_json_severely_malformed() {
-        let input = "{\"a\":{\"b\":1,\"c\":]}}";
-        let result: genkit_core::error::Result<Value> = parse_partial_json(input);
-        assert!(result.is_err());
-    }
-
-    //-////////////////////////////////////////////////////////////////////////-
-    // extract_items tests
-    //-////////////////////////////////////////////////////////////////////////-
-
-    #[test]
-    fn test_extract_items_simple_array_in_chunks() {
+    for case in cases {
         let mut text = String::new();
         let mut cursor = 0;
 
-        // Chunk 1
-        text.push_str("[{\"a\": 1},");
-        let result1 = extract_items(&text, cursor);
-        assert_eq!(result1.items, vec![json!({"a": 1})]);
-        cursor = result1.cursor;
-
-        // Chunk 2
-        text.push_str(" {\"b\": 2}");
-        let result2 = extract_items(&text, cursor);
-        assert_eq!(result2.items, vec![json!({"b": 2})]);
-        cursor = result2.cursor;
-
-        // Chunk 3
-        text.push(']');
-        let result3 = extract_items(&text, cursor);
-        assert!(result3.items.is_empty());
-    }
-
-    #[test]
-    fn test_extract_items_nested_objects() {
-        let mut text = String::new();
-        let mut cursor = 0;
-
-        // Chunk 1
-        text.push_str("[{\"outer\": {\"inner\": \"value\"}},");
-        let result1 = extract_items(&text, cursor);
-        assert_eq!(result1.items, vec![json!({"outer": {"inner": "value"}})]);
-        cursor = result1.cursor;
-
-        // Chunk 2
-        text.push_str("{\"next\": true}]");
-        let result2 = extract_items(&text, cursor);
-        assert_eq!(result2.items, vec![json!({"next": true})]);
-    }
-
-    #[test]
-    fn test_extract_items_ignores_content_before_array() {
-        let text =
-            "Here is an array:\n```json\n\n[{\"a\": 1}, {\"b\": 2}]\n```\nDid you like my array?";
-        let result = extract_items(text, 0);
-        assert_eq!(result.items, vec![json!({"a": 1}), json!({"b": 2})]);
+        for step in case.steps {
+            text.push_str(&step.chunk);
+            let result = extract_items(&text, cursor);
+            assert_eq!(result.items, step.want, "Test case '{}' failed", case.name);
+            cursor = result.cursor;
+        }
     }
 }
