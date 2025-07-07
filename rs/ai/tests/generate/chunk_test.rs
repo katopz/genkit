@@ -23,7 +23,7 @@ mod test {
 
     #[test]
     fn test_text_accumulation() {
-        let test_chunk: GenerateResponseChunk<()> = GenerateResponseChunk::from_json(
+        let test_chunk = GenerateResponseChunk::from_json(
             json!({
                 "index": 0,
                 "role": "model",

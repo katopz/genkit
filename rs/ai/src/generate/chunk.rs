@@ -73,15 +73,6 @@ impl<O> GenerateResponseChunk<O>
 where
     O: for<'de> Deserialize<'de> + 'static,
 {
-    /// Creates a new `GenerateResponseChunk` from `serde_json::Value`.
-    ///
-    /// This is primarily for convenience in testing.
-    pub fn from_json(data: Value, options: Value) -> Result<Self> {
-        let data: GenerateResponseChunkData = serde_json::from_value(data)?;
-        let options: GenerateResponseChunkOptions = serde_json::from_value(options)?;
-        Ok(Self::new(data, options))
-    }
-
     /// Creates a new `GenerateResponseChunk`.
     pub fn new(data: GenerateResponseChunkData, options: GenerateResponseChunkOptions) -> Self {
         Self {
@@ -155,5 +146,16 @@ where
             custom: self.custom.clone(),
             role: self.role.clone(),
         }
+    }
+}
+
+impl GenerateResponseChunk<Value> {
+    /// Creates a new `GenerateResponseChunk` from `serde_json::Value`.
+    ///
+    /// This is primarily for convenience in testing.
+    pub fn from_json(data: Value, options: Value) -> Result<Self> {
+        let data: GenerateResponseChunkData = serde_json::from_value(data)?;
+        let options: GenerateResponseChunkOptions = serde_json::from_value(options)?;
+        Ok(Self::new(data, options))
     }
 }
