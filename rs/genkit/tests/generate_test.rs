@@ -27,6 +27,7 @@ use genkit_ai::{
 };
 
 use rstest::{fixture, rstest};
+use serde_json::json;
 use std::sync::{Arc, Mutex};
 use tokio_stream::StreamExt;
 
@@ -143,10 +144,7 @@ async fn test_calls_default_model_with_tool_choice(
 
     let locked_request = last_request.lock().unwrap();
     let request_tool_choice = locked_request.as_ref().unwrap().tool_choice.clone();
-    assert_eq!(
-        request_tool_choice,
-        Some(format!("{:?}", genkit_ai::ToolChoice::Required))
-    );
+    assert_eq!(request_tool_choice, Some(json!("required")));
 }
 
 #[rstest]

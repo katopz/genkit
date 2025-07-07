@@ -128,10 +128,7 @@ async fn test_custom_format_native_constrained(#[future] mut registry: Registry)
         "format": "banana",
         "constrained": true,
     });
-    assert_eq!(
-        serde_json::from_str::<Value>(&request.output.clone().unwrap()).unwrap(),
-        expected_output
-    );
+    assert_eq!(request.output.clone().unwrap(), expected_output);
     assert!(request.tools.is_none());
     assert!(request.config.is_none());
 }
@@ -198,10 +195,7 @@ async fn test_custom_format_simulated_constrained(#[future] mut registry: Regist
         "format": "banana",
         "constrained": true,
     });
-    assert_eq!(
-        serde_json::from_str::<Value>(&request.output.clone().unwrap()).unwrap(),
-        expected_output
-    );
+    assert_eq!(request.output.clone().unwrap(), expected_output);
     assert!(request.tools.is_none());
     assert!(request.config.is_none());
 }

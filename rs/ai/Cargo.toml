@@ -75,9 +75,9 @@ path = "tests/model/middleware_test_augment_with_context.rs"
 name = "middleware_test_simulate_system_prompt"
 path = "tests/model/middleware_test_simulate_system_prompt.rs"
 
-# [[test]]
-# name = "middleware_test_simulate_constrained_generation"
-# path = "tests/model/middleware_test_simulate_constrained_generation.rs"
+[[test]]
+name = "middleware_test_simulate_constrained_generation"
+path = "tests/model/middleware_test_simulate_constrained_generation.rs"
 
 # [[test]]
 # name = "action_test"

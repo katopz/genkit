@@ -527,9 +527,12 @@ pub async fn to_generate_request<O>(
         output: options
             .output
             .as_ref()
-            .map(|o| serde_json::to_string(o).unwrap_or_else(|_| "{}".to_string())),
+            .and_then(|o| serde_json::to_value(o).ok()),
         docs: options.docs.clone(),
-        tool_choice: options.tool_choice.as_ref().map(|tc| format!("{:?}", *tc)),
+        tool_choice: options
+            .tool_choice
+            .as_ref()
+            .map(|tc| serde_json::to_value(tc).unwrap()),
         max_turns: options.max_turns,
         return_tool_requests: options.return_tool_requests,
         // The `resume` field is handled before this stage and is not part of the final model request.

@@ -222,22 +222,12 @@ pub fn simulate_system_prompt(options: Option<SystemPromptSimulateOptions>) -> M
 
 pub type ItemTemplate = Box<dyn Fn(&Document, usize) -> String + Send + Sync>;
 
-#[derive(Serialize, Deserialize)]
+#[derive(Default, Serialize, Deserialize)]
 pub struct AugmentWithContextOptions {
     pub preface: Option<String>,
     pub citation_key: Option<String>,
     #[serde(skip)]
     pub item_template: Option<ItemTemplate>,
-}
-
-impl Default for AugmentWithContextOptions {
-    fn default() -> Self {
-        Self {
-            preface: None,
-            citation_key: None,
-            item_template: None,
-        }
-    }
 }
 
 impl Clone for AugmentWithContextOptions {
@@ -395,7 +385,8 @@ pub fn simulate_constrained_generation(
             Box::pin(async move {
                 let mut instructions: Option<String> = None;
                 if let Some(output_str) = &req.output {
-                    if let Ok(mut output_meta) = serde_json::from_str::<OutputMetadata>(output_str)
+                    if let Ok(mut output_meta) =
+                        serde_json::from_value::<OutputMetadata>(output_str.clone())
                     {
                         if output_meta.constrained == Some(true) {
                             if let Some(schema) = &output_meta.schema {
@@ -410,7 +401,7 @@ pub fn simulate_constrained_generation(
                                 output_meta.format = None;
                                 output_meta.content_type = None;
                                 output_meta.schema = None;
-                                req.output = serde_json::to_string(&output_meta).ok();
+                                req.output = serde_json::to_value(&output_meta).ok();
                             }
                         }
                     }

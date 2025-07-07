@@ -125,9 +125,9 @@ pub struct GenerateRequest {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub tools: Option<Vec<ToolRequest>>,
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub tool_choice: Option<String>,
+    pub tool_choice: Option<Value>,
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub output: Option<String>,
+    pub output: Option<Value>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub docs: Option<Vec<Document>>,
     #[serde(skip_serializing_if = "Option::is_none")]
