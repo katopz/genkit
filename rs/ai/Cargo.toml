@@ -62,3 +62,7 @@ path = "tests/prompt/prompt_helpers_test.rs"
 [[test]]
 name = "resource_test"
 path = "tests/resource/resource_test.rs"
+
+[[test]]
+name = "document_test"
+path = "tests/document_test.rs"

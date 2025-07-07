@@ -17,15 +17,11 @@
 //! This module defines the core data structures for representing content, such
 //! as `Document` and `Part`. It is the Rust equivalent of `document.ts`.
 
+use crate::embedder::Embedding;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::collections::{HashMap, HashSet};
-
-// The `Embedding` struct is defined in `embedder.rs`, but we need a forward
-// declaration here for the `Document::get_embedding_documents` method.
-// This will be replaced with a proper `use` statement once `embedder.rs` is created.
-use crate::embedder::Embedding;
 
 /// Represents a media item, typically an image, video, or audio file.
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, PartialEq)]
@@ -122,17 +118,27 @@ pub struct Document {
 }
 
 impl Document {
-    /// Creates a new `Document` from a text string.
-    pub fn from_text(text: impl Into<String>, metadata: Option<HashMap<String, Value>>) -> Self {
-        Document::from_part(Part::text(text), metadata)
+    /// Creates a new `Document` with a deep copy of the provided data.
+    pub fn new(content: Vec<Part>, metadata: Option<HashMap<String, Value>>) -> Self {
+        Document {
+            content: content.clone(),
+            metadata: metadata.clone(),
+        }
     }
 
-    /// Creates a new `Document` from a part.
+    /// Creates a new `Document` from a text string.
+    pub fn from_text(text: impl Into<String>, metadata: Option<HashMap<String, Value>>) -> Self {
+        Document::new(vec![Part::text(text)], metadata)
+    }
+
+    /// Creates a new `Document` from a single part.
     pub fn from_part(part: Part, metadata: Option<HashMap<String, Value>>) -> Self {
-        Document {
-            content: vec![part],
-            metadata,
-        }
+        Document::new(vec![part], metadata)
+    }
+
+    /// Creates a new `Document` from a vector of parts.
+    pub fn from_parts(parts: Vec<Part>, metadata: Option<HashMap<String, Value>>) -> Self {
+        Document::new(parts, metadata)
     }
 
     /// Creates a new `Document` from a single media item.
@@ -141,8 +147,8 @@ impl Document {
         content_type: Option<String>,
         metadata: Option<HashMap<String, Value>>,
     ) -> Self {
-        Document {
-            content: vec![Part {
+        Document::new(
+            vec![Part {
                 media: Some(Media {
                     url: url.into(),
                     content_type,
@@ -150,6 +156,19 @@ impl Document {
                 ..Default::default()
             }],
             metadata,
+        )
+    }
+
+    /// Creates a new `Document` from raw data and a data type hint.
+    pub fn from_data(
+        data: String,
+        data_type: &str,
+        metadata: Option<HashMap<String, Value>>,
+    ) -> Self {
+        if data_type == "text" {
+            Self::from_text(data, metadata)
+        } else {
+            Self::from_media(data, Some(data_type.to_string()), metadata)
         }
     }
 
@@ -170,11 +189,48 @@ impl Document {
             .collect()
     }
 
+    /// Gets the first item in the document, either text or a media URL.
+    pub fn data(&self) -> String {
+        let text = self.text();
+        if !text.is_empty() {
+            return text;
+        }
+        if let Some(first_media) = self.media().first() {
+            return first_media.url.clone();
+        }
+        String::new()
+    }
+
+    /// Gets the content type of the data returned by `data()`.
+    pub fn data_type(&self) -> &str {
+        if !self.text().is_empty() {
+            "text"
+        } else if let Some(first_media) = self.media().first() {
+            first_media.content_type.as_deref().unwrap_or("")
+        } else {
+            ""
+        }
+    }
+
+    /// Returns the document as a `serde_json::Value`, making a deep copy.
+    pub fn to_json_value(&self) -> Value {
+        serde_json::to_value(self).unwrap_or(Value::Null)
+    }
+
     /// Creates an array of `Document`s from this document, one for each provided embedding.
     ///
     /// This is useful when a single document is chunked into multiple embeddings.
     /// Each returned document will have the same content but different `embedMetadata`.
     pub fn get_embedding_documents(&self, embeddings: &[Embedding]) -> Vec<Document> {
+        if embeddings.len() <= 1 {
+            if let Some(embedding) = embeddings.first() {
+                if embedding.metadata.is_none() {
+                    return vec![self.clone()];
+                }
+            } else {
+                return vec![self.clone()];
+            }
+        }
         let mut documents = Vec::new();
         for embedding in embeddings {
             let mut new_doc = self.clone();
