@@ -105,19 +105,17 @@ async fn test_defines_and_matches_static_resource_uri(mut registry: Registry) {
 #[rstest]
 #[tokio::test]
 async fn test_defines_and_matches_template_resource_uri(mut registry: Registry) {
-    let test_resource = define_resource(
-        &mut registry,
-        ResourceOptions {
-            template: Some("foo://bar/{baz}".to_string()),
-            description: Some("does foo things".to_string()),
-            ..Default::default()
-        },
-        |input, _| async move {
-            Ok(ResourceOutput {
-                content: vec![Part::text(format!("foo stuff {}", input.uri))],
-            })
-        },
-    )
+    let options: ResourceOptions = from_value(json!({
+        "template": "foo://bar/{baz}",
+        "description": "does foo things"
+    }))
+    .unwrap();
+
+    let test_resource = define_resource(&mut registry, options, |input, _| async move {
+        Ok(ResourceOutput {
+            content: vec![Part::text(format!("foo stuff {}", input.uri))],
+        })
+    })
     .unwrap();
 
     assert_eq!(test_resource.name(), "foo://bar/{baz}");
@@ -175,42 +173,40 @@ async fn test_defines_and_matches_template_resource_uri(mut registry: Registry) 
 #[rstest]
 #[tokio::test]
 async fn test_handles_parent_resources(mut registry: Registry) {
-    let test_resource = define_resource(
-        &mut registry,
-        ResourceOptions {
-            name: Some("testResource".to_string()),
-            template: Some("file://{id*}".to_string()),
-            ..Default::default()
-        },
-        |file, _| async move {
-            let mut metadata1 = HashMap::new();
-            metadata1.insert(
-                "resource".to_string(),
-                json!({ "uri": format!("{}/sub1.txt", file.uri) }),
-            );
+    let options: ResourceOptions = from_value(json!({
+        "name": "testResource",
+        "template": "file://{id*}"
+    }))
+    .unwrap();
 
-            let mut metadata2 = HashMap::new();
-            metadata2.insert(
-                "resource".to_string(),
-                json!({ "uri": format!("{}/sub2.txt", file.uri) }),
-            );
+    let test_resource = define_resource(&mut registry, options, |file, _| async move {
+        let mut metadata1 = HashMap::new();
+        metadata1.insert(
+            "resource".to_string(),
+            json!({ "uri": format!("{}/sub1.txt", file.uri) }),
+        );
 
-            Ok(ResourceOutput {
-                content: vec![
-                    Part {
-                        text: Some("sub1".to_string()),
-                        metadata: Some(metadata1),
-                        ..Default::default()
-                    },
-                    Part {
-                        text: Some("sub2".to_string()),
-                        metadata: Some(metadata2),
-                        ..Default::default()
-                    },
-                ],
-            })
-        },
-    )
+        let mut metadata2 = HashMap::new();
+        metadata2.insert(
+            "resource".to_string(),
+            json!({ "uri": format!("{}/sub2.txt", file.uri) }),
+        );
+
+        Ok(ResourceOutput {
+            content: vec![
+                Part {
+                    text: Some("sub1".to_string()),
+                    metadata: Some(metadata1),
+                    ..Default::default()
+                },
+                Part {
+                    text: Some("sub2".to_string()),
+                    metadata: Some(metadata2),
+                    ..Default::default()
+                },
+            ],
+        })
+    })
     .unwrap();
 
     let output = test_resource
@@ -239,33 +235,28 @@ async fn test_handles_parent_resources(mut registry: Registry) {
 #[rstest]
 #[tokio::test]
 async fn test_finds_matching_resource(mut registry: Registry) {
-    define_resource(
-        &mut registry,
-        ResourceOptions {
-            name: Some("testTemplateResource".to_string()),
-            template: Some("foo://bar/{baz}".to_string()),
-            ..Default::default()
-        },
-        |input, _| async move {
-            Ok(ResourceOutput {
-                content: vec![Part::text(input.uri)],
-            })
-        },
-    )
+    let template_options: ResourceOptions = from_value(json!({
+        "name": "testTemplateResource",
+        "template": "foo://bar/{baz}"
+    }))
     .unwrap();
-    define_resource(
-        &mut registry,
-        ResourceOptions {
-            name: Some("testResource".to_string()),
-            uri: Some("bar://baz".to_string()),
-            ..Default::default()
-        },
-        |_, _| async {
-            Ok(ResourceOutput {
-                content: vec![Part::text("bar")],
-            })
-        },
-    )
+    define_resource(&mut registry, template_options, |input, _| async move {
+        Ok(ResourceOutput {
+            content: vec![Part::text(input.uri)],
+        })
+    })
+    .unwrap();
+
+    let static_options: ResourceOptions = from_value(json!({
+        "name": "testResource",
+        "uri": "bar://baz"
+    }))
+    .unwrap();
+    define_resource(&mut registry, static_options, |_, _| async {
+        Ok(ResourceOutput {
+            content: vec![Part::text("bar")],
+        })
+    })
     .unwrap();
 
     // Find static resource
