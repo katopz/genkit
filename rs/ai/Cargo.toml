@@ -64,8 +64,12 @@ name = "document_test"
 path = "tests/document_test.rs"
 
 [[test]]
-name = "middleware_test"
-path = "tests/model/middleware_test.rs"
+name = "middleware_test_validate_support"
+path = "tests/model/middleware_test_validate_support.rs"
+
+[[test]]
+name = "middleware_test_augment_with_context"
+path = "tests/model/middleware_test_augment_with_context.rs"
 
 [[test]]
 name = "middleware_test_simulate_system_prompt"

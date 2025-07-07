@@ -62,13 +62,13 @@ fn mock_model() -> genkit_ai::model::ModelAction {
                 .docs
                 .unwrap_or_default()
                 .first()
-                .map(|d| d.text.clone())
-                .unwrap_or_else(|| Some("No context provided.".to_string()));
+                .map(|d| d.text().clone())
+                .unwrap_or_else(|| "No context provided.".to_string());
 
             let response_message = genkit_ai::message::MessageData {
                 role: genkit_ai::message::Role::Model,
                 content: vec![genkit_ai::document::Part {
-                    text: context_text,
+                    text: Some(context_text),
                     ..Default::default()
                 }],
                 metadata: None,

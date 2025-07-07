@@ -124,7 +124,14 @@ async fn test_custom_format_native_constrained(#[future] mut registry: Registry)
     assert_eq!(request.messages.len(), 1);
     assert_eq!(request.messages[0].content[0].text.as_deref(), Some("hi"));
     assert_eq!(request.messages[0].role, genkit_ai::Role::User);
-    assert_eq!(request.output, Some("banana".to_string()));
+    let expected_output = serde_json::json!({
+        "format": "banana",
+        "constrained": true,
+    });
+    assert_eq!(
+        serde_json::from_str::<Value>(&request.output.clone().unwrap()).unwrap(),
+        expected_output
+    );
     assert!(request.tools.is_none());
     assert!(request.config.is_none());
 }
@@ -187,7 +194,14 @@ async fn test_custom_format_simulated_constrained(#[future] mut registry: Regist
     assert_eq!(request.messages.len(), 1);
     assert_eq!(request.messages[0].content[0].text.as_deref(), Some("hi"));
     assert_eq!(request.messages[0].role, genkit_ai::Role::User);
-    assert_eq!(request.output, Some("banana".to_string()));
+    let expected_output = serde_json::json!({
+        "format": "banana",
+        "constrained": true,
+    });
+    assert_eq!(
+        serde_json::from_str::<Value>(&request.output.clone().unwrap()).unwrap(),
+        expected_output
+    );
     assert!(request.tools.is_none());
     assert!(request.config.is_none());
 }

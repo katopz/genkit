@@ -41,7 +41,7 @@ use std::ops::Deref;
 use std::pin::Pin;
 use std::sync::Arc;
 
-use crate::{MessageData, Part, Role, ToolRequest};
+use crate::{Document, MessageData, Part, Role, ToolRequest};
 
 pub mod middleware;
 
@@ -129,7 +129,7 @@ pub struct GenerateRequest {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub output: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub docs: Option<Vec<Part>>,
+    pub docs: Option<Vec<Document>>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub max_turns: Option<u32>,
     #[serde(skip_serializing_if = "Option::is_none")]

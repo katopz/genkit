@@ -527,11 +527,8 @@ pub async fn to_generate_request<O>(
         output: options
             .output
             .as_ref()
-            .map(|o| o.format.as_deref().unwrap_or_default().to_string()),
-        docs: options
-            .docs
-            .as_ref()
-            .map(|docs| docs.iter().flat_map(|d| d.content.clone()).collect()),
+            .map(|o| serde_json::to_string(o).unwrap_or_else(|_| "{}".to_string())),
+        docs: options.docs.clone(),
         tool_choice: options.tool_choice.as_ref().map(|tc| format!("{:?}", *tc)),
         max_turns: options.max_turns,
         return_tool_requests: options.return_tool_requests,

@@ -297,12 +297,8 @@ pub fn augment_with_context(options: Option<AugmentWithContextOptions>) -> Model
                         .clone()
                         .unwrap_or_else(|| CONTEXT_PREFACE.to_string());
                     let mut context_text = preface;
-                    for (i, doc_data) in docs.iter().enumerate() {
-                        let doc = Document {
-                            content: vec![doc_data.clone()],
-                            metadata: doc_data.metadata.clone(),
-                        };
-                        context_text.push_str(&default_item_template(&doc, i, &opts));
+                    for (i, doc) in docs.iter().enumerate() {
+                        context_text.push_str(&default_item_template(doc, i, &opts));
                     }
                     context_text.push('\n');
 
