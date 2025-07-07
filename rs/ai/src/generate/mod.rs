@@ -29,8 +29,9 @@ pub use self::response::GenerateResponse;
 
 use crate::document::{Document, Part, ToolRequest, ToolRequestPart, ToolResponsePart};
 use crate::formats::{self};
-use crate::generate::action::{run_with_streaming_callback, ModelMiddleware};
+use crate::generate::action::run_with_streaming_callback;
 use crate::message::{Message, MessageData, Role};
+use crate::model::middleware::ModelMiddleware;
 use crate::model::GenerateRequest;
 use crate::tool::{self, ToolArgument};
 use crate::GenerateResponseData;

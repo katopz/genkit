@@ -22,7 +22,11 @@ use super::{response::GenerateResponse, GenerateOptions};
 use crate::document::Part;
 use crate::generate::{OutputOptions, ToolChoice};
 use crate::message::{Message, MessageData};
-use crate::model::{self, GenerateRequest, GenerateResponseChunkData, GenerateResponseData};
+use crate::model::{
+    self,
+    middleware::{ModelMiddleware, ModelMiddlewareNext},
+    GenerateRequest, GenerateResponseChunkData, GenerateResponseData,
+};
 use crate::{formats, to_generate_request, Document, Model};
 use genkit_core::action::{Action, ActionBuilder, ActionFnArg, StreamingCallback};
 use genkit_core::error::{Error, Result};
@@ -41,15 +45,6 @@ use tokio_stream::StreamExt;
 pub type NextFn = Box<
     dyn Fn(GenerateRequest) -> Pin<Box<dyn Future<Output = Result<GenerateResponseData>> + Send>>
         + Send,
->;
-
-pub type ModelMiddleware = Arc<
-    dyn Fn(
-            GenerateRequest,
-            NextFn,
-        ) -> Pin<Box<dyn Future<Output = Result<GenerateResponseData>> + Send>>
-        + Send
-        + Sync,
 >;
 
 /// The serializable options for a `generate` action.
@@ -272,50 +267,33 @@ async fn run_model_via_middleware(
     request: GenerateRequest,
     middleware: Vec<ModelMiddleware>,
 ) -> Result<GenerateResponseData> {
-    let mut chain = Box::new(move |req: GenerateRequest| {
+    let mut chain: ModelMiddlewareNext<'static> = Box::new(move |req: GenerateRequest| {
         let model_action = model_action.clone();
-
         Box::pin(async move {
             let req_value = serde_json::to_value(req)
                 .map_err(|e| Error::new_internal(format!("Failed to serialize request: {}", e)))?;
-
-            // Get the callback from the context instead of a parameter.
-            if let Some(chunk_callback) = get_streaming_callback() {
-                // STREAMING PATH
+            let mut value = if let Some(chunk_callback) = get_streaming_callback() {
                 let mut streaming_response = model_action.stream_http_json(req_value, None)?;
-
-                // Spawn a task to forward stream chunks to the callback.
                 tokio::spawn(async move {
                     while let Some(chunk_result) = streaming_response.stream.next().await {
                         chunk_callback(chunk_result);
                     }
                 });
-
-                // Wait for the final response.
-                let mut final_resp_value = streaming_response.output.await?;
-                if let Some(result) = final_resp_value.get_mut("result") {
-                    final_resp_value = result.take();
-                }
-                serde_json::from_value(final_resp_value)
-                    .map_err(|e| Error::new_internal(format!("Failed to deserialize: {}", e)))
+                streaming_response.output.await?
             } else {
-                // NON-STREAMING PATH
-                let mut resp_value = model_action.run_http_json(req_value, None).await?;
-                if let Some(result) = resp_value.get_mut("result") {
-                    resp_value = result.take();
-                }
-                serde_json::from_value(resp_value)
-                    .map_err(|e| Error::new_internal(format!("Failed to deserialize: {}", e)))
+                model_action.run_http_json(req_value, None).await?
+            };
+            if let Some(result) = value.get_mut("result") {
+                value = result.take();
             }
-        }) as Pin<Box<dyn Future<Output = Result<GenerateResponseData>> + Send>>
-    }) as NextFn;
+            serde_json::from_value(value)
+                .map_err(|e| Error::new_internal(format!("Failed to deserialize: {}", e)))
+        })
+    });
 
     // Wrap the chain with each middleware, in reverse order.
     for mw in middleware.into_iter().rev() {
         let prev_chain = chain;
-        // This stateful closure allows us to pass a FnOnce-like behavior (consuming the previous chain)
-        // while satisfying the Fn trait bound required by NextFn. This works because we know
-        // the final chain is only executed once.
         let state = std::sync::Mutex::new(Some(prev_chain));
         chain = Box::new(move |req| {
             let f = state
@@ -323,7 +301,6 @@ async fn run_model_via_middleware(
                 .unwrap() // Panics if the mutex is poisoned.
                 .take()
                 .expect("Middleware chain can only be called once.");
-            // The middleware consumes the previous function in the chain.
             mw(req, f)
         });
     }
