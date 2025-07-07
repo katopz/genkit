@@ -43,17 +43,13 @@ uuid.workspace          = true
 [dev-dependencies]
 tokio-test.workspace = true
 
-# [[test]]
-# name = "action_test"
-# path = "tests/generate/action_test.rs"
-
 [[test]]
 name = "chunk_test"
 path = "tests/generate/chunk_test.rs"
 
-# [[test]]
-# name = "middleware_test"
-# path = "tests/model/middleware_test.rs"
+[[test]]
+name = "extract_test"
+path = "tests/extract_test.rs"
 
 [[test]]
 name = "prompt_helpers_test"
@@ -66,3 +62,11 @@ path = "tests/resource/resource_test.rs"
 [[test]]
 name = "document_test"
 path = "tests/document_test.rs"
+
+[[test]]
+name = "middleware_test"
+path = "tests/model/middleware_test.rs"
+
+# [[test]]
+# name = "action_test"
+# path = "tests/generate/action_test.rs"

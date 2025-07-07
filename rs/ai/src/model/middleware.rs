@@ -17,24 +17,34 @@
 //! This module provides middleware for `ModelAction`s to preprocess requests
 //! or post-process responses.
 
-use crate::document::Document;
-use crate::model::{GenerateResponseData, MessageData, ModelInfoSupports, ModelMiddleware, Part};
-use crate::GenerateRequest;
-use base64::Engine;
-use genkit_core::error::Error;
-use std::future::Future;
-use std::pin::Pin;
-use std::sync::Arc;
+use crate::{
+    document::Document,
+    model::{GenerateRequest, GenerateResponseData, MessageData, ModelInfoSupports, Part},
+    Role,
+};
+use base64::{engine::general_purpose, Engine};
+use genkit_core::error::{Error, Result};
+use serde::{Deserialize, Serialize};
+use std::{future::Future, pin::Pin, sync::Arc};
 
 /// A boxed, pinned future.
 pub type BoxFuture<'a, T> = Pin<Box<dyn Future<Output = T> + Send + 'a>>;
 
 /// The `next` function passed to a `ModelMiddleware`.
-pub type ModelMiddlewareNext<'a> = Box<
-    dyn Fn(GenerateRequest) -> BoxFuture<'a, Result<GenerateResponseData, Error>> + Send + Sync,
+pub type ModelMiddlewareNext<'a> =
+    Box<dyn Fn(GenerateRequest) -> BoxFuture<'a, Result<GenerateResponseData>> + Send + Sync>;
+
+/// A middleware function for a model.
+pub type ModelMiddleware = Arc<
+    dyn for<'a> Fn(
+            GenerateRequest,
+            ModelMiddlewareNext<'a>,
+        ) -> BoxFuture<'a, Result<GenerateResponseData>>
+        + Send
+        + Sync,
 >;
 
-/// Preprocess a GenerateRequest to download referenced http(s) media URLs and
+/// Preprocesses a `GenerateRequest` to download referenced http(s) media URLs and
 /// inline them as data URIs.
 pub fn download_request_media(
     max_bytes: Option<usize>,
@@ -53,14 +63,14 @@ pub fn download_request_media(
                     if let Some(media) = &part.media {
                         if media.url.starts_with("http") && filter.is_none_or(|f| f(&part)) {
                             let response = reqwest::get(&media.url).await.map_err(|e| {
-                                genkit_core::error::Error::new_internal(format!(
+                                Error::new_internal(format!(
                                     "HTTP error downloading media '{}': {}",
                                     &media.url, e
                                 ))
                             })?;
 
                             if !response.status().is_success() {
-                                return Err(genkit_core::error::Error::new_internal(format!(
+                                return Err(Error::new_internal(format!(
                                     "HTTP error downloading media '{}': {}",
                                     &media.url,
                                     response.text().await.unwrap_or_default()
@@ -75,22 +85,18 @@ pub fn download_request_media(
                                 .to_string();
 
                             let body_bytes = response.bytes().await.map_err(|e| {
-                                genkit_core::error::Error::new_internal(format!(
-                                    "Failed to read media bytes: {}",
-                                    e
-                                ))
+                                Error::new_internal(format!("Failed to read media bytes: {}", e))
                             })?;
 
                             if let Some(limit) = max_bytes {
                                 if body_bytes.len() > limit {
-                                    return Err(genkit_core::error::Error::new_internal(format!(
+                                    return Err(Error::new_internal(format!(
                                         "Downloaded media exceeds size limit of {} bytes",
                                         limit
                                     )));
                                 }
                             }
-                            let encoded =
-                                base64::engine::general_purpose::STANDARD.encode(&body_bytes);
+                            let encoded = general_purpose::STANDARD.encode(&body_bytes);
                             let new_url = format!("data:{};base64,{}", content_type, encoded);
                             new_content.push(Part {
                                 media: Some(crate::Media {
@@ -106,7 +112,7 @@ pub fn download_request_media(
                         new_content.push(part);
                     }
                 }
-                new_messages.push(crate::model::MessageData {
+                new_messages.push(MessageData {
                     content: new_content,
                     ..message
                 });
@@ -117,14 +123,14 @@ pub fn download_request_media(
     })
 }
 
-/// Validates that a GenerateRequest does not include unsupported features.
+/// Validates that a `GenerateRequest` does not include unsupported features.
 pub fn validate_support(name: String, supports: ModelInfoSupports) -> ModelMiddleware {
     Arc::new(move |req: GenerateRequest, next: ModelMiddlewareNext<'_>| {
         let name = name.clone();
         let supports = supports.clone();
         Box::pin(async move {
-            let invalid = |message: &str| -> genkit_core::error::Error {
-                genkit_core::error::Error::new_internal(format!(
+            let invalid = |message: &str| -> Error {
+                Error::new_internal(format!(
                     "Model '{}' does not support {}. Request: {}",
                     name,
                     message,
@@ -153,20 +159,19 @@ pub fn validate_support(name: String, supports: ModelInfoSupports) -> ModelMiddl
                     len
                 )));
             }
-
             next(req).await
         })
     })
 }
 
 #[derive(Default, Clone)]
-pub struct SimulateSystemPromptOptions {
+pub struct SystemPromptSimulateOptions {
     pub preface: Option<String>,
     pub acknowledgement: Option<String>,
 }
 
 /// Provide a simulated system prompt for models that don't support it natively.
-pub fn simulate_system_prompt(options: Option<SimulateSystemPromptOptions>) -> ModelMiddleware {
+pub fn simulate_system_prompt(options: Option<SystemPromptSimulateOptions>) -> ModelMiddleware {
     let opts = options.unwrap_or_default();
     let preface = opts
         .preface
@@ -183,7 +188,7 @@ pub fn simulate_system_prompt(options: Option<SimulateSystemPromptOptions>) -> M
                 if let Some(pos) = req
                     .messages
                     .iter()
-                    .position(|m| m.role == crate::message::Role::System)
+                    .position(|m| m.role == crate::model::Role::System)
                 {
                     let system_message = req.messages.remove(pos);
                     let mut user_content = vec![Part {
@@ -193,12 +198,12 @@ pub fn simulate_system_prompt(options: Option<SimulateSystemPromptOptions>) -> M
                     user_content.extend(system_message.content);
 
                     let user_message = MessageData {
-                        role: crate::message::Role::User,
+                        role: crate::model::Role::User,
                         content: user_content,
                         metadata: None,
                     };
                     let model_message = MessageData {
-                        role: crate::message::Role::Model,
+                        role: crate::model::Role::Model,
                         content: vec![Part {
                             text: Some(acknowledgement),
                             ..Default::default()
@@ -209,7 +214,6 @@ pub fn simulate_system_prompt(options: Option<SimulateSystemPromptOptions>) -> M
                     req.messages
                         .splice(pos..pos, vec![user_message, model_message]);
                 }
-
                 next(req).await
             })
         },
@@ -267,13 +271,13 @@ pub fn augment_with_context(options: Option<AugmentWithContextOptions>) -> Model
                 if let Some(user_message) = req
                     .messages
                     .iter_mut()
-                    .rfind(|m| m.role == crate::message::Role::User)
+                    .rfind(|m| m.role == crate::model::Role::User)
                 {
                     // Check if context part already exists and is not pending
                     let context_part_index = user_message.content.iter().position(|p| {
                         p.metadata
                             .as_ref()
-                            .map_or_else(|| false, |m| m.get("purpose") == Some(&"context".into()))
+                            .is_some_and(|m| m.get("purpose") == Some(&"context".into()))
                     });
 
                     if let Some(idx) = context_part_index {
@@ -294,11 +298,11 @@ pub fn augment_with_context(options: Option<AugmentWithContextOptions>) -> Model
                         .unwrap_or_else(|| CONTEXT_PREFACE.to_string());
                     let mut context_text = preface;
                     for (i, doc_data) in docs.iter().enumerate() {
-                        context_text.push_str(&default_item_template(
-                            &Document::from_part(doc_data.clone(), None),
-                            i,
-                            &opts,
-                        ));
+                        let doc = Document {
+                            content: vec![doc_data.clone()],
+                            metadata: doc_data.metadata.clone(),
+                        };
+                        context_text.push_str(&default_item_template(&doc, i, &opts));
                     }
                     context_text.push('\n');
 
@@ -321,17 +325,38 @@ pub fn augment_with_context(options: Option<AugmentWithContextOptions>) -> Model
                         user_message.content.push(new_part);
                     }
                 }
-
                 next(req).await
             })
         },
     )
 }
 
+#[derive(Serialize, Deserialize, Debug, Default, Clone)]
+#[serde(rename_all = "camelCase")]
+struct OutputMetadata {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    format: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    schema: Option<serde_json::Value>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    constrained: Option<bool>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    content_type: Option<String>,
+}
+
 pub type InstructionsRenderer = Box<dyn Fn(&serde_json::Value) -> String + Send + Sync>;
 
+#[derive(Default)]
 pub struct SimulatedConstrainedGenerationOptions {
     pub instructions_renderer: Option<InstructionsRenderer>,
+}
+
+#[allow(unused)]
+fn default_constrained_generation_instructions(schema: &serde_json::Value) -> String {
+    format!(
+        "Output should be in JSON format and conform to the following schema:\n\n```\n{}\n```\n",
+        serde_json::to_string_pretty(schema).unwrap_or_default()
+    )
 }
 
 /// Model middleware that simulates constrained generation by injecting generation
@@ -339,33 +364,49 @@ pub struct SimulatedConstrainedGenerationOptions {
 pub fn simulate_constrained_generation(
     options: Option<SimulatedConstrainedGenerationOptions>,
 ) -> ModelMiddleware {
-    // This is tricky in Rust due to closure capture rules with Arc.
-    // A simpler approach for now is to not support custom renderers.
-    let _ = options; // Mark as used.
+    let options = Arc::new(options.unwrap_or_default());
+    Arc::new(
+        move |mut req: GenerateRequest, next: ModelMiddlewareNext<'_>| {
+            let options = Arc::clone(&options);
+            Box::pin(async move {
+                let mut instructions: Option<String> = None;
+                if let Some(output_str) = &req.output {
+                    if let Ok(mut output_meta) = serde_json::from_str::<OutputMetadata>(output_str)
+                    {
+                        if output_meta.constrained == Some(true) {
+                            if let Some(schema) = &output_meta.schema {
+                                if let Some(renderer) = &options.instructions_renderer {
+                                    instructions = Some(renderer(schema));
+                                } else {
+                                    instructions =
+                                        Some(default_constrained_generation_instructions(schema));
+                                }
 
-    Arc::new(move |req: GenerateRequest, next: ModelMiddlewareNext<'_>| {
-        Box::pin(async move {
-            let mut _instructions: Option<String> = None;
-            // TODO
-            // if let Some(output) = &req.output {
-            //     if output.constrained == Some(true) {
-            //         if let Some(schema) = &output.schema {
-            //             instructions =
-            //                 Some(default_constrained_generation_instructions(schema));
-            //         }
-            //     }
-            // }
-            // if let Some(instr) = instructions {
-            //     req.messages = inject_instructions(&req.messages, Some(instr));
-            //     if let Some(output) = req.output.as_mut() {
-            //         output.constrained = Some(false);
-            //         output.format = None;
-            //         output.content_type = None;
-            //         output.schema = None;
-            //     }
-            // }
+                                output_meta.constrained = Some(false);
+                                output_meta.format = None;
+                                output_meta.content_type = None;
+                                output_meta.schema = None;
+                                req.output = serde_json::to_string(&output_meta).ok();
+                            }
+                        }
+                    }
+                }
 
-            next(req).await
-        })
-    })
+                if let Some(instr) = instructions {
+                    if let Some(user_message) =
+                        req.messages.iter_mut().rfind(|m| m.role == Role::User)
+                    {
+                        let mut metadata = std::collections::HashMap::new();
+                        metadata.insert("purpose".to_string(), "output".into());
+                        user_message.content.push(Part {
+                            text: Some(instr),
+                            metadata: Some(metadata),
+                            ..Default::default()
+                        });
+                    }
+                }
+                next(req).await
+            })
+        },
+    )
 }

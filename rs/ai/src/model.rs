@@ -116,7 +116,7 @@ pub struct GenerationCommonConfig {
 }
 
 /// A request to a generative model.
-#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, PartialEq)]
 #[serde(rename_all = "camelCase")]
 pub struct GenerateRequest {
     pub messages: Vec<MessageData>,
@@ -597,9 +597,11 @@ pub fn validate_support(name: String, supports: ModelInfoSupports) -> ModelMiddl
     middleware::validate_support(name, supports)
 }
 
-pub use middleware::SimulateSystemPromptOptions;
+pub use middleware::SystemPromptSimulateOptions;
 
-pub fn simulate_system_prompt(options: Option<SimulateSystemPromptOptions>) -> ModelMiddleware {
+pub fn simulate_system_prompt<SimulateSystemPromptOptions>(
+    options: Option<SystemPromptSimulateOptions>,
+) -> ModelMiddleware {
     middleware::simulate_system_prompt(options)
 }
 
