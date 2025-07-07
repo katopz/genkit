@@ -177,6 +177,115 @@ mod test {
 
     #[rstest]
     #[tokio::test]
+    #[ignore]
+    async fn test_injects_instructions_into_request_idempotently() {
+        use self::helpers::{registry_with_programmable_model, ProgrammableModelHandler};
+        use genkit_ai::document::Part;
+        use genkit_ai::generate::{generate, GenerateOptions, OutputOptions};
+        use genkit_ai::message::{MessageData, Role};
+        use genkit_ai::model::{
+            middleware::SimulatedConstrainedGenerationOptions, CandidateData, Model,
+        };
+
+        let (registry, pm_handle) = registry_with_programmable_model().await;
+
+        let handler: ProgrammableModelHandler =
+            Arc::new(Box::new(move |_req, _streaming_callback| {
+                Box::pin(async {
+                    Ok(GenerateResponseData {
+                        candidates: vec![CandidateData {
+                            message: MessageData {
+                                role: Role::Model,
+                                content: vec![Part::text("```\n{\"foo\": \"bar\"}\n```")],
+                                ..Default::default()
+                            },
+                            ..Default::default()
+                        }],
+                        ..Default::default()
+                    })
+                })
+            }));
+        *pm_handle.handler.lock().unwrap() = handler;
+
+        #[derive(serde::Deserialize, PartialEq, Debug)]
+        struct Foo {
+            foo: String,
+        }
+
+        let schema_value = json!({
+            "type": "object",
+            "properties": { "foo": { "type": "string" } },
+            "required": ["foo"],
+            "additionalProperties": true,
+            "$schema": "http://json-schema.org/draft-07/schema#"
+        });
+
+        let renderer = move |s: &serde_json::Value| {
+            format!("must be json: {}", serde_json::to_string(s).unwrap())
+        };
+        let options = SimulatedConstrainedGenerationOptions {
+            instructions_renderer: Some(Box::new(renderer)),
+        };
+        let middleware = simulate_constrained_generation(Some(options));
+
+        let result = generate(
+            &registry,
+            GenerateOptions::<Value> {
+                model: Some(Model::Name("programmableModel".to_string())),
+                prompt: Some(vec![Part::text("generate json")]),
+                r#use: todo!(), // Some(vec![middleware]),
+                output: Some(OutputOptions {
+                    schema: Some(schema_value.clone()),
+                    format: Some("json".to_string()),
+                    ..Default::default()
+                }),
+                ..Default::default()
+            },
+        )
+        .await
+        .unwrap();
+
+        let output_val: Foo = serde_json::from_value(result.output().unwrap()).unwrap();
+        assert_eq!(
+            output_val,
+            Foo {
+                foo: "bar".to_string()
+            }
+        );
+
+        let last_req = pm_handle.last_request.lock().unwrap().clone().unwrap();
+        let mut last_req_val = serde_json::to_value(&last_req).unwrap();
+        last_req_val.as_object_mut().unwrap().remove("config");
+
+        let expected_text = format!(
+            "must be json: {}",
+            serde_json::to_string(&schema_value).unwrap()
+        );
+
+        let expected_req_val = json!({
+          "messages": [
+            {
+              "role": "user",
+              "content": [
+                { "text": "generate json" },
+                {
+                  "metadata": { "purpose": "output" },
+                  "text": expected_text
+                }
+              ]
+            }
+          ],
+          "output": {
+            "constrained": false
+          },
+          "tools": []
+        });
+
+        assert_eq!(last_req_val, expected_req_val);
+    }
+
+    #[rstest]
+    #[tokio::test]
     async fn test_relies_on_native_support_no_instructions() {
         use self::helpers::{registry_with_programmable_model_options, ProgrammableModelHandler};
         use genkit_ai::document::Part;
@@ -211,7 +320,7 @@ mod test {
             }));
         *pm_handle.handler.lock().unwrap() = handler;
 
-        #[derive(Default, Deserialize, Serialize, PartialEq, Debug, Clone)]
+        #[derive(Default, Serialize, Deserialize, PartialEq, Debug, Clone)]
         struct Foo {
             foo: String,
         }
