@@ -90,6 +90,12 @@ async fn reconstruct_user_facing_request<O: Serialize>(
     registry: &Registry,
 ) -> Result<GenerateRequest> {
     let mut final_request = model_request.clone();
+
+    // If the original request didn't have tools, don't show the injected empty array.
+    if raw_request.tools.is_none() {
+        final_request.tools = None;
+    }
+
     if let Some(user_output_opts) = raw_request.output.as_ref() {
         let mut final_output_opts = user_output_opts.clone();
         if let Some(format) = formats::resolve_format(registry, Some(user_output_opts)).await {
