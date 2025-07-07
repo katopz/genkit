@@ -356,6 +356,8 @@ struct OutputMetadata {
     constrained: Option<bool>,
     #[serde(skip_serializing_if = "Option::is_none")]
     content_type: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    instructions: Option<bool>,
 }
 
 pub type InstructionsRenderer = Box<dyn Fn(&serde_json::Value) -> String + Send + Sync>;
@@ -383,41 +385,44 @@ pub fn simulate_constrained_generation(
         move |mut req: GenerateRequest, next: ModelMiddlewareNext<'_>| {
             let options = Arc::clone(&options);
             Box::pin(async move {
-                let mut instructions: Option<String> = None;
-                if let Some(output_str) = &req.output {
+                if let Some(output_value) = &req.output {
                     if let Ok(mut output_meta) =
-                        serde_json::from_value::<OutputMetadata>(output_str.clone())
+                        serde_json::from_value::<OutputMetadata>(output_value.clone())
                     {
-                        if output_meta.constrained == Some(true) {
-                            if let Some(schema) = &output_meta.schema {
-                                if let Some(renderer) = &options.instructions_renderer {
-                                    instructions = Some(renderer(schema));
-                                } else {
-                                    instructions =
-                                        Some(default_constrained_generation_instructions(schema));
-                                }
+                        let should_simulate = if output_meta.instructions == Some(true) {
+                            true
+                        } else {
+                            !matches!(output_meta.constrained, Some(true))
+                        };
 
+                        if should_simulate {
+                            if let Some(schema) = &output_meta.schema {
+                                let rendered_instructions =
+                                    if let Some(renderer) = &options.instructions_renderer {
+                                        renderer(schema)
+                                    } else {
+                                        default_constrained_generation_instructions(schema)
+                                    };
+
+                                if let Some(user_message) =
+                                    req.messages.iter_mut().rfind(|m| m.role == Role::User)
+                                {
+                                    let mut metadata = std::collections::HashMap::new();
+                                    metadata.insert("purpose".to_string(), "output".into());
+                                    user_message.content.push(Part {
+                                        text: Some(rendered_instructions),
+                                        metadata: Some(metadata),
+                                        ..Default::default()
+                                    });
+                                }
                                 output_meta.constrained = Some(false);
-                                output_meta.format = None;
-                                output_meta.content_type = None;
-                                output_meta.schema = None;
-                                req.output = serde_json::to_value(&output_meta).ok();
+                                if output_meta.instructions != Some(true) {
+                                    output_meta.format = None;
+                                    output_meta.schema = None;
+                                }
+                                req.output = serde_json::to_value(output_meta).ok();
                             }
                         }
-                    }
-                }
-
-                if let Some(instr) = instructions {
-                    if let Some(user_message) =
-                        req.messages.iter_mut().rfind(|m| m.role == Role::User)
-                    {
-                        let mut metadata = std::collections::HashMap::new();
-                        metadata.insert("purpose".to_string(), "output".into());
-                        user_message.content.push(Part {
-                            text: Some(instr),
-                            metadata: Some(metadata),
-                            ..Default::default()
-                        });
                     }
                 }
                 next(req).await

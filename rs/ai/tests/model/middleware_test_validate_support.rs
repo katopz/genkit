@@ -68,7 +68,6 @@ mod test {
         let req: GenerateRequest = from_value(json!({
             "messages": [{ "role": "user", "content": [{ "text": "generate json" }] }],
             "output": {
-                "constrained": true,
                 "format": "json",
                 "schema": schema
             }
@@ -118,7 +117,6 @@ mod test {
         let req: GenerateRequest = from_value(json!({
             "messages": [{ "role": "user", "content": [{ "text": "generate json" }] }],
             "output": {
-                "constrained": true,
                 "format": "json",
                 "schema": schema.clone()
             }
@@ -185,30 +183,8 @@ mod test {
         // The original request is cloned to ensure it remains unchanged.
         let modified_req = test_middleware_request(req.clone(), middleware).await;
 
-        // In a unit test, the middleware always runs if `constrained: true`.
-        // We expect the request to be modified.
-        let expected_req: GenerateRequest = from_value(json!({
-            "messages": [
-                {
-                    "role": "user",
-                    "content": [
-                        { "text": "generate json" },
-                        {
-                            "text": format!(
-                                "Output should be in JSON format and conform to the following schema:\n\n```\n{}\n```\n",
-                                serde_json::to_string_pretty(&schema).unwrap()
-                            ),
-                            "metadata": { "purpose": "output" }
-                        }
-                    ]
-                }
-            ],
-            "output": {
-                "constrained": false
-            }
-        }))
-        .unwrap();
-        assert_eq!(modified_req, expected_req);
+        // The request should be passed through unmodified.
+        assert_eq!(modified_req, req);
     }
 
     /// Tests that the middleware injects instructions if `output.instructions` is explicitly true,
@@ -256,9 +232,11 @@ mod test {
                 }
             ],
             // Note that `constrained` is now false, as the middleware has handled the constraint via instructions.
-            // The current middleware implementation strips other fields from the output object.
             "output": {
-                "constrained": false
+                "constrained": false,
+                "format": "json",
+                "schema": schema,
+                "instructions": true
             }
         })).unwrap();
 
