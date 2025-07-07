@@ -83,6 +83,34 @@ pub struct GenerateHelperOptions<O: 'static> {
     pub message_index: u32,
 }
 
+/// Reconstructs the `GenerateRequest` to reflect user-facing options.
+async fn reconstruct_user_facing_request<O: Serialize>(
+    model_request: &GenerateRequest,
+    raw_request: &GenerateOptions<O>,
+    registry: &Registry,
+) -> Result<GenerateRequest> {
+    let mut final_request = model_request.clone();
+    if let Some(user_output_opts) = raw_request.output.as_ref() {
+        let mut final_output_opts = user_output_opts.clone();
+        if let Some(format) = formats::resolve_format(registry, Some(user_output_opts)).await {
+            // Always set format name from resolved format
+            final_output_opts.format = Some(format.name.clone());
+            // Only set content_type if user didn't specify one
+            if final_output_opts.content_type.is_none() {
+                final_output_opts.content_type = format.config.content_type.clone();
+            }
+            // Only set constrained if user didn't specify one
+            if final_output_opts.constrained.is_none() {
+                final_output_opts.constrained = format.config.constrained;
+            }
+        }
+        final_request.output = Some(serde_json::to_value(final_output_opts).map_err(|e| {
+            Error::new_internal(format!("Failed to serialize final output options: {}", e))
+        })?);
+    }
+    Ok(final_request)
+}
+
 /// Defines (registers) a utility `generate` action.
 pub fn define_generate_action(registry: &mut Registry) -> Arc<GenerateAction> {
     let registry_clone = Arc::new(registry.clone());
@@ -118,7 +146,13 @@ pub fn define_generate_action(registry: &mut Registry) -> Arc<GenerateAction> {
 
                 let ((response_data, request), _telemetry) = result?;
 
-                let mut response = GenerateResponse::new(&response_data, Some(request));
+                let final_request = reconstruct_user_facing_request(
+                    &request,
+                    &raw_request_for_response,
+                    &registry_for_response,
+                )
+                .await?;
+                let mut response = GenerateResponse::new(&response_data, Some(final_request));
 
                 response.assert_valid()?;
 
@@ -189,7 +223,13 @@ where
 
     let ((response_data, request), _telemetry) = result?;
 
-    let mut response = GenerateResponse::new(&response_data, Some(request.clone()));
+    let final_request = reconstruct_user_facing_request(
+        &request,
+        &raw_request_for_response,
+        &registry_for_response,
+    )
+    .await?;
+    let mut response = GenerateResponse::new(&response_data, Some(final_request));
 
     response.assert_valid()?;
 
