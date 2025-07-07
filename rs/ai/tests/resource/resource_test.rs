@@ -12,16 +12,12 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use genkit_ai::{
-    resource::{
-        define_resource, find_matching_resource, ResourceInput, ResourceOptions, ResourceOutput,
-    },
-    Part,
+use genkit_ai::resource::{
+    define_resource, find_matching_resource, ResourceInput, ResourceOptions,
 };
 use genkit_core::registry::{ErasedAction, Registry};
 use rstest::{fixture, rstest};
 use serde_json::{from_value, json};
-use std::collections::HashMap;
 
 #[fixture]
 fn registry() -> Registry {
@@ -40,9 +36,9 @@ async fn test_defines_and_matches_static_resource_uri(mut registry: Registry) {
     .unwrap();
 
     let test_resource = define_resource(&mut registry, options, |_, _| async {
-        Ok(ResourceOutput {
-            content: vec![Part::text("foo stuff")],
-        })
+        Ok(from_value(json!({
+            "content": [{ "text": "foo stuff" }]
+        }))?)
     })
     .unwrap();
 
@@ -112,9 +108,9 @@ async fn test_defines_and_matches_template_resource_uri(mut registry: Registry) 
     .unwrap();
 
     let test_resource = define_resource(&mut registry, options, |input, _| async move {
-        Ok(ResourceOutput {
-            content: vec![Part::text(format!("foo stuff {}", input.uri))],
-        })
+        Ok(from_value(json!({
+            "content": [{ "text": format!("foo stuff {}", input.uri) }]
+        }))?)
     })
     .unwrap();
 
@@ -180,32 +176,22 @@ async fn test_handles_parent_resources(mut registry: Registry) {
     .unwrap();
 
     let test_resource = define_resource(&mut registry, options, |file, _| async move {
-        let mut metadata1 = HashMap::new();
-        metadata1.insert(
-            "resource".to_string(),
-            json!({ "uri": format!("{}/sub1.txt", file.uri) }),
-        );
-
-        let mut metadata2 = HashMap::new();
-        metadata2.insert(
-            "resource".to_string(),
-            json!({ "uri": format!("{}/sub2.txt", file.uri) }),
-        );
-
-        Ok(ResourceOutput {
-            content: vec![
-                Part {
-                    text: Some("sub1".to_string()),
-                    metadata: Some(metadata1),
-                    ..Default::default()
+        Ok(from_value(json!({
+            "content": [
+                {
+                    "text": "sub1",
+                    "metadata": {
+                        "resource": { "uri": format!("{}/sub1.txt", file.uri) }
+                    }
                 },
-                Part {
-                    text: Some("sub2".to_string()),
-                    metadata: Some(metadata2),
-                    ..Default::default()
-                },
-            ],
-        })
+                {
+                    "text": "sub2",
+                    "metadata": {
+                        "resource": { "uri": format!("{}/sub2.txt", file.uri) }
+                    }
+                }
+            ]
+        }))?)
     })
     .unwrap();
 
@@ -241,9 +227,9 @@ async fn test_finds_matching_resource(mut registry: Registry) {
     }))
     .unwrap();
     define_resource(&mut registry, template_options, |input, _| async move {
-        Ok(ResourceOutput {
-            content: vec![Part::text(input.uri)],
-        })
+        Ok(from_value(json!({
+            "content": [{ "text": input.uri }]
+        }))?)
     })
     .unwrap();
 
@@ -253,9 +239,9 @@ async fn test_finds_matching_resource(mut registry: Registry) {
     }))
     .unwrap();
     define_resource(&mut registry, static_options, |_, _| async {
-        Ok(ResourceOutput {
-            content: vec![Part::text("bar")],
-        })
+        Ok(from_value(json!({
+            "content": [{ "text": "bar" }]
+        }))?)
     })
     .unwrap();
 
