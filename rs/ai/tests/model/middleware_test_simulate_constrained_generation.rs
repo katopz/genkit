@@ -194,4 +194,50 @@ mod test {
 
         assert_eq!(last_req_val, expected_req_val);
     }
+
+    #[rstest]
+    #[tokio::test]
+    async fn test_uses_format_instructions_when_explicitly_set() {
+        let schema = json!({
+            "type": "object",
+            "properties": { "foo": { "type": "string" } },
+        });
+
+        // This request simulates asking for instructions to be added, overriding native support.
+        let req: GenerateRequest = from_value(json!({
+            "messages": [{ "role": "user", "content": [{ "text": "generate json" }] }],
+            "output": {
+                "instructions": true,
+                "constrained": true, // This would normally bypass instruction injection.
+                "format": "json",
+                "schema": schema.clone()
+            }
+        }))
+        .unwrap();
+
+        let modified_req = test_constrained_request(req).await;
+
+        // 1. Check instructions were injected into messages
+        let expected_text = format!(
+            "Output should be in JSON format and conform to the following schema:\n\n```\n{}\n```\n",
+            serde_json::to_string_pretty(&schema).unwrap()
+        );
+        let last_part = modified_req
+            .messages
+            .last()
+            .unwrap()
+            .content
+            .last()
+            .unwrap();
+        assert_eq!(last_part.text.as_ref().unwrap(), &expected_text);
+        assert_eq!(last_part.metadata.as_ref().unwrap()["purpose"], "output");
+
+        // 2. Check that output options were modified correctly
+        let output_val = modified_req.output.unwrap();
+        let output_obj = output_val.as_object().unwrap();
+        assert_eq!(output_obj["constrained"], false);
+        assert_eq!(output_obj["instructions"], true);
+        assert_eq!(output_obj["format"], "json");
+        assert_eq!(output_obj["schema"], schema);
+    }
 }

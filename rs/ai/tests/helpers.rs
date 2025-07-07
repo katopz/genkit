@@ -57,14 +57,22 @@ pub struct ProgrammableModel {
 }
 
 /// The Genkit Plugin that provides the programmable model for testing.
-#[derive(Clone, Default)]
+#[derive(Clone)]
 pub struct ProgrammableModelPlugin {
     state: Arc<Mutex<Option<ProgrammableModel>>>,
+    options: DefineModelOptions,
 }
 
 impl ProgrammableModelPlugin {
-    pub fn new() -> Self {
-        Default::default()
+    pub fn new(options: Option<DefineModelOptions>) -> Self {
+        let mut opts = options.unwrap_or_default();
+        if opts.name.is_empty() {
+            opts.name = "programmableModel".to_string();
+        }
+        Self {
+            state: Arc::new(Mutex::new(None)),
+            options: opts,
+        }
     }
 
     pub fn get_handle(&self) -> ProgrammableModel {
@@ -94,26 +102,24 @@ impl Plugin for ProgrammableModelPlugin {
 
         *self.state.lock().unwrap() = Some(model_state.clone());
 
-        define_model(
-            registry,
-            DefineModelOptions {
-                name: "programmableModel".to_string(),
-                supports: Some(ModelInfoSupports {
-                    tools: Some(true),
-                    system_role: Some(true),
-                    ..Default::default()
-                }),
-                ..Default::default()
-            },
-            move |req, streaming_callback| {
-                let model_state = model_state.clone();
-                async move {
-                    *model_state.last_request.lock().unwrap() = Some(req.clone());
-                    let handler = model_state.handler.lock().unwrap().clone();
-                    handler(req, streaming_callback).await
-                }
-            },
-        );
+        let mut define_opts = self.options.clone();
+        let mut supports = define_opts.supports.unwrap_or_default();
+        if supports.tools.is_none() {
+            supports.tools = Some(true);
+        }
+        if supports.system_role.is_none() {
+            supports.system_role = Some(true);
+        }
+        define_opts.supports = Some(supports);
+
+        define_model(registry, define_opts, move |req, streaming_callback| {
+            let model_state = model_state.clone();
+            async move {
+                *model_state.last_request.lock().unwrap() = Some(req.clone());
+                let handler = model_state.handler.lock().unwrap().clone();
+                handler(req, streaming_callback).await
+            }
+        });
 
         Ok(())
     }
@@ -221,6 +227,7 @@ pub async fn registry_with_echo_model() -> (Arc<Registry>, Arc<Mutex<Option<Gene
     };
 
     let mut registry = Registry::new();
+    genkit_ai::configure_ai(&mut registry);
     registry.set_default_model("echoModel".to_string());
     echo_plugin.initialize(&mut registry).await.unwrap();
 
@@ -230,13 +237,24 @@ pub async fn registry_with_echo_model() -> (Arc<Registry>, Arc<Mutex<Option<Gene
 /// Test fixture that provides a Registry with the `programmableModel`.
 /// Returns the Registry and a handle to program the model's behavior.
 #[allow(unused)]
-pub async fn registry_with_programmable_model() -> (Arc<Registry>, ProgrammableModel) {
-    let pm_plugin = ProgrammableModelPlugin::new();
+pub async fn registry_with_programmable_model_options(
+    options: Option<DefineModelOptions>,
+) -> (Arc<Registry>, ProgrammableModel) {
+    let pm_plugin = ProgrammableModelPlugin::new(options);
 
     let mut registry = Registry::new();
-    registry.set_default_model("programmableModel".to_string());
+    genkit_ai::configure_ai(&mut registry);
+    let model_name = pm_plugin.options.name.clone();
+    registry.set_default_model(model_name);
     pm_plugin.initialize(&mut registry).await.unwrap();
 
     let handle = pm_plugin.get_handle();
     (Arc::new(registry), handle)
+}
+
+/// Test fixture that provides a Registry with the `programmableModel`.
+/// Returns the Registry and a handle to program the model's behavior.
+#[allow(unused)]
+pub async fn registry_with_programmable_model() -> (Arc<Registry>, ProgrammableModel) {
+    registry_with_programmable_model_options(None).await
 }
