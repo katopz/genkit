@@ -96,7 +96,7 @@ pub struct ResumeOptions {
 }
 
 /// Options for a `generate` call. This struct is now generic to support typed `on_chunk` callbacks.
-#[derive(Clone, Deserialize, JsonSchema)]
+#[derive(Clone, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct GenerateOptions<O = Value> {
     pub model: Option<crate::model::Model>,
