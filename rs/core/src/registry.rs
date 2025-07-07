@@ -38,10 +38,12 @@ use std::any::Any;
 use std::collections::HashMap;
 use std::fmt::Debug;
 use std::sync::{Arc, Mutex};
+use strum::Display;
 
 /// The type of a runnable action.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, Display)]
 #[serde(rename_all = "camelCase")]
+#[strum(serialize_all = "lowercase")]
 pub enum ActionType {
     Custom,
     Embedder,
@@ -55,6 +57,7 @@ pub enum ActionType {
     CancelOperation,
     Prompt,
     Reranker,
+    Resource,
     Retriever,
     Tool,
     Util,

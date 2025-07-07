@@ -30,6 +30,7 @@ base64.workspace        = true
 colored.workspace       = true
 futures-util.workspace  = true
 jsonschema.workspace    = true
+regex.workspace         = true
 reqwest                 = { workspace = true, features = ["json"] }
 rstest.workspace        = true
 rstest_macros.workspace = true
@@ -57,3 +58,7 @@ path = "tests/generate/chunk_test.rs"
 [[test]]
 name = "prompt_helpers_test"
 path = "tests/prompt/prompt_helpers_test.rs"
+
+[[test]]
+name = "resource_test"
+path = "tests/resource/resource_test.rs"
