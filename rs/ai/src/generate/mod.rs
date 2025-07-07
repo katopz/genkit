@@ -506,19 +506,15 @@ pub async fn to_generate_request<O>(
     };
 
     let resolved_tools = tool::resolve_tools(registry, options.tools.as_deref()).await?;
-    let tools = if !resolved_tools.is_empty() {
-        Some(
-            resolved_tools
-                .iter()
-                .map(|t| tool::to_tool_definition(t.as_ref()))
-                .collect::<Result<Vec<_>>>()?
-                .into_iter()
-                .map(ToolRequest::from)
-                .collect(),
-        )
-    } else {
-        None
-    };
+    let tools = Some(
+        resolved_tools
+            .iter()
+            .map(|t| tool::to_tool_definition(t.as_ref()))
+            .collect::<Result<Vec<_>>>()?
+            .into_iter()
+            .map(ToolRequest::from)
+            .collect(),
+    );
 
     Ok(GenerateRequest {
         messages,

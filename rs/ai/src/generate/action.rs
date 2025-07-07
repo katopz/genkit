@@ -389,12 +389,26 @@ where
                         request.messages
                     );
                 }
-            }
 
-            if let Some(output_opts) = request.output.as_mut() {
-                output_opts.format = Some(format.name.clone());
-                output_opts.content_type = format.config.content_type.clone();
-                output_opts.constrained = format.config.constrained;
+                // When simulating, modify the output options for the model request.
+                if let Some(output_opts) = request.output.as_mut() {
+                    output_opts.constrained = Some(false);
+                    if !matches!(
+                        output_opts.instructions.as_ref().and_then(|i| i.as_bool()),
+                        Some(true)
+                    ) {
+                        output_opts.format = None;
+                        output_opts.schema = None;
+                    }
+                    output_opts.content_type = None;
+                }
+            } else {
+                // Model supports format, so just pass through the options.
+                if let Some(output_opts) = request.output.as_mut() {
+                    output_opts.format = Some(format.name.clone());
+                    output_opts.content_type = format.config.content_type.clone();
+                    output_opts.constrained = format.config.constrained;
+                }
             }
         }
 
