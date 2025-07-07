@@ -220,10 +220,34 @@ pub fn simulate_system_prompt(options: Option<SystemPromptSimulateOptions>) -> M
     )
 }
 
-#[derive(Default, Clone)]
+pub type ItemTemplate = Box<dyn Fn(&Document, usize) -> String + Send + Sync>;
+
+#[derive(Serialize, Deserialize)]
 pub struct AugmentWithContextOptions {
     pub preface: Option<String>,
     pub citation_key: Option<String>,
+    #[serde(skip)]
+    pub item_template: Option<ItemTemplate>,
+}
+
+impl Default for AugmentWithContextOptions {
+    fn default() -> Self {
+        Self {
+            preface: None,
+            citation_key: None,
+            item_template: None,
+        }
+    }
+}
+
+impl Clone for AugmentWithContextOptions {
+    fn clone(&self) -> Self {
+        Self {
+            preface: self.preface.clone(),
+            citation_key: self.citation_key.clone(),
+            item_template: None,
+        }
+    }
 }
 
 pub const CONTEXT_PREFACE: &str = "\n\nUse the following information to complete your task:\n\n";
@@ -258,10 +282,10 @@ fn default_item_template(
 
 /// Injects retrieved documents as context into the last user message.
 pub fn augment_with_context(options: Option<AugmentWithContextOptions>) -> ModelMiddleware {
-    let opts = options.unwrap_or_default();
+    let opts = Arc::new(options.unwrap_or_default());
     Arc::new(
         move |mut req: GenerateRequest, next: ModelMiddlewareNext<'_>| {
-            let opts = opts.clone();
+            let opts = Arc::clone(&opts);
             Box::pin(async move {
                 let docs = match req.docs.as_ref() {
                     Some(d) if !d.is_empty() => d,
@@ -298,7 +322,11 @@ pub fn augment_with_context(options: Option<AugmentWithContextOptions>) -> Model
                         .unwrap_or_else(|| CONTEXT_PREFACE.to_string());
                     let mut context_text = preface;
                     for (i, doc) in docs.iter().enumerate() {
-                        context_text.push_str(&default_item_template(doc, i, &opts));
+                        if let Some(template) = &opts.item_template {
+                            context_text.push_str(&template(doc, i));
+                        } else {
+                            context_text.push_str(&default_item_template(doc, i, &opts));
+                        }
                     }
                     context_text.push('\n');
 
