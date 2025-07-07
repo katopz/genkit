@@ -13,4 +13,5 @@
 // limitations under the License.
 
 // Note: The Rust version of `genkit-ai` does not yet export `FormatArgument`.
-pub use genkit_ai::formats::types::Formatter;
+pub use genkit_ai::formats::types::{FormatHandler, Formatter};
+pub use genkit_ai::formats::{define_format, Format, FormatterConfig};

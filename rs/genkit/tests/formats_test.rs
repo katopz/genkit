@@ -17,9 +17,8 @@
 mod helpers;
 
 use futures_util::StreamExt;
-use genkit::formats::Formatter;
+use genkit::formats::{define_format, Format, FormatHandler, Formatter, FormatterConfig};
 use genkit::model::Message;
-use genkit_ai::formats::types::FormatHandler;
 use genkit_ai::generate::{generate, generate_stream, OutputOptions};
 use genkit_ai::GenerateOptions;
 use genkit_core::registry::Registry;
@@ -28,7 +27,7 @@ use serde_json::Value;
 use std::sync::Arc;
 
 struct BananaFormat;
-impl genkit_ai::formats::Format for BananaFormat {
+impl Format for BananaFormat {
     fn parse_message(&self, message: &Message) -> Value {
         println!(
             "[BananaFormat::parse_message] called with message text: {}",
@@ -49,11 +48,11 @@ async fn registry() -> Registry {
     let mut registry = Registry::new();
     genkit_ai::configure_ai(&mut registry);
     let banana_handler: FormatHandler = Arc::new(|_schema| Box::new(BananaFormat));
-    let banana_config = genkit_ai::formats::FormatterConfig {
+    let banana_config = FormatterConfig {
         constrained: Some(true),
         ..Default::default()
     };
-    genkit_ai::formats::define_format(
+    define_format(
         &mut registry,
         "banana",
         banana_config.clone(),

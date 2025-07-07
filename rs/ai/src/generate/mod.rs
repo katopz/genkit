@@ -505,16 +505,24 @@ pub async fn to_generate_request<O>(
         Some(Value::Object(merged_config))
     };
 
-    let resolved_tools = tool::resolve_tools(registry, options.tools.as_deref()).await?;
-    let tools = Some(
-        resolved_tools
-            .iter()
-            .map(|t| tool::to_tool_definition(t.as_ref()))
-            .collect::<Result<Vec<_>>>()?
-            .into_iter()
-            .map(ToolRequest::from)
-            .collect(),
-    );
+    let tools = if options.tools.is_none() {
+        None
+    } else {
+        let resolved_tools = tool::resolve_tools(registry, options.tools.as_deref()).await?;
+        if resolved_tools.is_empty() {
+            None
+        } else {
+            Some(
+                resolved_tools
+                    .iter()
+                    .map(|t| tool::to_tool_definition(t.as_ref()))
+                    .collect::<Result<Vec<_>>>()?
+                    .into_iter()
+                    .map(ToolRequest::from)
+                    .collect(),
+            )
+        }
+    };
 
     Ok(GenerateRequest {
         messages,
