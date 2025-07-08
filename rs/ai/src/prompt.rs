@@ -34,16 +34,27 @@ use handlebars::Handlebars;
 use schemars::{self, JsonSchema};
 use serde::{de::DeserializeOwned, Deserialize, Serialize};
 use serde_json::{json, Value};
+use std::fmt;
+use std::future::Future;
+use std::pin::Pin;
 use std::sync::Arc;
 
 /// A type alias for an action that renders a prompt.
 pub type PromptAction<I = Value> = Action<I, GenerateRequest, ()>;
 
+/// A type alias for a function that resolves documents dynamically for a prompt.
+pub type DocsResolver<I> = Box<
+    dyn Fn(
+            I,
+            Option<Value>,
+            Option<ActionContext>,
+        ) -> Pin<Box<dyn Future<Output = Result<Vec<Document>>> + Send>>
+        + Send
+        + Sync,
+>;
+
 /// Configuration for a prompt action.
-/// NOTE: This is a simplified version of the TS equivalent.
-/// It does not support function resolvers for `system`, `prompt`, `messages`, or `docs`.
-/// It primarily supports static content and string-based Handlebars templates.
-#[derive(Clone, Default, Debug, Serialize, Deserialize, JsonSchema)]
+#[derive(Default, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct PromptConfig<I = Value, O = Value, C = Value> {
     pub name: String,
@@ -71,6 +82,36 @@ pub struct PromptConfig<I = Value, O = Value, C = Value> {
     pub tools: Option<Vec<ToolArgument>>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub _marker: Option<std::marker::PhantomData<O>>,
+    #[serde(skip, default)]
+    #[schemars(skip)]
+    pub docs_fn: Option<DocsResolver<I>>,
+}
+
+// Manual Debug implementation because Box<dyn Fn(...)> is not Debug.
+impl<I, O, C> fmt::Debug for PromptConfig<I, O, C>
+where
+    I: fmt::Debug,
+    O: fmt::Debug,
+    C: fmt::Debug,
+{
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("PromptConfig")
+            .field("name", &self.name)
+            .field("variant", &self.variant)
+            .field("model", &self.model)
+            .field("config", &self.config)
+            .field("description", &self.description)
+            .field("input_schema", &self.input_schema)
+            .field("system", &self.system)
+            .field("prompt", &self.prompt)
+            .field("messages", &self.messages)
+            .field("docs", &self.docs)
+            .field("output", &self.output)
+            .field("tools", &self.tools)
+            .field("_marker", &self._marker)
+            .field("docs_fn", &self.docs_fn.as_ref().map(|_| "Some(<fn>)"))
+            .finish()
+    }
 }
 
 /// Options for generating a response from a prompt.
@@ -135,34 +176,44 @@ where
         handlebars.set_strict_mode(false);
 
         // 1. Prepare render data from input, session state, and context
-        let mut render_data = serde_json::to_value(input)
+        let mut render_data = serde_json::to_value(input.clone())
             .map_err(|e| Error::new_internal(format!("Failed to serialize input: {}", e)))?;
 
-        if let Some(data_obj) = render_data.as_object_mut() {
-            // Add session state if available
-            if let Ok(session) = crate::session::get_current_session() {
-                if let Some(state) = session.state().await {
-                    data_obj.insert("@state".to_string(), state);
-                }
-            }
+        let session = crate::session::get_current_session().ok();
+        let state = if let Some(s) = &session {
+            s.state().await
+        } else {
+            None
+        };
 
-            // Merge context from definition-time and runtime
-            let mut final_context = get_context();
-            if let Some(opts_context) = opts.as_ref().and_then(|o| o.context.clone()) {
-                if let Some(ctx) = &mut final_context {
-                    ctx.extend(opts_context);
-                } else {
-                    final_context = Some(opts_context);
-                }
+        let mut final_context = get_context();
+        if let Some(opts_context) = opts.as_ref().and_then(|o| o.context.clone()) {
+            if let Some(ctx) = &mut final_context {
+                ctx.extend(opts_context);
+            } else {
+                final_context = Some(opts_context);
             }
-            if let Some(context) = final_context {
+        }
+
+        if let Some(data_obj) = render_data.as_object_mut() {
+            if let Some(state_val) = state.clone() {
+                data_obj.insert("@state".to_string(), state_val);
+            }
+            if let Some(context) = &final_context {
                 if let Some(auth_val) = context.get("auth") {
                     data_obj.insert("@auth".to_string(), auth_val.clone());
                 }
             }
         }
 
-        // 2. Build the message list in the correct order
+        // 2. Resolve docs (either from static list or dynamic function)
+        let docs = if let Some(docs_fn) = &self.config.docs_fn {
+            docs_fn(input, state, final_context.clone()).await?
+        } else {
+            self.config.docs.clone().unwrap_or_default()
+        };
+
+        // 3. Build the message list in the correct order
         let mut messages = Vec::new();
 
         // System Prompt
@@ -193,7 +244,7 @@ where
             messages.push(MessageData::user(vec![Part::text(prompt_text)]));
         }
 
-        // 3. Merge configs
+        // 4. Merge configs
         let mut final_config = self
             .config
             .config
@@ -214,12 +265,12 @@ where
             None
         };
 
-        // 4. Construct final GenerateOptions
+        // 5. Construct final GenerateOptions
         let gen_opts = GenerateOptions {
             model: self.config.model.clone(),
             messages: Some(messages),
             tools: self.config.tools.clone(),
-            docs: self.config.docs.clone(),
+            docs: if docs.is_empty() { None } else { Some(docs) },
             config: final_config,
             output: self.config.output.clone(),
             context: opts.and_then(|o| o.context),
