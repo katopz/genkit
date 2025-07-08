@@ -62,7 +62,7 @@ path = "tests/message/message_test.rs"
 
 [[test]]
 name = "prompt_test"
-path = "tests/prompt_test.rs"
+path = "tests/prompt/prompt_test.rs"
 
 [[test]]
 name = "resource_test"

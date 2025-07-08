@@ -20,6 +20,8 @@ use rstest::*;
 use serde::{Deserialize, Serialize};
 use serde_json::{from_value, json, Value};
 
+// Import test helpers
+#[path = "../helpers.rs"]
 mod helpers;
 
 // This helper is not in the original file, but useful for comparing GenerateOptions
@@ -49,27 +51,24 @@ fn strip_nulls(value: Value) -> Value {
     }
 }
 
-#[cfg(test)]
-mod prompt_tests {
-    use super::*;
-    use crate::helpers::registry_with_echo_model_and_tool;
+use crate::helpers::registry_with_echo_model_and_tool;
 
-    #[derive(Serialize, Deserialize)]
-    #[serde(rename_all = "camelCase")]
-    struct TestCase {
-        name: String,
-        prompt: PromptConfig<Value, Value, Value>,
-        input: Option<Value>,
-        input_options: Option<PromptGenerateOptions>,
-        want_text_output: Option<String>,
-        want_rendered: Option<GenerateOptions>,
-        state: Option<Value>,
-        #[serde(default)]
-        context: Option<ActionContext>,
-    }
+#[derive(Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct TestCase {
+    name: String,
+    prompt: PromptConfig<Value, Value, Value>,
+    input: Option<Value>,
+    input_options: Option<PromptGenerateOptions>,
+    want_text_output: Option<String>,
+    want_rendered: Option<GenerateOptions>,
+    state: Option<Value>,
+    #[serde(default)]
+    context: Option<ActionContext>,
+}
 
-    #[rstest]
-    #[case(from_value(json!({
+#[rstest]
+#[case(from_value(json!({
         "name": "renders user prompt",
         "prompt": {
             "model": "echoModel",
@@ -87,7 +86,7 @@ mod prompt_tests {
             "model": "echoModel"
         }
     })).unwrap())]
-    #[case(from_value(json!({
+#[case(from_value(json!({
         "name": "renders user prompt with context",
         "prompt": {
             "model": "echoModel",
@@ -106,7 +105,7 @@ mod prompt_tests {
             "context": { "auth": { "email": "a@b.c" } }
         }
     })).unwrap())]
-    #[case(from_value(json!({
+#[case(from_value(json!({
         "name": "renders user prompt with explicit messages override",
         "prompt": {
             "model": "echoModel",
@@ -134,7 +133,7 @@ mod prompt_tests {
             "model": "echoModel"
         }
     })).unwrap())]
-    #[case(from_value(json!({
+#[case(from_value(json!({
         "name": "renders system prompt",
         "prompt": {
             "model": "echoModel",
@@ -152,7 +151,7 @@ mod prompt_tests {
             "model": "echoModel"
         }
     })).unwrap())]
-    #[case(from_value(json!({
+#[case(from_value(json!({
         "name": "renders messages",
         "prompt": {
             "model": "echoModel",
@@ -176,7 +175,7 @@ mod prompt_tests {
             "model": "echoModel"
         }
     })).unwrap())]
-    #[case(from_value(json!({
+#[case(from_value(json!({
         "name": "renders system, message and prompt in the same order",
         "prompt": {
             "model": "echoModel",
@@ -204,7 +203,7 @@ mod prompt_tests {
             "model": "echoModel"
         }
     })).unwrap())]
-    #[case(from_value(json!({
+#[case(from_value(json!({
         "name": "includes docs",
         "prompt": {
             "model": "echoModel",
@@ -224,7 +223,7 @@ mod prompt_tests {
             "docs": [{ "content": [{ "text": "doc a" }] }, { "content": [{ "text": "doc b" }] }]
         }
     })).unwrap())]
-    #[case(from_value(json!({
+#[case(from_value(json!({
         "name": "includes tools",
         "prompt": {
             "model": "echoModel",
@@ -244,80 +243,79 @@ mod prompt_tests {
             "tools": [{ "name": "toolA", "description": "toolA descr" }]
         }
     })).unwrap())]
-    #[tokio::test]
-    async fn test_prompt_logic(#[case] case: TestCase) {
-        let (registry, _last_request) = registry_with_echo_model_and_tool().await;
-        let mut mut_registry = (*registry).clone();
+#[tokio::test]
+async fn test_prompt_logic(#[case] case: TestCase) {
+    let (registry, _last_request) = registry_with_echo_model_and_tool().await;
+    let mut mut_registry = (*registry).clone();
 
-        let p = define_prompt(&mut mut_registry, case.prompt);
+    let p = define_prompt(&mut mut_registry, case.prompt);
 
-        let p_clone = p.clone();
-        let input_clone = case.input.clone().unwrap_or(Value::Null);
-        let options_clone = case.input_options.clone();
+    let p_clone = p.clone();
+    let input_clone = case.input.clone().unwrap_or(Value::Null);
+    let options_clone = case.input_options.clone();
 
-        let execution_fut = async {
-            if let Some(state) = case.state {
-                let session = Session::new(
-                    registry.clone(),
-                    None,
-                    Some("test_session".to_string()),
-                    Some(state),
-                )
+    let execution_fut = async {
+        if let Some(state) = case.state {
+            let session = Session::new(
+                registry.clone(),
+                None,
+                Some("test_session".to_string()),
+                Some(state),
+            )
+            .await
+            .unwrap();
+            let session_arc = std::sync::Arc::new(session);
+            session_arc
+                .run(async move { p_clone.generate(input_clone, options_clone).await })
                 .await
-                .unwrap();
-                let session_arc = std::sync::Arc::new(session);
-                session_arc
-                    .run(async move { p_clone.generate(input_clone, options_clone).await })
-                    .await
-            } else {
-                p_clone.generate(input_clone, options_clone).await
-            }
-        };
-
-        if let Some(want_text) = case.want_text_output {
-            let result = execution_fut.await.unwrap();
-            // The TS echo model includes docs in the final text, the Rust one doesn't.
-            // We'll skip validating the text output for doc cases for now.
-            let has_docs = case
-                .want_rendered
-                .as_ref()
-                .is_some_and(|r| r.docs.is_some());
-            if !has_docs {
-                assert_eq!(result.text().unwrap(), want_text);
-            }
+        } else {
+            p_clone.generate(input_clone, options_clone).await
         }
+    };
 
-        if let Some(want_rendered) = case.want_rendered {
-            let p_clone_render = p.clone();
-            let input_clone_render = case.input.clone().unwrap_or(Value::Null);
-            let options_clone_render = case.input_options.clone();
+    if let Some(want_text) = case.want_text_output {
+        let result = execution_fut.await.unwrap();
+        // The TS echo model includes docs in the final text, the Rust one doesn't.
+        // We'll skip validating the text output for doc cases for now.
+        let has_docs = case
+            .want_rendered
+            .as_ref()
+            .is_some_and(|r| r.docs.is_some());
+        if !has_docs {
+            assert_eq!(result.text().unwrap(), want_text);
+        }
+    }
 
-            let rendered_opts = p_clone_render
-                .render(input_clone_render, options_clone_render)
-                .await
-                .unwrap();
+    if let Some(want_rendered) = case.want_rendered {
+        let p_clone_render = p.clone();
+        let input_clone_render = case.input.clone().unwrap_or(Value::Null);
+        let options_clone_render = case.input_options.clone();
 
-            // Resolve tool names to definitions for comparison
-            let mut want_rendered_value = serde_json::to_value(want_rendered).unwrap();
-            if let Some(tools_val) = want_rendered_value.get_mut("tools") {
-                if let Some(tools) = tools_val.as_array_mut() {
-                    if tools.len() == 1 && tools[0].as_str() == Some("toolA") {
-                        *tools = vec![json!({
-                            "name": "toolA",
-                            "description": "toolA descr"
-                        })];
-                    }
+        let rendered_opts = p_clone_render
+            .render(input_clone_render, options_clone_render)
+            .await
+            .unwrap();
+
+        // Resolve tool names to definitions for comparison
+        let mut want_rendered_value = serde_json::to_value(want_rendered).unwrap();
+        if let Some(tools_val) = want_rendered_value.get_mut("tools") {
+            if let Some(tools) = tools_val.as_array_mut() {
+                if tools.len() == 1 && tools[0].as_str() == Some("toolA") {
+                    *tools = vec![json!({
+                        "name": "toolA",
+                        "description": "toolA descr"
+                    })];
                 }
             }
-
-            let rendered_value = serde_json::to_value(rendered_opts).unwrap();
-
-            assert_eq!(
-                strip_nulls(rendered_value),
-                strip_nulls(want_rendered_value),
-                "Failed test: {}",
-                case.name
-            );
         }
+
+        let rendered_value = serde_json::to_value(rendered_opts).unwrap();
+
+        assert_eq!(
+            strip_nulls(rendered_value),
+            strip_nulls(want_rendered_value),
+            "Failed test: {}",
+            case.name
+        );
     }
 }
