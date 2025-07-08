@@ -13,6 +13,7 @@
 // limitations under the License.
 
 pub mod docs_fn_test;
+pub mod no_fn_test;
 pub mod prompt_helpers;
 // pub mod messages_fn_test;
 // pub mod prompt_fn_test;
