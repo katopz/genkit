@@ -23,6 +23,8 @@ use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 
+// #toJSON()
+
 #[test]
 fn test_to_json_data_serialization() {
     let response_data = GenerateResponseData {
@@ -49,7 +51,7 @@ fn test_to_json_data_serialization() {
                 ..Default::default()
             },
             finish_reason: Some(FinishReason::Stop),
-            finish_message: Some("Content was blocked".to_string()),
+            finish_message: None,
         }],
         usage: None,
         custom: None,
@@ -70,6 +72,7 @@ struct TestOutput {
     age: Option<u32>,
 }
 
+// #output()
 #[rstest]
 #[case(
         "return structured data from the data part",
@@ -107,6 +110,7 @@ fn test_output_parsing(
 }
 
 #[test]
+// #assertValid()
 fn test_assert_valid_blocked() {
     let response_data = GenerateResponseData {
         candidates: vec![CandidateData {
@@ -185,6 +189,7 @@ fn test_assert_valid_schema_success() {
     assert!(response.assert_valid_schema().is_ok());
 }
 
+// #toolRequests()
 #[rstest]
 #[case("returns empty array if no tools requests found", vec![Part::text(r#"{"abc":"123"}"#)], vec![])]
 #[case("returns tool call if present",
