@@ -19,12 +19,12 @@
 
 use async_trait::async_trait;
 use genkit_ai::{
-    self,
+    self, define_tool,
     model::{
         define_model, CandidateData, DefineModelOptions, FinishReason, GenerateRequest,
         GenerateResponseChunkData, GenerateResponseData, ModelInfoSupports,
     },
-    MessageData, Part, Role,
+    MessageData, Part, Role, ToolConfig,
 };
 use genkit_core::{error::Result, plugin::Plugin, registry::Registry};
 use std::{
@@ -257,4 +257,32 @@ pub async fn registry_with_programmable_model_options(
 #[allow(unused)]
 pub async fn registry_with_programmable_model() -> (Arc<Registry>, ProgrammableModel) {
     registry_with_programmable_model_options(None).await
+}
+
+/// Test fixture that provides a Registry with an `echoModel` and `toolA`.
+#[allow(unused)]
+pub async fn registry_with_echo_model_and_tool(
+) -> (Arc<Registry>, Arc<Mutex<Option<GenerateRequest>>>) {
+    let last_request = Arc::new(Mutex::new(None));
+    let echo_plugin = EchoModelPlugin {
+        last_request: last_request.clone(),
+    };
+
+    let mut registry = Registry::new();
+    genkit_ai::configure_ai(&mut registry);
+    registry.set_default_model("echoModel".to_string());
+    echo_plugin.initialize(&mut registry).await.unwrap();
+
+    define_tool(
+        &mut registry,
+        ToolConfig {
+            name: "toolA".to_string(),
+            description: "toolA descr".to_string(),
+            ..Default::default()
+        },
+        // In TS test, this tool takes no input and returns 'a'
+        |_: (), _: genkit_ai::tool::ToolFnOptions| async { Ok("a".to_string()) },
+    );
+
+    (Arc::new(registry), last_request)
 }

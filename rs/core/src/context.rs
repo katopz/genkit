@@ -47,6 +47,31 @@ pub struct ActionContext {
     pub additional_context: HashMap<String, Value>,
 }
 
+impl ActionContext {
+    /// Merges another `ActionContext` into this one.
+    ///
+    /// The `auth` field from `other` will overwrite the `auth` field in `self` if present.
+    /// The `additional_context` maps are merged.
+    pub fn extend(&mut self, other: ActionContext) {
+        if other.auth.is_some() {
+            self.auth = other.auth;
+        }
+        self.additional_context.extend(other.additional_context);
+    }
+
+    /// Retrieves a value from the context by key.
+    ///
+    /// This is a convenience method that checks for the special "auth" key
+    /// before looking in the `additional_context` map.
+    pub fn get(&self, key: &str) -> Option<&Value> {
+        if key == "auth" {
+            self.auth.as_ref()
+        } else {
+            self.additional_context.get(key)
+        }
+    }
+}
+
 #[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq)]
 pub struct FlowContext {
     pub flow_id: String,

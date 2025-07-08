@@ -171,7 +171,7 @@ where
         options: Option<ChatOptions<'a, I, S>>,
     ) -> Result<Chat<S>>
     where
-        I: Serialize + DeserializeOwned + JsonSchema + Default + Send + Sync + 'static,
+        I: Serialize + DeserializeOwned + JsonSchema + Default + Send + Sync + Clone + 'static,
     {
         let options = options.unwrap_or_default();
         let thread_name = options

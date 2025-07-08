@@ -18,28 +18,31 @@
 //! creating and executing type-safe, templated prompts. It is the Rust
 // equivalent of `prompt.ts`.
 
-use crate::document::Part;
+use crate::document::{Document, Part};
 use crate::generate::{
     generate, generate_stream, to_generate_request, GenerateOptions, GenerateResponse,
     GenerateStreamResponse, OutputOptions,
 };
-use crate::message::{MessageData, Role};
+use crate::message::MessageData;
 use crate::model::{GenerateRequest, Model};
 use crate::tool::ToolArgument;
 use genkit_core::action::{Action, ActionBuilder};
+use genkit_core::context::{get_context, ActionContext};
 use genkit_core::error::{Error, Result};
-use genkit_core::registry::{ActionType, Registry};
-// #[cfg(feature = "dotprompt-private")]
-// use handlebars::HandlebarsHelper;
+use genkit_core::registry::{ActionType, ErasedAction, Registry};
+use handlebars::Handlebars;
 use schemars::{self, JsonSchema};
 use serde::{de::DeserializeOwned, Deserialize, Serialize};
-use serde_json::Value;
+use serde_json::{json, Value};
 use std::sync::Arc;
 
 /// A type alias for an action that renders a prompt.
 pub type PromptAction<I = Value> = Action<I, GenerateRequest, ()>;
 
 /// Configuration for a prompt action.
+/// NOTE: This is a simplified version of the TS equivalent.
+/// It does not support function resolvers for `system`, `prompt`, `messages`, or `docs`.
+/// It primarily supports static content and string-based Handlebars templates.
 #[derive(Clone, Default, Debug, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct PromptConfig<I = Value, O = Value, C = Value> {
@@ -61,6 +64,8 @@ pub struct PromptConfig<I = Value, O = Value, C = Value> {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub messages: Option<Vec<MessageData>>,
     #[serde(skip_serializing_if = "Option::is_none")]
+    pub docs: Option<Vec<Document>>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub output: Option<OutputOptions>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub tools: Option<Vec<ToolArgument>>,
@@ -69,11 +74,13 @@ pub struct PromptConfig<I = Value, O = Value, C = Value> {
 }
 
 /// Options for generating a response from a prompt.
-#[derive(Clone, Default, Debug)]
+#[derive(Clone, Default, Debug, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct PromptGenerateOptions<O = Value> {
     pub config: Option<Value>,
     pub messages: Option<Vec<MessageData>>,
     pub output: Option<OutputOptions>,
+    pub context: Option<ActionContext>,
     pub _marker: std::marker::PhantomData<O>,
 }
 
@@ -86,7 +93,7 @@ pub struct ExecutablePrompt<I = Value, O = Value, C = Value> {
 
 impl<I, O, C> ExecutablePrompt<I, O, C>
 where
-    I: Serialize + DeserializeOwned + JsonSchema + Send + Sync + 'static,
+    I: Serialize + DeserializeOwned + JsonSchema + Send + Sync + Clone + 'static,
     O: for<'de> Deserialize<'de>
         + Serialize
         + Send
@@ -120,50 +127,105 @@ where
     /// Renders the prompt template into a `GenerateOptions` struct.
     pub async fn render(
         &self,
-        _input: I, // In a real implementation, this would be used for templating.
+        input: I,
         opts: Option<PromptGenerateOptions<O>>,
     ) -> Result<GenerateOptions<O>> {
-        let mut messages = Vec::new();
-        if let Some(system_text) = &self.config.system {
-            messages.push(MessageData {
-                role: Role::System,
-                content: vec![Part {
-                    text: Some(system_text.clone()),
-                    ..Default::default()
-                }],
-                metadata: None,
-            });
+        let mut handlebars = Handlebars::new();
+        // Allow missing fields to match JS behavior (e.g. {{foo}} is ok if foo is not provided)
+        handlebars.set_strict_mode(false);
+
+        // 1. Prepare render data from input, session state, and context
+        let mut render_data = serde_json::to_value(input)
+            .map_err(|e| Error::new_internal(format!("Failed to serialize input: {}", e)))?;
+
+        if let Some(data_obj) = render_data.as_object_mut() {
+            // Add session state if available
+            if let Ok(session) = crate::session::get_current_session() {
+                if let Some(state) = session.state().await {
+                    data_obj.insert("@state".to_string(), state);
+                }
+            }
+
+            // Merge context from definition-time and runtime
+            let mut final_context = get_context();
+            if let Some(opts_context) = opts.as_ref().and_then(|o| o.context.clone()) {
+                if let Some(ctx) = &mut final_context {
+                    ctx.extend(opts_context);
+                } else {
+                    final_context = Some(opts_context);
+                }
+            }
+            if let Some(context) = final_context {
+                if let Some(auth_val) = context.get("auth") {
+                    data_obj.insert("@auth".to_string(), auth_val.clone());
+                }
+            }
         }
+
+        // 2. Build the message list in the correct order
+        let mut messages = Vec::new();
+
+        // System Prompt
+        if let Some(system_template) = &self.config.system {
+            let system_text = handlebars
+                .render_template(system_template, &render_data)
+                .map_err(|e| {
+                    Error::new_internal(format!("Failed to render system template: {}", e))
+                })?;
+            messages.push(MessageData::system(vec![Part::text(system_text)]));
+        }
+
+        // Messages from config and options
         if let Some(config_messages) = &self.config.messages {
             messages.extend(config_messages.clone());
         }
         if let Some(opts_messages) = opts.as_ref().and_then(|o| o.messages.as_ref()) {
             messages.extend(opts_messages.clone());
         }
-        if let Some(prompt_text) = &self.config.prompt {
-            messages.push(MessageData {
-                role: Role::User,
-                content: vec![Part {
-                    text: Some(prompt_text.clone()),
-                    ..Default::default()
-                }],
-                metadata: None,
-            });
+
+        // Main User Prompt
+        if let Some(prompt_template) = &self.config.prompt {
+            let prompt_text = handlebars
+                .render_template(prompt_template, &render_data)
+                .map_err(|e| {
+                    Error::new_internal(format!("Failed to render prompt template: {}", e))
+                })?;
+            messages.push(MessageData::user(vec![Part::text(prompt_text)]));
         }
 
+        // 3. Merge configs
+        let mut final_config = self
+            .config
+            .config
+            .as_ref()
+            .and_then(|c| serde_json::to_value(c).ok())
+            .unwrap_or_else(|| json!({}));
+
+        if let Some(opts_config) = opts.as_ref().and_then(|o| o.config.as_ref()) {
+            if let (Some(final_obj), Some(opts_obj)) =
+                (final_config.as_object_mut(), opts_config.as_object())
+            {
+                final_obj.extend(opts_obj.clone());
+            }
+        }
+        let final_config = if final_config.as_object().is_some_and(|m| !m.is_empty()) {
+            Some(final_config)
+        } else {
+            None
+        };
+
+        // 4. Construct final GenerateOptions
         let gen_opts = GenerateOptions {
             model: self.config.model.clone(),
             messages: Some(messages),
             tools: self.config.tools.clone(),
-            config: self
-                .config
-                .config
-                .as_ref()
-                .and_then(|c| serde_json::to_value(c).ok())
-                .or_else(|| opts.and_then(|o| o.config)),
+            docs: self.config.docs.clone(),
+            config: final_config,
             output: self.config.output.clone(),
+            context: opts.and_then(|o| o.context),
             ..Default::default()
         };
+
         Ok(gen_opts)
     }
 }
@@ -174,7 +236,7 @@ pub fn define_prompt<I, O, C>(
     config: PromptConfig<I, O, C>,
 ) -> ExecutablePrompt<I, O, C>
 where
-    I: Serialize + DeserializeOwned + JsonSchema + Send + Sync + 'static,
+    I: Serialize + DeserializeOwned + JsonSchema + Send + Sync + Clone + 'static,
     O: for<'de> Deserialize<'de>
         + Serialize
         + Send
@@ -209,7 +271,7 @@ where
         .build()
     };
 
-    let _ = prompt_action;
+    let _ = registry.register_action(prompt_action.clone().name(), prompt_action);
 
     ExecutablePrompt {
         config: config_arc,
@@ -222,131 +284,10 @@ pub fn is_executable_prompt<I, O, C>(_: &ExecutablePrompt<I, O, C>) -> bool {
     true
 }
 
-// /// Defines a partial template for use in other Dotprompt templates.
-// #[cfg(feature = "dotprompt-private")]
-// pub fn define_partial(name: &str, source: &str) {
-//     registry.dotprompt.define_partial(name, source);
-// }
-
-// /// Defines a custom Handlebars helper for use in prompt templates.
-// #[cfg(feature = "dotprompt-private")]
-// pub fn define_helper(
-//     name: &str,
-//     helper: Box<dyn HandlebarsHelper + Send + Sync>,
-// ) {
-//     registry.dotprompt.define_helper(name, helper);
-// }
-
-// /// Loads all `.prompt` files from a given directory and registers them as prompts.
-// ///
-// /// This function recursively searches the specified directory.
-// /// Files starting with `_` are treated as partials.
-// #[cfg(feature = "dotprompt-private")]
-// pub async fn load_prompt_folder(dir: &str, ns: &str) -> Result<()> {
-//     let prompts_path = PathBuf::from(dir);
-//     if prompts_path.exists() {
-//         load_prompt_folder_recursively(registry, &prompts_path, ns, &PathBuf::new()).await?;
-//     }
-//     Ok(())
-// }
-
-// #[cfg(feature = "dotprompt-private")]
-// async fn load_prompt_folder_recursively(
-//     base_path: &Path,
-//     ns: &str,
-//     sub_dir: &Path,
-// ) -> Result<()> {
-//     let current_path = base_path.join(sub_dir);
-//     let mut entries = tokio::fs::read_dir(current_path).await?;
-
-//     while let Some(entry) = entries.next_entry().await? {
-//         let path = entry.path();
-//         if path.is_dir() {
-//             let relative_path = path.strip_prefix(base_path).unwrap().to_path_buf();
-//             load_prompt_folder_recursively(registry, base_path, ns, &relative_path).await?;
-//         } else if let Some(file_name) = path.file_name().and_then(|s| s.to_str()) {
-//             if file_name.ends_with(".prompt") {
-//                 let source = tokio::fs::read_to_string(&path).await?;
-//                 if file_name.starts_with('_') {
-//                     if let Some(partial_name) = file_name
-//                         .strip_prefix('_')
-//                         .and_then(|s| s.strip_suffix(".prompt"))
-//                     {
-//                         define_partial(registry, partial_name, &source);
-//                     }
-//                 } else {
-//                     let prefix = sub_dir.to_str().unwrap_or("").replace('\\', "/");
-//                     load_prompt(
-//                         registry,
-//                         source,
-//                         prefix,
-//                         file_name.to_string(),
-//                         ns.to_string(),
-//                     )
-//                     .await?;
-//                 }
-//             }
-//         }
-//     }
-//     Ok(())
-// }
-
-// #[cfg(feature = "dotprompt-private")]
-// async fn load_prompt(
-//     source: String,
-//     prefix: String,
-//     filename: String,
-//     ns: String,
-// ) -> Result<()> {
-//     let mut name = filename.strip_suffix(".prompt").unwrap().to_string();
-//     let mut variant: Option<String> = None;
-//     if let Some(dot_index) = name.rfind('.') {
-//         variant = Some(name[dot_index + 1..].to_string());
-//         name = name[..dot_index].to_string();
-//     }
-
-//     let parsed_prompt = registry.dotprompt.parse(&source)?;
-//     let mut prompt_metadata = registry.dotprompt.render_metadata(&parsed_prompt).await?;
-//     if let Some(v) = variant.clone() {
-//         prompt_metadata.variant = Some(v);
-//     }
-
-//     let full_name = format!(
-//         "{}/{}{}",
-//         ns,
-//         if !prefix.is_empty() {
-//             format!("{}/", prefix)
-//         } else {
-//             "".to_string()
-//         },
-//         name
-//     );
-
-//     let config = PromptConfig {
-//         name: full_name,
-//         variant,
-//         model: prompt_metadata.model,
-//         config: prompt_metadata.config,
-//         description: prompt_metadata.description,
-//         input_schema: prompt_metadata.input.and_then(|i| i.schema),
-//         output: prompt_metadata.output.map(|o| OutputOptions {
-//             format: o.format,
-//             schema: o.schema,
-//             ..Default::default()
-//         }),
-//         messages: Some(parsed_prompt.messages),
-//         tools: prompt_metadata.tools,
-//         ..Default::default()
-//     };
-
-//     define_prompt::<Value, Value, Value>(registry, config);
-//     Ok(())
-// }
-
 /// A placeholder function for `prompt()`, which would look up a defined prompt.
 pub async fn prompt<I, O, C>(registry: &Registry, name: &str) -> Result<ExecutablePrompt<I, O, C>>
 where
-    I: Serialize + DeserializeOwned + JsonSchema + Send + Sync + 'static,
+    I: Serialize + DeserializeOwned + JsonSchema + Send + Sync + Clone + 'static,
     O: for<'de> Deserialize<'de>
         + Serialize
         + Send
@@ -357,11 +298,10 @@ where
         + 'static,
     C: Serialize + DeserializeOwned + JsonSchema + Send + Sync + 'static,
 {
-    let action = registry
+    let _action = registry
         .lookup_action(&format!("/prompt/{}", name))
         .await
         .ok_or_else(|| Error::new_internal(format!("Prompt '{}' not found", name)))?;
-    let _ = action;
     unimplemented!(
         "Looking up prompts by name is not fully supported yet without a way to retrieve the original config from the registry."
     )

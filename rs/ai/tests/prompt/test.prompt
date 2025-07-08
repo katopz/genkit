@@ -1,4 +1,0 @@
----
-model: testModel
----
-Hello, {{name}}!

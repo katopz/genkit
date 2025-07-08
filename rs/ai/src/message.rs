@@ -49,6 +49,26 @@ pub struct MessageData {
     pub metadata: Option<HashMap<String, Value>>,
 }
 
+impl MessageData {
+    /// Creates a new `MessageData` with the `User` role.
+    pub fn user(content: Vec<Part>) -> Self {
+        Self {
+            role: Role::User,
+            content,
+            ..Default::default()
+        }
+    }
+
+    /// Creates a new `MessageData` with the `System` role.
+    pub fn system(content: Vec<Part>) -> Self {
+        Self {
+            role: Role::System,
+            content,
+            ..Default::default()
+        }
+    }
+}
+
 /// A function type for parsing the content of a `Message` into a structured format.
 pub type MessageParser<T> = Arc<dyn Fn(&Message<T>) -> Result<T> + Send + Sync>;
 

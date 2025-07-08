@@ -247,7 +247,7 @@ impl Genkit {
         config: PromptConfig<I, O, C>,
     ) -> ExecutablePrompt<I, O, C>
     where
-        I: Serialize + DeserializeOwned + JsonSchema + Send + Sync + 'static,
+        I: Serialize + DeserializeOwned + JsonSchema + Send + Sync + Clone + 'static,
         O: for<'de> Deserialize<'de>
             + Serialize
             + Send
