@@ -17,6 +17,7 @@ use crate::generate::{GenerationBlockedError, GenerationResponseError};
 use crate::message::{Message, MessageData, MessageParser};
 use crate::model::{FinishReason, GenerateRequest, GenerateResponseData, GenerationUsage};
 use genkit_core::error::{Error, Result};
+
 use schemars::JsonSchema;
 use serde::{de::DeserializeOwned, Deserialize, Serialize};
 use std::fmt;
@@ -105,13 +106,16 @@ where
     /// Throws an error if the response does not contain valid output.
     pub fn assert_valid(&self) -> Result<()> {
         if self.finish_reason == Some(FinishReason::Blocked) {
-            let msg = self
+            let base_message = "Generation blocked";
+            let final_message = self
                 .finish_message
-                .as_deref()
-                .unwrap_or("Generation blocked.");
+                .as_ref()
+                .map(|fm| format!("{}: {}", base_message, fm))
+                .unwrap_or_else(|| base_message.to_string());
+
             return Err(GenerationBlockedError(GenerationResponseError {
                 response: self.clone(),
-                message: msg.to_string(),
+                message: final_message,
             })
             .into());
         }

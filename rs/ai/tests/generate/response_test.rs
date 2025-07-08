@@ -49,7 +49,7 @@ fn test_to_json_data_serialization() {
                 ..Default::default()
             },
             finish_reason: Some(FinishReason::Stop),
-            finish_message: None,
+            finish_message: Some("Content was blocked".to_string()),
         }],
         usage: None,
         custom: None,
