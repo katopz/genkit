@@ -75,6 +75,6 @@ path = "tests/document_test.rs"
 name = "model"
 path = "tests/model/middleware_test.rs"
 
-# [[test]]
-# name = "action_test"
-# path = "tests/generate/action_test.rs"
+[[test]]
+name = "generate"
+path = "tests/generate/generate.rs"
