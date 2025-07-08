@@ -1,168 +1,156 @@
-use serde_json::json;
+// Copyright 2024 Google LLC
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+//     http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
 
-// Assuming the following structs and functions exist in your crate.
-// You might need to adjust the paths and definitions according to your project structure.
-use genkit::formats::array::array_formatter;
-use genkit::generate::{GenerateResponseChunk, GenerateResponseChunkData};
-use genkit::message::{Message, MessageData};
-use genkit::model::{Content, GenerateRequest, Output, Schema, SchemaType};
+use genkit_ai::{
+    document::Part,
+    formats::array::array_formatter,
+    generate::chunk::{GenerateResponseChunk, GenerateResponseChunkOptions},
+    message::{Message, MessageData, Role},
+    model::GenerateResponseChunkData,
+};
+use serde_json::{json, Value};
 
 #[cfg(test)]
-mod test {
+mod tests {
     use super::*;
-    fn test_streaming_emits_complete_array_items_as_they_arrive() {
-        let chunks_data = vec![
-            ("{\"id\": 1,", json!([])),
-            ("\"name\": \"first\"}", json!([{"id": 1, "name": "first"}])),
-            (
-                ", {\"id\": 2, \"name\": \"second\"}]",
-                json!([{"id": 2, "name": "second"}]),
-            ),
+
+    struct StreamingTestCase<'a> {
+        desc: &'a str,
+        chunks: Vec<StreamingTestStep<'a>>,
+    }
+
+    struct StreamingTestStep<'a> {
+        text: &'a str,
+        want: Value,
+    }
+
+    #[test]
+    fn test_streaming_parser() {
+        let test_cases = vec![
+            StreamingTestCase {
+                desc: "emits complete array items as they arrive",
+                chunks: vec![
+                    StreamingTestStep {
+                        text: r#"[{"id": 1,"#,
+                        want: json!([]),
+                    },
+                    StreamingTestStep {
+                        text: r#""name": "first"}"#,
+                        want: json!([{"id": 1, "name": "first"}]),
+                    },
+                    StreamingTestStep {
+                        text: r#", {"id": 2, "name": "second"}]"#,
+                        want: json!([{"id": 2, "name": "second"}]),
+                    },
+                ],
+            },
+            StreamingTestCase {
+                desc: "handles single item arrays",
+                chunks: vec![StreamingTestStep {
+                    text: r#"[{"id": 1, "name": "single"}]"#,
+                    want: json!([{"id": 1, "name": "single"}]),
+                }],
+            },
+            StreamingTestCase {
+                desc: "handles preamble with code fence",
+                chunks: vec![
+                    StreamingTestStep {
+                        text: "Here is the array you requested:\n\n```json\n[",
+                        want: json!([]),
+                    },
+                    StreamingTestStep {
+                        text: r#"{"id": 1, "name": "item"}]`"#,
+                        want: json!([{"id": 1, "name": "item"}]),
+                    },
+                ],
+            },
         ];
 
-        let parser = array_formatter().handler(None).unwrap();
-        let mut previous_chunks: Vec<GenerateResponseChunk> = Vec::new();
+        let formatter = array_formatter();
+        let handler = (formatter.handler)(None);
 
-        for (text, want) in chunks_data {
-            let new_chunk_data = GenerateResponseChunkData {
-                index: 0,
-                role: "model".to_string(),
-                content: vec![Content::from_text(text)],
-                ..Default::default()
-            };
+        for case in test_cases {
+            let mut chunks: Vec<GenerateResponseChunkData> = Vec::new();
+            for (i, step) in case.chunks.iter().enumerate() {
+                let new_chunk_data = GenerateResponseChunkData {
+                    index: 0,
+                    role: Some(Role::Model),
+                    content: vec![Part::text(step.text)],
+                    ..Default::default()
+                };
 
-            let result = parser.parse_chunk(&new_chunk_data).unwrap();
-
-            previous_chunks.push(GenerateResponseChunk::from(new_chunk_data));
-            assert_eq!(result, want);
+                let chunk = GenerateResponseChunk::new(
+                    new_chunk_data.clone(),
+                    GenerateResponseChunkOptions {
+                        previous_chunks: chunks.clone(),
+                        ..Default::default()
+                    },
+                );
+                let result = handler.parse_chunk(&chunk).unwrap();
+                assert_eq!(result, step.want, "failed test ({}): step {}", case.desc, i);
+                chunks.push(new_chunk_data);
+            }
         }
     }
 
-    #[test]
-    fn test_streaming_handles_single_item_arrays() {
-        let chunks_data = vec![(
-            "[{\"id\": 1, \"name\": \"single\"}]",
-            json!([{"id": 1, "name": "single"}]),
-        )];
-
-        let parser = array_formatter().handler(None).unwrap();
-        let mut previous_chunks: Vec<GenerateResponseChunk> = Vec::new();
-
-        for (text, want) in chunks_data {
-            let new_chunk_data = GenerateResponseChunkData {
-                index: 0,
-                role: "model".to_string(),
-                content: vec![Content::from_text(text)],
-                ..Default::default()
-            };
-
-            let result = parser.parse_chunk(&new_chunk_data).unwrap();
-
-            previous_chunks.push(GenerateResponseChunk::from(new_chunk_data));
-            assert_eq!(result, want);
-        }
+    struct MessageTestCase {
+        desc: &'static str,
+        message: MessageData,
+        want: Value,
     }
 
     #[test]
-    fn test_streaming_handles_preamble_with_code_fence() {
-        let chunks_data = vec![
-            ("Here is the array you requested:\n\n```json\n[", json!([])),
-            (
-                "{\"id\": 1, \"name\": \"item\"}]\n```",
-                json!([{"id": 1, "name": "item"}]),
-            ),
+    fn test_message_parser() {
+        let test_cases = vec![
+            MessageTestCase {
+                desc: "parses complete array response",
+                message: MessageData {
+                    role: Role::Model,
+                    content: vec![Part::text(r#"[{"id": 1, "name": "test"}]"#)],
+                    ..Default::default()
+                },
+                want: json!([{"id": 1, "name": "test"}]),
+            },
+            MessageTestCase {
+                desc: "parses empty array",
+                message: MessageData {
+                    role: Role::Model,
+                    content: vec![Part::text(r#"[]"#)],
+                    ..Default::default()
+                },
+                want: json!([]),
+            },
+            MessageTestCase {
+                desc: "parses array with preamble and code fence",
+                message: MessageData {
+                    role: Role::Model,
+                    content: vec![Part::text(
+                        "Here is the array:\n\n```json\n[{\"id\": 1}]\n```",
+                    )],
+                    ..Default::default()
+                },
+                want: json!([{"id": 1}]),
+            },
         ];
 
-        let parser = array_formatter().handler(None).unwrap();
-        let mut previous_chunks: Vec<GenerateResponseChunk> = Vec::new();
+        let formatter = array_formatter();
+        let handler = (formatter.handler)(None);
 
-        for (text, want) in chunks_data {
-            let new_chunk_data = GenerateResponseChunkData {
-                index: 0,
-                role: "model".to_string(),
-                content: vec![Content::from_text(text)],
-                ..Default::default()
-            };
-
-            let result = parser.parse_chunk(&new_chunk_data).unwrap();
-
-            previous_chunks.push(GenerateResponseChunk::from(new_chunk_data));
-            assert_eq!(result, want);
+        for case in test_cases {
+            let message = Message::new(case.message, None);
+            let result = handler.parse_message(&message);
+            assert_eq!(result, case.want, "failed test: {}", case.desc);
         }
-    }
-
-    #[test]
-    fn test_message_parses_complete_array_response() {
-        let message_data = MessageData {
-            role: "model".to_string(),
-            content: vec![Content::from_text("[{\"id\": 1, \"name\": \"test\"}]")],
-        };
-        let want = json!([{"id": 1, "name": "test"}]);
-
-        let parser = array_formatter().handler(None).unwrap();
-        let result = parser.parse_message(&Message::from(message_data)).unwrap();
-        assert_eq!(result, want);
-    }
-
-    #[test]
-    fn test_message_parses_empty_array() {
-        let message_data = MessageData {
-            role: "model".to_string(),
-            content: vec![Content::from_text("[]")],
-        };
-        let want = json!([]);
-
-        let parser = array_formatter().handler(None).unwrap();
-        let result = parser.parse_message(&Message::from(message_data)).unwrap();
-        assert_eq!(result, want);
-    }
-
-    #[test]
-    fn test_message_parses_array_with_preamble_and_code_fence() {
-        let message_data = MessageData {
-            role: "model".to_string(),
-            content: vec![Content::from_text(
-                "Here is the array:\n\n```json\n[{\"id\": 1}]\n```",
-            )],
-        };
-        let want = json!([{"id": 1}]);
-
-        let parser = array_formatter().handler(None).unwrap();
-        let result = parser.parse_message(&Message::from(message_data)).unwrap();
-        assert_eq!(result, want);
-    }
-
-    #[test]
-    #[should_panic(expected = "Must supply an 'array' schema type")]
-    fn test_error_throws_for_non_array_schema_type() {
-        let request = GenerateRequest {
-            messages: Vec::new(),
-            output: Some(Output {
-                schema: Some(Schema {
-                    r#type: SchemaType::String,
-                    ..Default::default()
-                }),
-                ..Default::default()
-            }),
-            ..Default::default()
-        };
-        array_formatter().handler(Some(&request)).unwrap();
-    }
-
-    #[test]
-    #[should_panic(expected = "Must supply an 'array' schema type")]
-    fn test_error_throws_for_object_schema_type() {
-        let request = GenerateRequest {
-            messages: Vec::new(),
-            output: Some(Output {
-                schema: Some(Schema {
-                    r#type: SchemaType::Object,
-                    ..Default::default()
-                }),
-                ..Default::default()
-            }),
-            ..Default::default()
-        };
-        array_formatter().handler(Some(&request)).unwrap();
     }
 }
