@@ -155,7 +155,7 @@ where
                     ))
                 })?;
 
-                if let Err(error) = jsonschema::validate(&output_value, schema) {
+                if let Err(error) = jsonschema::validate(schema, &output_value) {
                     return Err(Error::new_internal(format!(
                         "Schema validation failed: {}",
                         error
