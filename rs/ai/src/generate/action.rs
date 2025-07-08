@@ -15,8 +15,8 @@
 //! # Generate Action
 //!
 //! This module defines the `generate` action and the core implementation logic
-//! for content generation, including tool handling and streaming. It is the
-// Rust equivalent of `generate/action.ts`.
+//! for content generation, including tool handling and streaming. It is the Rust
+// equivalent of `generate/action.ts`.
 
 use super::{response::GenerateResponse, GenerateOptions};
 use crate::document::Part;
@@ -574,7 +574,7 @@ pub fn get_streaming_callback() -> Option<ErasedStreamingCallback> {
     STREAMING_CALLBACK.try_with(|cb| cb.clone()).unwrap_or(None)
 }
 
-/// Retrieves the type-erased streaming callback from the current task-local context.
+/// Executes a future with a given session set as the current task-local session.
 pub async fn run_with_streaming_callback<S, F, Fut>(
     callback: Option<StreamingCallback<S>>,
     f: F,
@@ -584,49 +584,50 @@ where
     F: FnOnce() -> Fut,
     Fut: Future,
 {
-    println!(
-        "[ACTION] run_with_streaming_callback called. callback.is_some(): {}",
-        callback.is_some()
-    );
     if let Some(cb) = callback {
-        println!("[ACTION] Callback is Some. Creating erased callback and setting task-local.");
-        let erased: ErasedStreamingCallback = Arc::new(move |value_result: Result<Value>| {
-            println!(
-                "[ACTION] Erased callback invoked with value: {:?}",
-                value_result
-            );
-            let final_result = value_result.and_then(|value| {
-                // HACK: The value here is a raw `GenerateResponseChunkData` which is not
-                // directly deserializable into a `GenerateResponseChunk` because the latter
-                // has additional fields. We manually add the missing fields to the JSON
-                // representation before attempting to deserialize.
-                let mut obj = match value {
-                    Value::Object(map) => map,
-                    _ => {
-                        return Err(Error::new_internal(
-                            "Expected JSON object for chunk data".to_string(),
-                        ))
-                    }
-                };
-                // `previous_chunks` is required by `GenerateResponseChunk`.
-                obj.entry("previousChunks".to_string())
-                    .or_insert(Value::Array(vec![]));
+        let previous_chunks_state = Arc::new(tokio::sync::Mutex::new(Vec::<
+            crate::model::GenerateResponseChunkData,
+        >::new()));
 
-                let new_value = Value::Object(obj);
-                let deserialized: Result<S, _> = serde_json::from_value(new_value.clone());
-                if let Err(e) = &deserialized {
-                    println!(
-                        "[ACTION] Deserialization ERROR: {}. Value was: {}",
-                        e, new_value
+        let erased: ErasedStreamingCallback = Arc::new(move |value_result: Result<Value>| {
+            let cb = cb.clone();
+            let previous_chunks_state = previous_chunks_state.clone();
+            tokio::spawn(async move {
+                let final_result = async {
+                    let value = value_result?;
+
+                    let mut chunk_data_obj = match value {
+                        Value::Object(map) => map,
+                        _ => {
+                            return Err(Error::new_internal("Expected JSON object for chunk data"))
+                        }
+                    };
+
+                    let mut previous_chunks_guard = previous_chunks_state.lock().await;
+
+                    let current_chunk_data: GenerateResponseChunkData =
+                        serde_json::from_value(Value::Object(chunk_data_obj.clone())).map_err(
+                            |e| Error::new_internal(format!("Failed to parse chunk data: {}", e)),
+                        )?;
+
+                    chunk_data_obj.insert(
+                        "previousChunks".to_string(),
+                        serde_json::to_value(previous_chunks_guard.clone()).unwrap(),
                     );
+
+                    previous_chunks_guard.push(current_chunk_data);
+
+                    let value_with_history = Value::Object(chunk_data_obj);
+
+                    serde_json::from_value(value_with_history)
+                        .map_err(|e| Error::new_internal(e.to_string()))
                 }
-                deserialized.map_err(|e| Error::new_internal(e.to_string()))
+                .await;
+                cb(final_result);
             });
-            cb(final_result);
         });
         STREAMING_CALLBACK.scope(Some(erased), f()).await
     } else {
-        println!("[ACTION] Callback is None. Running future directly.");
         f().await
     }
 }

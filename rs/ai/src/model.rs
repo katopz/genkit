@@ -664,7 +664,7 @@ where
 
 /// Represents a reference to a model, which can hold configuration.
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
-#[serde(rename_all = "camelCase")]
+#[serde(untagged)]
 pub enum Model {
     /// A reference to a model that includes configuration details.
     Reference(ModelRef<serde_json::Value>),

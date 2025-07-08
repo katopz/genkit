@@ -97,7 +97,7 @@ pub struct ResumeOptions {
 }
 
 /// Options for a `generate` call. This struct is now generic to support typed `on_chunk` callbacks.
-#[derive(Clone, Serialize, Deserialize, JsonSchema)]
+#[derive(Clone, Serialize, Deserialize, JsonSchema, Default)]
 #[serde(rename_all = "camelCase")]
 pub struct GenerateOptions<O = Value> {
     pub model: Option<crate::model::Model>,
@@ -123,29 +123,6 @@ pub struct GenerateOptions<O = Value> {
     pub on_chunk: Option<OnChunkCallback<O>>,
     #[serde(skip)]
     pub _marker: PhantomData<O>,
-}
-
-impl<O> Default for GenerateOptions<O> {
-    fn default() -> Self {
-        Self {
-            model: Default::default(),
-            system: Default::default(),
-            prompt: Default::default(),
-            docs: Default::default(),
-            messages: Default::default(),
-            tools: Default::default(),
-            tool_choice: Default::default(),
-            config: Default::default(),
-            output: Default::default(),
-            resume: Default::default(),
-            max_turns: Default::default(),
-            return_tool_requests: Default::default(),
-            r#use: Default::default(),
-            context: Default::default(),
-            on_chunk: Default::default(),
-            _marker: PhantomData,
-        }
-    }
 }
 
 /// Base generate options used by `Chat`.
