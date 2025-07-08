@@ -69,7 +69,7 @@ struct TestCase {
             "model": "echoModel",
             "name": "prompt1",
             "config": { "banana": "ripe" },
-            "prompt": "hello {{name}} ({{@state.name}})"
+            "prompt": "hello {{name}} ({{state.name}})"
         },
         "input": { "name": "foo" },
         "state": { "name": "bar" },
@@ -87,7 +87,7 @@ struct TestCase {
             "model": "echoModel",
             "name": "prompt1",
             "config": { "banana": "ripe" },
-            "prompt": "hello {{name}} ({{@state.name}}, {{@auth.email}})"
+            "prompt": "hello {{name}} ({{state.name}}, {{auth.email}})"
         },
         "input": { "name": "foo" },
         "state": { "name": "bar" },
@@ -106,7 +106,7 @@ struct TestCase {
             "model": "echoModel",
             "name": "prompt1",
             "config": { "banana": "ripe" },
-            "prompt": "hello {{name}} ({{@state.name}})",
+            "prompt": "hello {{name}} ({{state.name}})",
         },
         "input": { "name": "foo" },
         "state": { "name": "bar" },
@@ -134,7 +134,7 @@ struct TestCase {
             "model": "echoModel",
             "name": "prompt1",
             "config": { "banana": "ripe" },
-            "system": "hello {{name}} ({{@state.name}})"
+            "system": "hello {{name}} ({{state.name}})"
         },
         "input": { "name": "foo" },
         "state": { "name": "bar" },
@@ -176,7 +176,7 @@ struct TestCase {
             "model": "echoModel",
             "name": "prompt1",
             "config": { "banana": "ripe" },
-            "prompt": "hi {{@state.name}}",
+            "prompt": "hi {{state.name}}",
             "system": "hi {{name}}",
             "messages": [
                 { "role": "user", "content": [{ "text": "hi" }] },
@@ -204,7 +204,7 @@ struct TestCase {
             "model": "echoModel",
             "name": "prompt1",
             "config": { "banana": "ripe" },
-            "prompt": "hello {{name}} ({{@state.name}})",
+            "prompt": "hello {{name}} ({{state.name}})",
             "docs": [{ "content": [{ "text": "doc a" }] }, { "content": [{ "text": "doc b" }] }]
         },
         "input": { "name": "foo" },
@@ -224,7 +224,7 @@ struct TestCase {
             "model": "echoModel",
             "name": "prompt1",
             "config": { "banana": "ripe" },
-            "prompt": "hello {{name}} ({{@state.name}})",
+            "prompt": "hello {{name}} ({{state.name}})",
             "tools": ["toolA"]
         },
         "input": { "name": "foo" },

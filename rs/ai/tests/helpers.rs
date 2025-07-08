@@ -131,7 +131,7 @@ impl Plugin for ProgrammableModelPlugin {
 
 /// A plugin that defines a model behaving like the TypeScript `echoModel`.
 /// It concatenates all message history with commas and includes the config.
-struct EchoModelPlugin {
+pub struct EchoModelPlugin {
     pub last_request: Arc<Mutex<Option<GenerateRequest>>>,
 }
 
@@ -169,7 +169,8 @@ impl Plugin for EchoModelPlugin {
                         }
                     }
 
-                    let concatenated_messages = req
+                    // 1. Collect all message parts into a vector of strings.
+                    let mut all_text_parts: Vec<String> = req
                         .messages
                         .iter()
                         .map(|m| {
@@ -182,16 +183,35 @@ impl Plugin for EchoModelPlugin {
                                 .iter()
                                 .map(|p| p.text.as_deref().unwrap_or(""))
                                 .collect::<Vec<_>>()
-                                .join(",");
+                                .join("");
                             format!("{}{}", prefix, content)
                         })
-                        .collect::<Vec<_>>()
-                        .join(",");
+                        .collect();
+
+                    // 2. If docs exist, format them as a single string block and add it as one item.
+                    if let Some(docs) = &req.docs {
+                        if !docs.is_empty() {
+                            let doc_lines: Vec<String> = docs
+                                .iter()
+                                .enumerate()
+                                .map(|(i, d)| format!("- [{}]: {}", i, d.text()))
+                                .collect();
+                            let docs_block = format!(
+                                "\n\nUse the following information to complete your task:\n\n{}\n",
+                                doc_lines.join("\n")
+                            );
+                            all_text_parts.push(docs_block);
+                        }
+                    }
+
+                    // 3. Join all parts with a comma, exactly like the TS version.
+                    let concatenated_text = all_text_parts.join(",");
 
                     let config_str = serde_json::to_string(&req.config.unwrap_or_default())
                         .unwrap_or_else(|_| "null".to_string());
 
-                    let response_text = format!("Echo: {}", concatenated_messages);
+                    // 4. Construct the final response string.
+                    let response_text = format!("Echo: {}", concatenated_text);
                     let config_text = format!("; config: {}", config_str);
 
                     Ok(GenerateResponseData {
@@ -263,15 +283,8 @@ pub async fn registry_with_programmable_model() -> (Arc<Registry>, ProgrammableM
 #[allow(unused)]
 pub async fn registry_with_echo_model_and_tool(
 ) -> (Arc<Registry>, Arc<Mutex<Option<GenerateRequest>>>) {
-    let last_request = Arc::new(Mutex::new(None));
-    let echo_plugin = EchoModelPlugin {
-        last_request: last_request.clone(),
-    };
-
-    let mut registry = Registry::new();
-    genkit_ai::configure_ai(&mut registry);
-    registry.set_default_model("echoModel".to_string());
-    echo_plugin.initialize(&mut registry).await.unwrap();
+    let (registry_arc, last_request) = registry_with_echo_model().await;
+    let mut registry = (*registry_arc).clone();
 
     define_tool(
         &mut registry,
@@ -280,7 +293,6 @@ pub async fn registry_with_echo_model_and_tool(
             description: "toolA descr".to_string(),
             ..Default::default()
         },
-        // In TS test, this tool takes no input and returns 'a'
         |_: (), _: genkit_ai::tool::ToolFnOptions| async { Ok("a".to_string()) },
     );
 

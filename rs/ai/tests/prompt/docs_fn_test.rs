@@ -47,9 +47,6 @@ async fn test_docs_from_function() -> Result<()> {
         },
     );
 
-    // NOTE: The `want_text` is constructed based on the panic message from the user's environment,
-    // which indicates that docs are automatically injected into the final prompt text.
-    // The `echoModel` in the provided context doesn't do this, but we trust the panic as ground truth.
     let want_text = "Echo: hello foo (bar),\n\nUse the following information to complete your task:\n\n- [0]: doc foo\n- [1]: doc bar\n\n; config: {\"banana\":\"ripe\",\"temperature\":11}".to_string();
 
     test_runner(TestCase {
@@ -58,7 +55,6 @@ async fn test_docs_from_function() -> Result<()> {
             name: "prompt1".to_string(),
             model: Some(Model::Name("echoModel".to_string())),
             config: Some(json!({ "banana": "ripe" })),
-            // Use `state.name` instead of `@state.name` for correct Handlebars syntax.
             prompt: Some("hello {{name}} ({{state.name}})".to_string()),
             docs_fn: Some(docs_resolver),
             ..Default::default()
@@ -75,8 +71,8 @@ async fn test_docs_from_function() -> Result<()> {
             "config": { "banana": "ripe", "temperature": 11 },
             "messages": [{ "role": "user", "content": [{ "text": "hello foo (bar)" }] }],
             "docs": [
-                { "content": [{ "text": "doc foo" }], "metadata": null },
-                { "content": [{ "text": "doc bar" }], "metadata": null }
+                { "content": [{ "text": "doc foo" }] },
+                { "content": [{ "text": "doc bar" }] }
             ],
             "tools": null,
             "tool_choice": null,
