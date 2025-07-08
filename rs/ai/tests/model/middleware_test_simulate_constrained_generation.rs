@@ -183,9 +183,7 @@ async fn test_injects_instructions_into_request_idempotently() {
     use genkit_ai::document::Part;
     use genkit_ai::generate::{generate, GenerateOptions, OutputOptions};
     use genkit_ai::message::{MessageData, Role};
-    use genkit_ai::model::{
-        middleware::SimulatedConstrainedGenerationOptions, CandidateData, Model,
-    };
+    use genkit_ai::model::{CandidateData, Model};
 
     let (registry, pm_handle) = registry_with_programmable_model().await;
 

@@ -23,10 +23,7 @@ use rstest::rstest;
 use serde_json::{from_value, json};
 use std::sync::{Arc, Mutex};
 
-use genkit_ai::model::{
-    middleware::{simulate_constrained_generation, SimulatedConstrainedGenerationOptions},
-    ModelMiddleware,
-};
+use genkit_ai::model::{middleware::simulate_constrained_generation, ModelMiddleware};
 
 /// Helper to invoke a middleware and capture the modified request that is passed to the next stage.
 async fn test_middleware_request(
