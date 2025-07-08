@@ -379,47 +379,55 @@ where
 
             // Only inject instructions if the model does NOT support the format.
             if !model_supports_format {
-                let schema_value = request
-                    .output
-                    .as_ref()
-                    .and_then(|opts| opts.schema.as_ref());
-                let schema: Option<schemars::Schema> =
-                    schema_value.and_then(|v| serde_json::from_value(v.clone()).ok());
-                let instructions_option = request
-                    .output
-                    .as_ref()
-                    .and_then(|opts| opts.instructions.as_ref());
-                let instructions = formats::resolve_instructions(
-                    Some(format.as_ref()),
-                    schema.as_ref(),
-                    instructions_option,
-                );
-
-                if instructions.is_some() {
-                    let messages = request.messages.get_or_insert_with(Vec::new);
+                // If middleware is provided, let it handle instruction injection.
+                if middleware.is_empty() {
                     println!(
-                        "[generate_internal] 🔥 Messages before injection: {:?}",
-                        messages
+                        "[generate_internal] No middleware; injecting default format instructions."
                     );
-                    let updated_messages = formats::inject_instructions(messages, instructions);
-                    request.messages = Some(updated_messages);
-                    println!(
-                        "[generate_internal] ✨ Messages after injection: {:?}",
-                        request.messages
+                    let schema_value = request
+                        .output
+                        .as_ref()
+                        .and_then(|opts| opts.schema.as_ref());
+                    let schema: Option<schemars::Schema> =
+                        schema_value.and_then(|v| serde_json::from_value(v.clone()).ok());
+                    let instructions_option = request
+                        .output
+                        .as_ref()
+                        .and_then(|opts| opts.instructions.as_ref());
+                    let instructions = formats::resolve_instructions(
+                        Some(format.as_ref()),
+                        schema.as_ref(),
+                        instructions_option,
                     );
-                }
 
-                // When simulating, modify the output options for the model request.
-                if let Some(output_opts) = request.output.as_mut() {
-                    output_opts.constrained = Some(false);
-                    if !matches!(
-                        output_opts.instructions.as_ref().and_then(|i| i.as_bool()),
-                        Some(true)
-                    ) {
-                        output_opts.format = None;
-                        output_opts.schema = None;
+                    if instructions.is_some() {
+                        let messages = request.messages.get_or_insert_with(Vec::new);
+                        println!(
+                            "[generate_internal] 🔥 Messages before injection: {:?}",
+                            messages
+                        );
+                        let updated_messages = formats::inject_instructions(messages, instructions);
+                        request.messages = Some(updated_messages);
+                        println!(
+                            "[generate_internal] ✨ Messages after injection: {:?}",
+                            request.messages
+                        );
                     }
-                    output_opts.content_type = None;
+
+                    // When simulating, modify the output options for the model request.
+                    if let Some(output_opts) = request.output.as_mut() {
+                        output_opts.constrained = Some(false);
+                        if !matches!(
+                            output_opts.instructions.as_ref().and_then(|i| i.as_bool()),
+                            Some(true)
+                        ) {
+                            output_opts.format = None;
+                            output_opts.schema = None;
+                        }
+                        output_opts.content_type = None;
+                    }
+                } else {
+                    println!("[generate_internal] Middleware found; skipping default format instruction injection.");
                 }
             } else {
                 // Model supports format, so just pass through the options.

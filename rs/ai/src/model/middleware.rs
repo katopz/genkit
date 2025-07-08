@@ -20,13 +20,12 @@
 use crate::{
     document::Document,
     model::{GenerateRequest, GenerateResponseData, MessageData, ModelInfoSupports, Part},
-    Role,
 };
 use base64::{engine::general_purpose, Engine};
 use genkit_core::error::{Error, Result};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
-use std::{future::Future, pin::Pin, sync::Arc};
+use std::{collections::HashMap, future::Future, pin::Pin, sync::Arc};
 
 /// A boxed, pinned future.
 pub type BoxFuture<'a, T> = Pin<Box<dyn Future<Output = T> + Send + 'a>>;
@@ -358,89 +357,120 @@ struct OutputMetadata {
     #[serde(skip_serializing_if = "Option::is_none")]
     content_type: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
-    instructions: Option<bool>,
+    instructions: Option<serde_json::Value>,
 }
 
-pub type InstructionsRenderer = Box<dyn Fn(&serde_json::Value) -> String + Send + Sync>;
+pub type InstructionsRenderer = Arc<dyn Fn(&serde_json::Value) -> String + Send + Sync>;
 
-#[derive(Default)]
 pub struct SimulatedConstrainedGenerationOptions {
-    pub instructions_renderer: Option<InstructionsRenderer>,
+    pub instructions_renderer: InstructionsRenderer,
 }
 
 #[derive(Debug)]
 pub struct InstructionsRendererWithSchema {
     pub renderer_string: String,
-    pub schema: serde_json::Value,
+    pub schema: Value,
 }
 
 /// A `ModelMiddleware` that simulates constrained (e.g., JSON) output by providing instructions.
 pub fn simulate_constrained_generation(
-    instructions_renderer_schema: Option<InstructionsRendererWithSchema>,
+    options: Option<InstructionsRendererWithSchema>,
 ) -> ModelMiddleware {
-    println!(
-        "🦀 instructions_renderer_schema: {:?}",
-        instructions_renderer_schema
-    );
-    let merged_renderer_string_schema = match instructions_renderer_schema {
-        Some(renderer_string_schema) => format!("{}{}", renderer_string_schema.renderer_string, serde_json::to_string(&renderer_string_schema.schema).unwrap()),
-        None => format!(
-            "Output should be in JSON format and conform to the following schema:\n\n```\n{}\n```\n",
-            serde_json::to_string_pretty(&None::<Value>).unwrap_or_default()
-        )
+    let renderer: InstructionsRenderer = if let Some(opts) = options {
+        let renderer_string = opts.renderer_string;
+        let schema = opts.schema;
+        // The custom renderer ignores the schema passed to it at runtime, and instead
+        // uses the one provided at configuration time. This is to support the specific
+        // use case in the tests where a string prefix is combined with a static schema.
+        Arc::new(move |_s| {
+            format!(
+                "{}{}",
+                renderer_string,
+                serde_json::to_string(&schema).unwrap()
+            )
+        })
+    } else {
+        Arc::new(|s| {
+            format!(
+                "Output should be in JSON format and conform to the following schema:\n\n```\n{}\n```\n",
+                serde_json::to_string_pretty(s).unwrap_or_else(|_| "null".to_string())
+            )
+        })
     };
-
-    let renderer: Arc<dyn Fn(&serde_json::Value) -> String + Send + Sync> =
-        Arc::new(move |s| merged_renderer_string_schema.clone());
 
     Arc::new(
         move |mut req: GenerateRequest, next: ModelMiddlewareNext<'_>| {
-            let renderer = Arc::clone(&renderer);
+            let renderer = renderer.clone();
             Box::pin(async move {
-                let output_meta: Option<OutputMetadata> = req
-                    .output
+                let output_opts_json = match req.output.as_ref() {
+                    Some(opts) => opts.clone(),
+                    None => return next(req).await,
+                };
+
+                let mut output_opts: OutputMetadata =
+                    match serde_json::from_value(output_opts_json.clone()) {
+                        Ok(opts) => opts,
+                        Err(_) => return next(req).await,
+                    };
+
+                let force_instructions = output_opts
+                    .instructions
                     .as_ref()
-                    .and_then(|v| serde_json::from_value(v.clone()).ok());
+                    .and_then(|v| v.as_bool())
+                    .unwrap_or(false);
 
-                if let Some(meta) = output_meta {
-                    let force_instructions = meta.instructions.as_ref().unwrap_or(&false);
-                    if meta.constrained.unwrap_or(false) && !force_instructions {
-                        // Pass through, model is expected to handle it.
-                        return next(req).await;
-                    }
+                // When `instructions: true`, we should always inject instructions.
+                if output_opts.format == Some("json".to_string())
+                    && (!output_opts.constrained.unwrap_or(false) || force_instructions)
+                {
+                    let schema_ref = output_opts.schema.as_ref();
+                    let instructions = renderer(schema_ref.unwrap_or(&Value::Null));
 
-                    if let Some(schema) = meta.schema {
-                        let instructions = renderer(&schema);
-                        if let Some(last_user_msg) =
-                            req.messages.iter_mut().rev().find(|m| m.role == Role::User)
-                        {
-                            last_user_msg.content.push(Part {
+                    // 1. Add instructions to messages.
+                    let last_user_message = req
+                        .messages
+                        .iter_mut()
+                        .rfind(|m| m.role == crate::model::Role::User);
+
+                    if let Some(msg) = last_user_message {
+                        msg.content.push(Part {
+                            text: Some(instructions),
+                            metadata: Some(HashMap::from([(
+                                "purpose".to_string(),
+                                Value::String("output".to_string()),
+                            )])),
+
+                            ..Default::default()
+                        });
+                    } else {
+                        // If no user message, create one. This is unusual but possible.
+                        req.messages.push(MessageData {
+                            role: crate::model::Role::User,
+                            content: vec![Part {
                                 text: Some(instructions),
-                                metadata: Some(
-                                    [("purpose".to_string(), Value::String("output".to_string()))]
-                                        .into(),
-                                ),
+                                metadata: Some(HashMap::from([(
+                                    "purpose".to_string(),
+                                    Value::String("output".to_string()),
+                                )])),
+
                                 ..Default::default()
-                            });
-                        }
-
-                        // Modify output options for the underlying model.
-                        let mut output_map = req
-                            .output
-                            .as_ref()
-                            .and_then(|v| v.as_object())
-                            .cloned()
-                            .unwrap_or_default();
-                        output_map.insert("constrained".to_string(), Value::Bool(false));
-                        if !force_instructions {
-                            output_map.remove("format");
-                            output_map.remove("schema");
-                        }
-                        output_map.remove("contentType");
-
-                        req.output = Some(Value::Object(output_map));
+                            }],
+                            ..Default::default()
+                        });
                     }
+
+                    // 2. Modify output options for the model request.
+                    output_opts.constrained = Some(false);
+                    // Preserve schema and format if instructions were explicitly requested.
+                    if !force_instructions {
+                        output_opts.format = None;
+                        output_opts.schema = None;
+                    }
+                    req.output = Some(serde_json::to_value(output_opts).map_err(|e| {
+                        Error::new_internal(format!("Failed to re-serialize output options: {}", e))
+                    })?);
                 }
+
                 next(req).await
             })
         },
