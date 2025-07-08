@@ -105,6 +105,9 @@ where
 
     /// Throws an error if the response does not contain valid output.
     pub fn assert_valid(&self) -> Result<()> {
+        if self.operation.is_some() {
+            return Ok(());
+        }
         if self.finish_reason == Some(FinishReason::Blocked) {
             let base_message = "Generation blocked";
             let final_message = self
