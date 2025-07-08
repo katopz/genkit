@@ -84,6 +84,7 @@ async fn test_docs_from_function() -> Result<()> {
             "prompt": null,
             "context": null,
         }),
+        context: None,
     })
     .await
 }

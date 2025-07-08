@@ -15,6 +15,7 @@
 use genkit_ai::prompt::{define_prompt, PromptConfig, PromptGenerateOptions};
 use genkit_ai::session::Session;
 use genkit_core::error::Result;
+use genkit_core::Context;
 use serde_json::Value;
 use std::sync::Arc;
 
@@ -28,6 +29,7 @@ pub struct TestCase {
     pub input: Value,
     pub options: Option<PromptGenerateOptions<Value>>,
     pub state: Option<Value>,
+    pub context: Option<Context>,
     pub want_text: String,
     pub want_rendered: Value,
 }
@@ -38,17 +40,33 @@ pub async fn test_runner(case: TestCase) -> Result<()> {
 
     let p = define_prompt(&mut mut_registry, case.config);
 
-    let session = Session::new(registry.clone(), None, None, case.state.clone()).await?;
-    let session_arc = Arc::new(session);
+    let session = if let Some(state) = case.state.clone() {
+        Some(Arc::new(
+            Session::new(registry.clone(), None, None, Some(state)).await?,
+        ))
+    } else {
+        None
+    };
 
     // Test generation
-    let p_gen = p.clone();
-    let input_gen = case.input.clone();
-    let options_gen = case.options.clone();
-    let response = session_arc
-        .clone()
-        .run(async move { p_gen.generate(input_gen, options_gen).await })
-        .await?;
+    let generate_future = async {
+        let p_clone = p.clone();
+        let input = case.input.clone();
+        let options = case.options.clone();
+        if let Some(session_arc) = session.clone() {
+            session_arc
+                .run(async move { p_clone.generate(input, options).await })
+                .await
+        } else {
+            p_clone.generate(input, options).await
+        }
+    };
+
+    let response = genkit_core::context::run_with_context(
+        case.context.clone().unwrap_or_default(),
+        generate_future,
+    )
+    .await?;
     assert_eq!(
         response.text()?,
         case.want_text,
@@ -57,12 +75,21 @@ pub async fn test_runner(case: TestCase) -> Result<()> {
     );
 
     // Test render
-    let p_render = p.clone();
-    let input_render = case.input.clone();
-    let options_render = case.options.clone();
-    let rendered = session_arc
-        .run(async move { p_render.render(input_render, options_render).await })
-        .await?;
+    let render_future = async {
+        let p_clone = p.clone();
+        let input = case.input.clone();
+        let options = case.options.clone();
+        if let Some(session_arc) = session.clone() {
+            session_arc
+                .run(async move { p_clone.render(input, options).await })
+                .await
+        } else {
+            p_clone.render(input, options).await
+        }
+    };
+    let rendered =
+        genkit_core::context::run_with_context(case.context.unwrap_or_default(), render_future)
+            .await?;
 
     let rendered_json = serde_json::to_value(&rendered)?;
     assert_eq!(
