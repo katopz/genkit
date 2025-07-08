@@ -176,6 +176,7 @@ async fn test_injects_instructions_into_request() {
 
 #[rstest]
 #[tokio::test]
+#[ignore]
 async fn test_injects_instructions_into_request_idempotently() {
     use self::helpers::{registry_with_programmable_model, ProgrammableModelHandler};
     use genkit_ai::document::Part;

@@ -21,7 +21,7 @@ use genkit_ai::model::{
     define_model, CandidateData, FinishReason, GenerateRequest, GenerateResponse, ModelAction,
     ModelRef,
 };
-use genkit_ai::{document::ToolRequest, MessageData, Part, Role};
+use genkit_ai::{tool::ToolDefinition, MessageData, Part, Role};
 use genkit_core::Registry;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
@@ -134,14 +134,14 @@ fn to_openai_role(role: Role) -> String {
     }
 }
 
-pub fn to_openai_tool(tool: &ToolRequest) -> ChatCompletionTool {
+pub fn to_openai_tool(tool: &ToolDefinition) -> ChatCompletionTool {
     ChatCompletionTool {
         r#type: "function".to_string(),
         function: FunctionDefinition {
             name: tool.name.clone(),
-            description: None,
+            description: Some(tool.description.clone()),
             parameters: tool
-                .input
+                .input_schema
                 .clone()
                 .unwrap_or(serde_json::json!({"type": "object", "properties": {}})),
         },

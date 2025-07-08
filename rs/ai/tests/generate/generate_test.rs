@@ -15,16 +15,14 @@
 use genkit_ai::{
     generate::{to_generate_request, GenerateOptions, OutputOptions},
     model::{GenerateRequest, Model},
-    tool::{self, define_tool, ToolArgument, ToolConfig},
-    Document, MessageData, Part, Role, ToolAction,
+    tool::{define_tool, ToolArgument, ToolConfig, ToolDefinition},
+    Document, MessageData, Part, Role,
 };
-use genkit_core::registry::{ErasedAction, Registry};
+use genkit_core::registry::Registry;
 use rstest::{fixture, rstest};
-use schemars::JsonSchema;
+use schemars::{schema_for, JsonSchema};
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
-
-use genkit_ai::ToolRequest;
 
 #[derive(JsonSchema, Deserialize, Serialize, Debug, Clone, Default)]
 struct JokeInput {
@@ -40,7 +38,7 @@ struct AddInput {
 #[fixture]
 fn registry() -> Registry {
     let mut registry = Registry::new();
-    let _ = define_tool(
+    define_tool(
             &mut registry,
             ToolConfig::<JokeInput, String> {
                 name: "tellAFunnyJoke".to_string(),
@@ -51,7 +49,7 @@ fn registry() -> Registry {
             },
             |input, _| async move { Ok(format!("Why did the {} cross the road?", input.topic)) },
         );
-    let _ = define_tool(
+    define_tool(
         &mut registry,
         ToolConfig::<AddInput, i32> {
             name: "namespaced/add".to_string(),
@@ -87,64 +85,60 @@ async fn test_to_generate_request_simple_prompt(#[from(registry)] registry: Regi
 #[rstest]
 #[tokio::test]
 async fn test_to_generate_request_with_tools_by_name(#[from(registry)] registry: Registry) {
-    let options = GenerateOptions {
+    let options = GenerateOptions::<Value> {
         model: Some(Model::Name("vertexai/gemini-1.0-pro".to_string())),
         tools: Some(vec![ToolArgument::Name("tellAFunnyJoke".to_string())]),
         prompt: Some(vec![Part::text("Tell a joke about dogs.")]),
         ..Default::default()
     };
     let mut actual = to_generate_request(&registry, &options).await.unwrap();
-    let mut tool = actual.tools.as_mut().unwrap().get_mut(0).unwrap();
+    let tool = actual.tools.as_mut().unwrap().get_mut(0).unwrap();
     // Schemas are complex and order isn't guaranteed, so we test them separately.
     let input_schema = tool.input_schema.take();
     let output_schema = tool.output_schema.take();
 
-    let expected_input_schema: Value = json!({
-        "type": "object",
-        "properties": { "topic": { "type": "string" } },
-        "required": ["topic"],
-    });
-    let expected_output_schema: Value = json!({"type": "string"});
+    let expected_input_schema: Value = serde_json::to_value(schema_for!(JokeInput)).unwrap();
+    let expected_output_schema: Value = serde_json::to_value(schema_for!(String)).unwrap();
     assert_eq!(input_schema.unwrap(), expected_input_schema);
     assert_eq!(output_schema.unwrap(), expected_output_schema);
 
     // Test the rest of the struct
     let expected = GenerateRequest {
-            messages: vec![MessageData {
-                role: Role::User,
-                content: vec![Part::text("Tell a joke about dogs.")],
-                ..Default::default()
-            }],
-            tools: Some(vec![ToolRequest {
-                name: "tellAFunnyJoke".to_string(),
-                description: "Tells jokes about an input topic. Use this tool whenever user asks you to tell a joke.".to_string(),
-                ..Default::default()
-            }]),
+        messages: vec![MessageData {
+            role: Role::User,
+            content: vec![Part::text("Tell a joke about dogs.")],
             ..Default::default()
-        };
+        }],
+        tools: Some(vec![ToolDefinition {
+            name: "tellAFunnyJoke".to_string(),
+            description:
+                "Tells jokes about an input topic. Use this tool whenever user asks you to tell a joke."
+                    .to_string(),
+            input_schema: None,
+            output_schema: None,
+            metadata: Some(json!({})),
+        }]),
+        ..Default::default()
+    };
     assert_eq!(actual, expected);
 }
 
 #[rstest]
 #[tokio::test]
 async fn test_to_generate_request_strips_tool_namespace(#[from(registry)] registry: Registry) {
-    let options = GenerateOptions {
+    let options = GenerateOptions::<Value> {
         model: Some(Model::Name("vertexai/gemini-1.0-pro".to_string())),
         tools: Some(vec![ToolArgument::Name("namespaced/add".to_string())]),
         prompt: Some(vec![Part::text("Add 10 and 5.")]),
         ..Default::default()
     };
     let mut actual = to_generate_request(&registry, &options).await.unwrap();
-    let mut tool = actual.tools.as_mut().unwrap().get_mut(0).unwrap();
+    let tool = actual.tools.as_mut().unwrap().get_mut(0).unwrap();
     let input_schema = tool.input_schema.take();
     let output_schema = tool.output_schema.take();
 
-    let expected_input_schema: Value = json!({
-        "type": "object",
-        "properties": { "a": { "type": "number" }, "b": { "type": "number" } },
-        "required": ["a", "b"],
-    });
-    let expected_output_schema: Value = json!({"type": "number"});
+    let expected_input_schema: Value = serde_json::to_value(schema_for!(AddInput)).unwrap();
+    let expected_output_schema: Value = serde_json::to_value(schema_for!(i32)).unwrap();
 
     assert_eq!(input_schema.unwrap(), expected_input_schema);
     assert_eq!(output_schema.unwrap(), expected_output_schema);
@@ -155,11 +149,12 @@ async fn test_to_generate_request_strips_tool_namespace(#[from(registry)] regist
             content: vec![Part::text("Add 10 and 5.")],
             ..Default::default()
         }],
-        tools: Some(vec![ToolRequest {
+        tools: Some(vec![ToolDefinition {
             name: "add".to_string(),
             description: "add two numbers together".to_string(),
+            input_schema: None,
+            output_schema: None,
             metadata: Some(json!({"originalName": "namespaced/add"})),
-            ..Default::default()
         }]),
         ..Default::default()
     };

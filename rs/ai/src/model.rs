@@ -41,7 +41,7 @@ use std::ops::Deref;
 use std::pin::Pin;
 use std::sync::Arc;
 
-use crate::{Document, MessageData, Part, Role, ToolRequest};
+use crate::{tool::ToolDefinition, Document, MessageData, Part, Role};
 
 pub mod middleware;
 
@@ -123,7 +123,7 @@ pub struct GenerateRequest {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub config: Option<Value>,
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub tools: Option<Vec<ToolRequest>>,
+    pub tools: Option<Vec<ToolDefinition>>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub tool_choice: Option<Value>,
     #[serde(skip_serializing_if = "Option::is_none")]

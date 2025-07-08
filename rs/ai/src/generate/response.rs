@@ -76,22 +76,19 @@ where
 {
     /// Creates a new `GenerateResponse` from the raw data and options.
     pub fn new(response: &GenerateResponseData, request: Option<GenerateRequest>) -> Self {
-        println!(
-            "[GenerateResponse::new] Received response data: {:?}",
-            response
-        );
-        let generated_message = response.candidates.first().map(|c| c.message.clone());
+        let first_candidate = response.candidates.first();
+        let generated_message = first_candidate.and_then(|c| {
+            if c.message.content.is_empty() && c.message.metadata.is_none() {
+                None
+            } else {
+                Some(c.message.clone())
+            }
+        });
 
         Self {
             message: generated_message.map(|msg| Message::new(msg, None)),
-            finish_reason: response
-                .candidates
-                .first()
-                .and_then(|c| c.finish_reason.clone()),
-            finish_message: response
-                .candidates
-                .first()
-                .and_then(|c| c.finish_message.clone()),
+            finish_reason: first_candidate.and_then(|c| c.finish_reason.clone()),
+            finish_message: first_candidate.and_then(|c| c.finish_message.clone()),
             usage: response.usage.clone(),
             custom: response.custom.clone(),
             request,
@@ -141,26 +138,23 @@ where
 
     /// Throws an error if the response does not conform to expected schema.
     pub fn assert_valid_schema(&self) -> Result<()> {
-        let schema_value = self.request.as_ref().and_then(|req| req.output.as_ref());
+        if let Some(options) = self.request.as_ref().and_then(|req| req.output.as_ref()) {
+            if let Some(schema) = options.get("schema") {
+                let output = self.output()?;
+                let output_value = serde_json::to_value(&output).map_err(|e| {
+                    Error::new_internal(format!(
+                        "Failed to serialize output for schema validation: {}",
+                        e
+                    ))
+                })?;
 
-        if let Some(schema) = schema_value {
-            let output = self.output()?;
-            let output_value = serde_json::to_value(&output).map_err(|e| {
-                Error::new_internal(format!(
-                    "Failed to serialize output for schema validation: {}",
-                    e
-                ))
-            })?;
-
-            jsonschema::validate(
-                &serde_json::to_value(schema).map_err(|error_message| {
-                    Error::new_internal(format!("Schema validation failed: {}", error_message))
-                })?,
-                &output_value,
-            )
-            .map_err(|error_message| {
-                Error::new_internal(format!("Schema validation failed: {}", error_message))
-            })?;
+                if let Err(error) = jsonschema::validate(&output_value, schema) {
+                    return Err(Error::new_internal(format!(
+                        "Schema validation failed: {}",
+                        error
+                    )));
+                }
+            }
         }
         Ok(())
     }
@@ -244,6 +238,15 @@ where
             vec![crate::model::CandidateData {
                 index: 0,
                 message: msg.to_json(),
+                finish_reason: self.finish_reason.clone(),
+                finish_message: self.finish_message.clone(),
+            }]
+        } else if self.finish_reason.is_some() {
+            // If there's no message, we might still have a finish reason (e.g., Blocked)
+            // So we construct a candidate with an empty message.
+            vec![crate::model::CandidateData {
+                index: 0,
+                message: MessageData::default(),
                 finish_reason: self.finish_reason.clone(),
                 finish_message: self.finish_message.clone(),
             }]

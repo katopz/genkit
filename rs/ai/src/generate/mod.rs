@@ -27,7 +27,7 @@ pub mod response;
 pub use self::chunk::GenerateResponseChunk;
 pub use self::response::GenerateResponse;
 
-use crate::document::{Document, Part, ToolRequest, ToolRequestPart, ToolResponsePart};
+use crate::document::{Document, Part, ToolRequestPart, ToolResponsePart};
 use crate::formats::{self};
 use crate::generate::action::run_with_streaming_callback;
 use crate::message::{Message, MessageData, Role};
@@ -488,10 +488,7 @@ pub async fn to_generate_request<O>(
             .await?
             .iter()
             .map(|t| tool::to_tool_definition(t.as_ref()))
-            .collect::<Result<Vec<_>>>()?
-            .into_iter()
-            .map(ToolRequest::from)
-            .collect(),
+            .collect::<Result<Vec<_>>>()?,
     );
 
     Ok(GenerateRequest {
