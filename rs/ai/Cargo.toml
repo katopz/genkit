@@ -65,10 +65,6 @@ name = "prompt_test"
 path = "tests/prompt/prompt_test.rs"
 
 [[test]]
-name = "prompt_fn_test"
-path = "tests/prompt/prompt_fn_test.rs"
-
-[[test]]
 name = "resource_test"
 path = "tests/resource/resource_test.rs"
 

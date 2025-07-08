@@ -43,12 +43,34 @@ use std::sync::Arc;
 pub type PromptAction<I = Value> = Action<I, GenerateRequest, ()>;
 
 /// A type alias for a function that resolves documents dynamically for a prompt.
-pub type DocsResolver<I> = Box<
+pub type DocsResolver<I> = Arc<
     dyn Fn(
             I,
             Option<Value>,
             Option<ActionContext>,
         ) -> Pin<Box<dyn Future<Output = Result<Vec<Document>>> + Send>>
+        + Send
+        + Sync,
+>;
+
+/// A type alias for a function that resolves a string dynamically for a prompt.
+pub type StringResolver<I> = Arc<
+    dyn Fn(
+            I,
+            Option<Value>,
+            Option<ActionContext>,
+        ) -> Pin<Box<dyn Future<Output = Result<String>> + Send>>
+        + Send
+        + Sync,
+>;
+
+/// A type alias for a function that resolves messages dynamically for a prompt.
+pub type MessagesResolver<I> = Arc<
+    dyn Fn(
+            I,
+            Option<Value>,
+            Option<ActionContext>,
+        ) -> Pin<Box<dyn Future<Output = Result<Vec<MessageData>>> + Send>>
         + Send
         + Sync,
 >;
@@ -70,21 +92,30 @@ pub struct PromptConfig<I = Value, O = Value, C = Value> {
     pub input_schema: Option<I>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub system: Option<String>,
+    #[serde(skip, default)]
+    #[schemars(skip)]
+    pub system_fn: Option<StringResolver<I>>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub prompt: Option<String>,
+    #[serde(skip, default)]
+    #[schemars(skip)]
+    pub prompt_fn: Option<StringResolver<I>>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub messages: Option<Vec<MessageData>>,
+    #[serde(skip, default)]
+    #[schemars(skip)]
+    pub messages_fn: Option<MessagesResolver<I>>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub docs: Option<Vec<Document>>,
+    #[serde(skip, default)]
+    #[schemars(skip)]
+    pub docs_fn: Option<DocsResolver<I>>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub output: Option<OutputOptions>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub tools: Option<Vec<ToolArgument>>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub _marker: Option<std::marker::PhantomData<O>>,
-    #[serde(skip, default)]
-    #[schemars(skip)]
-    pub docs_fn: Option<DocsResolver<I>>,
 }
 
 // Manual Debug implementation because Box<dyn Fn(...)> is not Debug.
@@ -103,13 +134,19 @@ where
             .field("description", &self.description)
             .field("input_schema", &self.input_schema)
             .field("system", &self.system)
+            .field("system_fn", &self.system_fn.as_ref().map(|_| "Some(<fn>)"))
             .field("prompt", &self.prompt)
+            .field("prompt_fn", &self.prompt_fn.as_ref().map(|_| "Some(<fn>)"))
             .field("messages", &self.messages)
+            .field(
+                "messages_fn",
+                &self.messages_fn.as_ref().map(|_| "Some(<fn>)"),
+            )
             .field("docs", &self.docs)
+            .field("docs_fn", &self.docs_fn.as_ref().map(|_| "Some(<fn>)"))
             .field("output", &self.output)
             .field("tools", &self.tools)
             .field("_marker", &self._marker)
-            .field("docs_fn", &self.docs_fn.as_ref().map(|_| "Some(<fn>)"))
             .finish()
     }
 }
@@ -206,18 +243,14 @@ where
             }
         }
 
-        // 2. Resolve docs (either from static list or dynamic function)
-        let docs = if let Some(docs_fn) = &self.config.docs_fn {
-            docs_fn(input, state, final_context.clone()).await?
-        } else {
-            self.config.docs.clone().unwrap_or_default()
-        };
-
-        // 3. Build the message list in the correct order
+        // 2. Build the message list in the correct order
         let mut messages = Vec::new();
 
         // System Prompt
-        if let Some(system_template) = &self.config.system {
+        if let Some(resolver) = &self.config.system_fn {
+            let text = resolver(input.clone(), state.clone(), final_context.clone()).await?;
+            messages.push(MessageData::system(vec![Part::text(text)]));
+        } else if let Some(system_template) = &self.config.system {
             let system_text = handlebars
                 .render_template(system_template, &render_data)
                 .map_err(|e| {
@@ -226,8 +259,12 @@ where
             messages.push(MessageData::system(vec![Part::text(system_text)]));
         }
 
-        // Messages from config and options
-        if let Some(config_messages) = &self.config.messages {
+        // Messages
+        if let Some(resolver) = &self.config.messages_fn {
+            let resolved_messages =
+                resolver(input.clone(), state.clone(), final_context.clone()).await?;
+            messages.extend(resolved_messages);
+        } else if let Some(config_messages) = &self.config.messages {
             messages.extend(config_messages.clone());
         }
         if let Some(opts_messages) = opts.as_ref().and_then(|o| o.messages.as_ref()) {
@@ -235,7 +272,10 @@ where
         }
 
         // Main User Prompt
-        if let Some(prompt_template) = &self.config.prompt {
+        if let Some(resolver) = &self.config.prompt_fn {
+            let text = resolver(input.clone(), state.clone(), final_context.clone()).await?;
+            messages.push(MessageData::user(vec![Part::text(text)]));
+        } else if let Some(prompt_template) = &self.config.prompt {
             let prompt_text = handlebars
                 .render_template(prompt_template, &render_data)
                 .map_err(|e| {
@@ -243,6 +283,13 @@ where
                 })?;
             messages.push(MessageData::user(vec![Part::text(prompt_text)]));
         }
+
+        // 3. Resolve docs
+        let docs = if let Some(docs_fn) = &self.config.docs_fn {
+            docs_fn(input, state, final_context.clone()).await?
+        } else {
+            self.config.docs.clone().unwrap_or_default()
+        };
 
         // 4. Merge configs
         let mut final_config = self
