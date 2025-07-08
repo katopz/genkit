@@ -234,11 +234,11 @@ where
 
         if let Some(data_obj) = render_data.as_object_mut() {
             if let Some(state_val) = state.clone() {
-                data_obj.insert("@state".to_string(), state_val);
+                data_obj.insert("state".to_string(), state_val);
             }
             if let Some(context) = &final_context {
                 if let Some(auth_val) = context.get("auth") {
-                    data_obj.insert("@auth".to_string(), auth_val.clone());
+                    data_obj.insert("auth".to_string(), auth_val.clone());
                 }
             }
         }

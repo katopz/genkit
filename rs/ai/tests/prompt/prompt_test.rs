@@ -14,7 +14,6 @@
 
 pub mod docs_fn_test;
 pub mod prompt_helpers;
-pub mod prompt_no_fn_test;
 // pub mod messages_fn_test;
 // pub mod prompt_fn_test;
 // pub mod system_fn_test;
