@@ -222,6 +222,46 @@ where
 
 /// Implementation for `MessageData` to easily extract concatenated text from its parts.
 impl MessageData {
+    /// Creates a new `MessageData` from a `serde_json::Value`.
+    ///
+    /// This function handles several flexible input formats:
+    /// - A raw JSON string is converted into a `user` role message.
+    /// - A JSON object with a `content` field that is a string is normalized
+    ///   to have `content` as an array of `Part`s.
+    /// - A JSON object that already matches the `MessageData` structure is
+    ///   deserialized directly.
+    pub fn from_value(value: Value) -> Result<Self> {
+        // Case 1: Raw string
+        if let Some(s) = value.as_str() {
+            return Ok(MessageData {
+                role: Role::User,
+                content: vec![Part::text(s)],
+                ..Default::default()
+            });
+        }
+
+        // Case 2 & 3: Object
+        if let Value::Object(mut map) = value {
+            // Check if content is a string
+            if let Some(content_val) = map.get("content") {
+                if content_val.is_string() {
+                    // Normalize content to Vec<Part>
+                    let text_content = content_val.as_str().unwrap().to_string();
+                    let part_array = serde_json::json!([{"text": text_content}]);
+                    map.insert("content".to_string(), part_array);
+                }
+            }
+            // Deserialize from the (potentially modified) map
+            return serde_json::from_value(Value::Object(map))
+                .map_err(|e| Error::new_internal(e.to_string()));
+        }
+
+        Err(Error::new_internal(format!(
+            "Unsupported message format: expected string or object, got {:?}",
+            value
+        )))
+    }
+
     /// Concatenates all text from the `content` parts into a single String.
     pub fn text(&self) -> String {
         self.content

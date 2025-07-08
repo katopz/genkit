@@ -52,6 +52,14 @@ name = "extract_test"
 path = "tests/extract_test.rs"
 
 [[test]]
+name = "formats"
+path = "tests/formats/mod.rs"
+
+[[test]]
+name = "message"
+path = "tests/message/message_test.rs"
+
+[[test]]
 name = "prompt_helpers_test"
 path = "tests/prompt/prompt_helpers_test.rs"
 
