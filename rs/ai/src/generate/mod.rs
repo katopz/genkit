@@ -249,12 +249,7 @@ where
     })
     .await?;
 
-    println!(
-        "[generate] Checking for formatter with output_options: {:?}",
-        output_options
-    );
     if let Some(formatter) = formats::resolve_format(registry, output_options.as_ref()).await {
-        println!("[generate] Found formatter: {}", formatter.name);
         let schema: Option<schemars::Schema> = output_options
             .as_ref()
             .and_then(|o| o.schema.as_ref())
@@ -276,8 +271,6 @@ where
         if let Some(message) = response.message.as_mut() {
             message.set_parser(parser_arc);
         }
-    } else {
-        println!("[generate] No formatter found.");
     }
 
     Ok(response)
