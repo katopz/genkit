@@ -46,10 +46,6 @@ pub fn define_format(
     handler: FormatHandler,
 ) -> Formatter {
     let name = name.into();
-    println!(
-        "[define_format] Registering format '{}' with key 'format/{}'",
-        &name, &name
-    );
     let formatter = Formatter {
         name: name.clone(),
         config,
@@ -89,34 +85,17 @@ pub async fn resolve_format(
     output_opts: Option<&OutputOptions>,
 ) -> Option<Arc<Formatter>> {
     let output_opts = output_opts?;
-    let available_formats: Vec<String> = registry.list_values("format").keys().cloned().collect();
-    println!(
-        "[resolve_format] Available format keys in registry: {:?}",
-        available_formats
-    );
-    println!(
-        "[resolve_format] Attempting to resolve format with opts: {:?}",
-        output_opts
-    );
+
     // If schema is set but no explicit format is set we default to json.
     if output_opts.schema.is_some() && output_opts.format.is_none() {
-        println!("[resolve_format] Schema found, but no format. Defaulting to 'json'.");
         return registry.lookup_value::<Formatter>("format", "json").await;
     }
     if let Some(format) = &output_opts.format {
-        println!(
-            "[resolve_format] Looking up format '{}' with key 'format/{}'",
-            format, format
-        );
         let result = registry.lookup_value::<Formatter>("format", format).await;
-        println!(
-            "[resolve_format] Lookup for '{}' was successful: {}",
-            format,
-            result.is_some()
-        );
+
         return result;
     }
-    println!("[resolve_format] No format specified in options.");
+
     None
 }
 

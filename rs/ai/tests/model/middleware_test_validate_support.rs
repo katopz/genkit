@@ -15,7 +15,9 @@
 
 //! # Model Middleware Tests
 
-use genkit_ai::model::{BoxFuture, GenerateRequest, GenerateResponseData};
+use genkit_ai::model::{
+    middleware::InstructionsRendererWithSchema, BoxFuture, GenerateRequest, GenerateResponseData,
+};
 use genkit_core::error::Result;
 use rstest::rstest;
 use serde_json::{from_value, json};
@@ -102,7 +104,7 @@ async fn test_injects_instructions_into_request() {
 #[rstest]
 #[tokio::test]
 async fn test_injects_instructions_idempotently() {
-    let schema = json!({
+    let schema_value = json!({
         "type": "object",
         "properties": { "foo": { "type": "string" } },
         "required": ["foo"],
@@ -114,18 +116,24 @@ async fn test_injects_instructions_idempotently() {
         "messages": [{ "role": "user", "content": [{ "text": "generate json" }] }],
         "output": {
             "format": "json",
-            "schema": schema.clone()
+            "schema": schema_value.clone()
         }
     }))
     .unwrap();
 
-    let renderer = move |s: &serde_json::Value| {
-        format!("must be json: {}", serde_json::to_string(&s).unwrap())
-    };
-    let options = SimulatedConstrainedGenerationOptions {
-        instructions_renderer: Some(Box::new(renderer)),
-    };
-    let middleware = simulate_constrained_generation(Some(options));
+    // let renderer = move |s: &serde_json::Value| {
+    //     format!("must be json: {}", serde_json::to_string(&s).unwrap())
+    // };
+    // let options = SimulatedConstrainedGenerationOptions {
+    //     instructions_renderer: Some(Box::new(renderer)),
+    // };
+
+    let middleware: ModelMiddleware =
+        simulate_constrained_generation(Some(InstructionsRendererWithSchema {
+            renderer_string: "must be json: ".to_string(),
+            schema: schema_value.clone(),
+        }));
+
     let modified_req = test_middleware_request(req, middleware).await;
 
     let expected_req: GenerateRequest = from_value(json!({
@@ -135,7 +143,7 @@ async fn test_injects_instructions_idempotently() {
                     "content": [
                         { "text": "generate json" },
                         {
-                            "text": format!("must be json: {}", serde_json::to_string(&schema).unwrap()),
+                            "text": format!("must be json: {}", serde_json::to_string(&schema_value).unwrap()),
                             "metadata": { "purpose": "output" }
                         }
                     ]

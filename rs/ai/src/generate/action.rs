@@ -363,14 +363,12 @@ where
 
         // 3. Resolve and apply format.
         if let Some(format) = formats::resolve_format(&registry, request.output.as_ref()).await {
-            println!("[generate_internal] Resolved format: {}", &format.name);
             // Get model info from the action's metadata
             let model_info: Option<crate::model::ModelInfo> = model_action
                 .metadata()
                 .metadata
                 .get("metadata")
                 .and_then(|v| serde_json::from_value(v.clone()).ok());
-            println!("[generate_internal] Model info: {:?}", &model_info);
 
             // Check if model supports the format natively
             let model_supports_format = model_info
@@ -378,16 +376,8 @@ where
                 .and_then(|info| info.supports.as_ref())
                 .and_then(|supports| supports.output.as_ref())
                 .is_some_and(|supported_formats| supported_formats.contains(&format.name));
-            println!(
-                "[generate_internal] Model supports format '{}' natively: {}",
-                &format.name, model_supports_format
-            );
 
             // Only inject instructions if the model does NOT support the format.
-            println!(
-                "[generate_internal] Condition to inject instructions (!model_supports_format): {}",
-                !model_supports_format
-            );
             if !model_supports_format {
                 let schema_value = request
                     .output
@@ -404,22 +394,17 @@ where
                     schema.as_ref(),
                     instructions_option,
                 );
-                println!(
-                    "[generate_internal] Resolved instructions: {:?}",
-                    &instructions
-                );
 
                 if instructions.is_some() {
-                    println!("[generate_internal] Injecting instructions.");
                     let messages = request.messages.get_or_insert_with(Vec::new);
                     println!(
-                        "[generate_internal] Messages before injection: {:?}",
+                        "[generate_internal] 🔥 Messages before injection: {:?}",
                         messages
                     );
                     let updated_messages = formats::inject_instructions(messages, instructions);
                     request.messages = Some(updated_messages);
                     println!(
-                        "[generate_internal] Messages after injection: {:?}",
+                        "[generate_internal] ✨ Messages after injection: {:?}",
                         request.messages
                     );
                 }

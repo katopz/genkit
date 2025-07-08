@@ -368,23 +368,30 @@ pub struct SimulatedConstrainedGenerationOptions {
     pub instructions_renderer: Option<InstructionsRenderer>,
 }
 
-#[allow(unused)]
-fn default_constrained_generation_instructions(schema: &serde_json::Value) -> String {
-    format!(
-        "Output should be in JSON format and conform to the following schema:\n\n```\n{}\n```\n",
-        serde_json::to_string_pretty(schema).unwrap_or_default()
-    )
+#[derive(Debug)]
+pub struct InstructionsRendererWithSchema {
+    pub renderer_string: String,
+    pub schema: serde_json::Value,
 }
 
 /// A `ModelMiddleware` that simulates constrained (e.g., JSON) output by providing instructions.
 pub fn simulate_constrained_generation(
-    options: Option<SimulatedConstrainedGenerationOptions>,
+    instructions_renderer_schema: Option<InstructionsRendererWithSchema>,
 ) -> ModelMiddleware {
-    let renderer = Arc::new(
-        options
-            .and_then(|o| o.instructions_renderer)
-            .unwrap_or_else(|| Box::new(default_constrained_generation_instructions)),
+    println!(
+        "🦀 instructions_renderer_schema: {:?}",
+        instructions_renderer_schema
     );
+    let merged_renderer_string_schema = match instructions_renderer_schema {
+        Some(renderer_string_schema) => format!("{}{}", renderer_string_schema.renderer_string, serde_json::to_string(&renderer_string_schema.schema).unwrap()),
+        None => format!(
+            "Output should be in JSON format and conform to the following schema:\n\n```\n{}\n```\n",
+            serde_json::to_string_pretty(&None::<Value>).unwrap_or_default()
+        )
+    };
+
+    let renderer: Arc<dyn Fn(&serde_json::Value) -> String + Send + Sync> =
+        Arc::new(move |s| merged_renderer_string_schema.clone());
 
     Arc::new(
         move |mut req: GenerateRequest, next: ModelMiddlewareNext<'_>| {

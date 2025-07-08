@@ -14,7 +14,9 @@
 
 //! # Model Middleware Tests
 
-use genkit_ai::model::middleware::simulate_constrained_generation;
+use genkit_ai::model::middleware::{
+    simulate_constrained_generation, InstructionsRendererWithSchema,
+};
 use genkit_ai::model::{GenerateRequest, GenerateResponseData};
 use genkit_core::error::Result;
 use rstest::rstest;
@@ -176,7 +178,6 @@ async fn test_injects_instructions_into_request() {
 
 #[rstest]
 #[tokio::test]
-#[ignore]
 async fn test_injects_instructions_into_request_idempotently() {
     use self::helpers::{registry_with_programmable_model, ProgrammableModelHandler};
     use genkit_ai::document::Part;
@@ -218,12 +219,17 @@ async fn test_injects_instructions_into_request_idempotently() {
         "$schema": "http://json-schema.org/draft-07/schema#"
     });
 
-    let renderer: Box<dyn Fn(&serde_json::Value) -> String + Send + Sync> =
-        Box::new(move |s| format!("must be json: {}", serde_json::to_string(s).unwrap()));
-    let options = SimulatedConstrainedGenerationOptions {
-        instructions_renderer: Some(renderer),
-    };
-    let middleware: ModelMiddleware = simulate_constrained_generation(Some(options));
+    // let renderer: Box<dyn Fn(&serde_json::Value) -> String + Send + Sync> =
+    //     Box::new(move |s| format!("must be json: {}", serde_json::to_string(s).unwrap()));
+    // let options = SimulatedConstrainedGenerationOptions {
+    //     instructions_renderer: Some(renderer),
+    // };
+
+    let middleware: ModelMiddleware =
+        simulate_constrained_generation(Some(InstructionsRendererWithSchema {
+            renderer_string: "must be json: ".to_string(),
+            schema: schema_value.clone(),
+        }));
 
     let result = generate(
         &registry,
