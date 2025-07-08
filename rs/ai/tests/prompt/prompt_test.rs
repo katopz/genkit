@@ -12,9 +12,9 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-pub mod docs_fn_test;
-pub mod no_fn_test;
-pub mod prompt_helpers;
+pub mod prompt_test_docs_fn_test;
+pub mod prompt_test_helpers;
+pub mod prompt_test_no_fn_test;
 // pub mod messages_fn_test;
 // pub mod prompt_fn_test;
 // pub mod system_fn_test;

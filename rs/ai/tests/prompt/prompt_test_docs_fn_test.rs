@@ -23,7 +23,7 @@ use genkit_core::context::ActionContext;
 use genkit_core::error::Result;
 use serde_json::{json, Value};
 
-use crate::prompt_helpers::{test_runner, TestCase};
+use crate::prompt_test_helpers::{test_runner, TestCase};
 
 #[tokio::test]
 async fn test_docs_from_function() -> Result<()> {
