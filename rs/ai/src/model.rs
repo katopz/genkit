@@ -116,7 +116,7 @@ pub struct GenerationCommonConfig {
 }
 
 /// A request to a generative model.
-#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, PartialEq)]
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, PartialEq, Default)]
 #[serde(rename_all = "camelCase")]
 pub struct GenerateRequest {
     pub messages: Vec<MessageData>,
