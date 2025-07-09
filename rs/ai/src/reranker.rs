@@ -203,7 +203,10 @@ where
 
     let request_value = serde_json::to_value(request)
         .map_err(|e| Error::new_internal(format!("Failed to serialize request: {}", e)))?;
-    let response_value = reranker_action.run_http_json(request_value, None).await?;
+    let mut response_value = reranker_action.run_http_json(request_value, None).await?;
+    if let Some(result) = response_value.get_mut("result") {
+        response_value = result.take();
+    }
     let response: RerankerResponse = serde_json::from_value(response_value)
         .map_err(|e| Error::new_internal(format!("Failed to deserialize response: {}", e)))?;
     Ok(response.documents)
