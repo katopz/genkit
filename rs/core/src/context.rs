@@ -72,6 +72,16 @@ impl ActionContext {
     }
 }
 
+impl From<HashMap<String, Value>> for ActionContext {
+    fn from(mut map: HashMap<String, Value>) -> Self {
+        let auth = map.remove("auth");
+        ActionContext {
+            auth,
+            additional_context: map,
+        }
+    }
+}
+
 #[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq)]
 pub struct FlowContext {
     pub flow_id: String,
