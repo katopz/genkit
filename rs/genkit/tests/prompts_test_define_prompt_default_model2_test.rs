@@ -104,3 +104,32 @@ async fn test_calls_legacy_prompt_with_default_model(#[future] genkit_instance: 
 
     assert_eq!(response.text().unwrap(), "Echo: hi Genkit; config: {}");
 }
+
+#[rstest]
+#[tokio::test]
+/// 'calls legacy prompt with string shorthand'
+async fn test_calls_legacy_prompt_with_string_shorthand(#[future] genkit_instance: Arc<Genkit>) {
+    let genkit = genkit_instance.await;
+
+    // NOTE: The "legacy" style of `definePrompt(config, "template")` from JS doesn't have
+    // a direct equivalent in Rust. The idiomatic way is to use the `prompt` field within the config.
+    let hi_prompt = genkit
+        .define_prompt::<TestInput, Value, Value>(PromptConfig {
+            name: "hi_legacy_string_shorthand_test".to_string(),
+            prompt: Some("hi {{name}}".to_string()),
+            ..Default::default()
+        })
+        .await;
+
+    let response = hi_prompt
+        .generate(
+            TestInput {
+                name: "Genkit".to_string(),
+            },
+            None,
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(response.text().unwrap(), "Echo: hi Genkit; config: {}");
+}
