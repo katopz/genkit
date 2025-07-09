@@ -242,8 +242,9 @@ impl<S: Serialize + DeserializeOwned + Clone + Send + Sync + 'static> Chat<S> {
         let resolved_options = resolve_send_options(input.into());
         let state = self.state.lock().await;
         let base_options = state.request_base.clone();
+        drop(state); // unlock early
 
-        let mut messages = base_options.messages;
+        let mut messages = base_options.messages.clone();
         if let Some(prompt_parts) = resolved_options.prompt {
             messages.push(MessageData {
                 role: Role::User,
@@ -264,10 +265,57 @@ impl<S: Serialize + DeserializeOwned + Clone + Send + Sync + 'static> Chat<S> {
             ..Default::default()
         };
 
-        // NOTE: This doesn't yet handle state updates after the stream completes.
-        // A more complete implementation would spawn a task to await the final
-        // response from the stream and then update the chat's message history.
-        generate_stream(&self.session.registry, generate_options).await
+        let stream_response = generate_stream(&self.session.registry, generate_options).await?;
+
+        // Spawn a task to update the history once the stream is complete.
+        let chat_clone = self.clone();
+        let original_response_handle = stream_response.response;
+        let new_response_handle = tokio::spawn(async move {
+            // Wait for the original generation task to complete.
+            let response_result = match original_response_handle.await {
+                Ok(res) => res,
+                Err(e) => {
+                    return Err(genkit_core::error::Error::new_internal(format!(
+                        "Stream response task failed: {}",
+                        e
+                    )))
+                }
+            };
+
+            // If generation was successful, update the state.
+            if let Ok(response) = &response_result {
+                let mut state = chat_clone.state.lock().await;
+
+                // Update state with any changes from the generation call (e.g., tools)
+                if let Some(req) = &response.request {
+                    if let Some(tools) = &req.tools {
+                        state.request_base.tools =
+                            Some(tools.iter().map(|t| t.name.clone().into()).collect());
+                    }
+                }
+
+                // Update the message history in the state and persist it
+                if let Ok(final_messages) = response.messages() {
+                    state.request_base.messages = final_messages.clone();
+                    drop(state); // Unlock before async call
+
+                    if let Err(e) = chat_clone.update_messages(&final_messages).await {
+                        // We have the final response already, but saving failed.
+                        // We'll log the error and return the successful response.
+                        // A more robust implementation might return an error here instead.
+                        println!("[Chat::send_stream] Failed to update session store: {}", e);
+                    }
+                }
+            }
+
+            // Return the original result, regardless of whether the state update succeeded.
+            response_result
+        });
+
+        Ok(GenerateStreamResponse {
+            stream: stream_response.stream,
+            response: new_response_handle,
+        })
     }
 
     /// Adds a "preamble" message to the beginning of the chat history.
