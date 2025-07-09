@@ -615,7 +615,7 @@ pub fn augment_with_context(options: Option<AugmentWithContextOptions>) -> Model
 // -- Start of refined code --
 
 /// A serializable reference to a model, often used in plugin configurations.
-#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, PartialEq)]
 #[serde(rename_all = "camelCase")]
 pub struct ModelRef<T> {
     pub name: String,
@@ -664,7 +664,7 @@ where
 }
 
 /// Represents a reference to a model, which can hold configuration.
-#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, PartialEq)]
 #[serde(untagged)]
 pub enum Model {
     /// A reference to a model that includes configuration details.
