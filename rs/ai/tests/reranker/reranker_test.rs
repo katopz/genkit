@@ -254,6 +254,6 @@ async fn test_handles_errors_thrown_by_the_reranker(mut registry: Registry) {
     let err = result.unwrap_err();
     assert_eq!(
         err.to_string(),
-        "Internal error: Something went wrong during reranking"
+        "INTERNAL: Something went wrong during reranking"
     );
 }
