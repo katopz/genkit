@@ -21,9 +21,16 @@ use genkit_ai::prompt::{PromptConfig, PromptGenerateOptions};
 use genkit_ai::Model;
 use genkit_core::context::ActionContext;
 use genkit_core::error::Result;
+use schemars::JsonSchema;
+use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 
 use crate::prompt_test_helpers::{test_runner, TestCase};
+
+#[derive(Serialize, Deserialize, JsonSchema)]
+struct TestInput {
+    name: String,
+}
 
 #[tokio::test]
 async fn test_docs_from_function() -> Result<()> {
@@ -56,6 +63,7 @@ async fn test_docs_from_function() -> Result<()> {
             model: Some(Model::Name("echoModel".to_string())),
             config: Some(json!({ "banana": "ripe" })),
             prompt: Some("hello {{name}} ({{state.name}})".to_string()),
+            input: Some(serde_json::to_value(schemars::schema_for!(TestInput))?),
             docs_fn: Some(docs_resolver),
             ..Default::default()
         },

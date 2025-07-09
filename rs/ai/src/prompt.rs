@@ -89,7 +89,7 @@ pub struct PromptConfig<I = Value, O = Value, C = Value> {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub description: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub input_schema: Option<I>,
+    pub input: Option<I>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub system: Option<String>,
     #[serde(skip, default)]
@@ -132,7 +132,7 @@ where
             .field("model", &self.model)
             .field("config", &self.config)
             .field("description", &self.description)
-            .field("input_schema", &self.input_schema)
+            .field("input", &self.input)
             .field("system", &self.system)
             .field("system_fn", &self.system_fn.as_ref().map(|_| "Some(<fn>)"))
             .field("prompt", &self.prompt)
