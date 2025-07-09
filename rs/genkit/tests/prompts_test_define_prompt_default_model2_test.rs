@@ -66,3 +66,41 @@ async fn test_calls_prompt_with_default_model(#[future] genkit_instance: Arc<Gen
 
     assert_eq!(response.text().unwrap(), "Echo: hi Genkit; config: {}");
 }
+
+#[rstest]
+#[tokio::test]
+/// 'calls legacy prompt with default model'
+async fn test_calls_legacy_prompt_with_default_model(#[future] genkit_instance: Arc<Genkit>) {
+    let genkit = genkit_instance.await;
+
+    // NOTE: The "legacy" style of `definePrompt(config, runner)` from JS doesn't have
+    // a direct equivalent in Rust due to static typing. The idiomatic way to achieve
+    // dynamic message generation is to use the `messages_fn` field within the config.
+    let hi_prompt = genkit
+        .define_prompt::<TestInput, Value, Value>(PromptConfig {
+            name: "hi_legacy_test".to_string(),
+            messages_fn: Some(Arc::new(|input, _state, _context| {
+                Box::pin(async move {
+                    Ok(vec![MessageData {
+                        role: Role::User,
+                        content: vec![Part::text(format!("hi {}", input.name))],
+                        ..Default::default()
+                    }])
+                })
+            })),
+            ..Default::default()
+        })
+        .await;
+
+    let response = hi_prompt
+        .generate(
+            TestInput {
+                name: "Genkit".to_string(),
+            },
+            None,
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(response.text().unwrap(), "Echo: hi Genkit; config: {}");
+}
