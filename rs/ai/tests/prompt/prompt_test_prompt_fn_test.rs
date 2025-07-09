@@ -34,17 +34,18 @@ struct TestInput {
 #[tokio::test]
 async fn test_renders_user_prompt_from_function() -> Result<()> {
     let prompt_fn = Arc::new(
-        |input: TestInput,
+        |input: Value,
          state: Option<Value>,
          _: Option<ActionContext>|
          -> Pin<Box<dyn Future<Output = Result<String>> + Send>> {
             Box::pin(async move {
+                let typed_input: TestInput = serde_json::from_value(input).unwrap();
                 let state_name = state
                     .as_ref()
                     .and_then(|s| s.get("name"))
                     .and_then(|v| v.as_str())
                     .unwrap_or("");
-                Ok(format!("hello {} ({})", input.name, state_name))
+                Ok(format!("hello {} ({})", typed_input.name, state_name))
             })
         },
     );
@@ -80,11 +81,12 @@ async fn test_renders_user_prompt_from_function() -> Result<()> {
 #[tokio::test]
 async fn test_renders_user_prompt_from_function_with_context() -> Result<()> {
     let prompt_fn = Arc::new(
-        |input: TestInput,
+        |input: Value,
          state: Option<Value>,
          context: Option<ActionContext>|
          -> Pin<Box<dyn Future<Output = Result<String>> + Send>> {
             Box::pin(async move {
+                let typed_input: TestInput = serde_json::from_value(input).unwrap();
                 let state_name = state
                     .as_ref()
                     .and_then(|s| s.get("name"))
@@ -96,13 +98,16 @@ async fn test_renders_user_prompt_from_function_with_context() -> Result<()> {
                     .and_then(|a| a.get("email"))
                     .and_then(|e| e.as_str())
                     .unwrap_or("");
-                Ok(format!("hello {} ({}, {})", input.name, state_name, email))
+                Ok(format!(
+                    "hello {} ({}, {})",
+                    typed_input.name, state_name, email
+                ))
             })
         },
     );
 
-    let mut context = HashMap::new();
-    context.insert("auth".to_string(), json!({ "email": "a@b.c"}));
+    let mut context_map = HashMap::new();
+    context_map.insert("auth".to_string(), json!({ "email": "a@b.c" }));
 
     test_runner(TestCase {
         name: "renders user prompt from function with context".to_string(),
@@ -120,7 +125,7 @@ async fn test_renders_user_prompt_from_function_with_context() -> Result<()> {
             config: Some(json!({ "temperature": 11 })),
             ..Default::default()
         }),
-        context: Some(context.into()),
+        context: Some(context_map.into()),
         want_text: "Echo: hello foo (bar, a@b.c); config: {\"banana\":\"ripe\",\"temperature\":11}"
             .to_string(),
         want_rendered: json!({
@@ -135,11 +140,12 @@ async fn test_renders_user_prompt_from_function_with_context() -> Result<()> {
 #[tokio::test]
 async fn test_renders_user_prompt_from_function_with_context_as_render_option() -> Result<()> {
     let prompt_fn = Arc::new(
-        |input: TestInput,
+        |input: Value,
          state: Option<Value>,
          context: Option<ActionContext>|
          -> Pin<Box<dyn Future<Output = Result<String>> + Send>> {
             Box::pin(async move {
+                let typed_input: TestInput = serde_json::from_value(input).unwrap();
                 let state_name = state
                     .as_ref()
                     .and_then(|s| s.get("name"))
@@ -151,7 +157,10 @@ async fn test_renders_user_prompt_from_function_with_context_as_render_option() 
                     .and_then(|a| a.get("email"))
                     .and_then(|e| e.as_str())
                     .unwrap_or("");
-                Ok(format!("hello {} ({}, {})", input.name, state_name, email))
+                Ok(format!(
+                    "hello {} ({}, {})",
+                    typed_input.name, state_name, email
+                ))
             })
         },
     );
