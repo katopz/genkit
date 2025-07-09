@@ -223,20 +223,24 @@ where
             None
         };
 
-        let mut final_context = get_context();
-        if let Some(opts_context) = opts.as_ref().and_then(|o| o.context.clone()) {
-            if let Some(ctx) = &mut final_context {
-                ctx.extend(opts_context);
+        let global_context = get_context();
+        let options_context = opts.as_ref().and_then(|o| o.context.clone());
+
+        let mut resolver_context = global_context;
+        if let Some(opts_ctx) = options_context.as_ref() {
+            if let Some(res_ctx) = &mut resolver_context {
+                res_ctx.extend(opts_ctx.clone());
             } else {
-                final_context = Some(opts_context);
+                resolver_context = Some(opts_ctx.clone());
             }
         }
 
         if let Some(data_obj) = render_data.as_object_mut() {
             if let Some(state_val) = state.clone() {
-                data_obj.insert("state".to_string(), state_val);
+                data_obj.insert("state".to_string(), state_val.clone());
+                data_obj.insert("@state".to_string(), state_val);
             }
-            if let Some(context) = &final_context {
+            if let Some(context) = &resolver_context {
                 if let Some(auth_val) = context.get("auth") {
                     data_obj.insert("auth".to_string(), auth_val.clone());
                 }
@@ -248,7 +252,7 @@ where
 
         // System Prompt
         if let Some(resolver) = &self.config.system_fn {
-            let text = resolver(input.clone(), state.clone(), final_context.clone()).await?;
+            let text = resolver(input.clone(), state.clone(), resolver_context.clone()).await?;
             messages.push(MessageData::system(vec![Part::text(text)]));
         } else if let Some(system_template) = &self.config.system {
             let system_text = handlebars
@@ -262,7 +266,7 @@ where
         // Messages
         if let Some(resolver) = &self.config.messages_fn {
             let resolved_messages =
-                resolver(input.clone(), state.clone(), final_context.clone()).await?;
+                resolver(input.clone(), state.clone(), resolver_context.clone()).await?;
             messages.extend(resolved_messages);
         } else if let Some(config_messages) = &self.config.messages {
             messages.extend(config_messages.clone());
@@ -273,7 +277,7 @@ where
 
         // Main User Prompt
         if let Some(resolver) = &self.config.prompt_fn {
-            let text = resolver(input.clone(), state.clone(), final_context.clone()).await?;
+            let text = resolver(input.clone(), state.clone(), resolver_context.clone()).await?;
             messages.push(MessageData::user(vec![Part::text(text)]));
         } else if let Some(prompt_template) = &self.config.prompt {
             let prompt_text = handlebars
@@ -286,7 +290,7 @@ where
 
         // 3. Resolve docs
         let docs = if let Some(docs_fn) = &self.config.docs_fn {
-            docs_fn(input, state, final_context.clone()).await?
+            docs_fn(input, state, resolver_context).await?
         } else {
             self.config.docs.clone().unwrap_or_default()
         };

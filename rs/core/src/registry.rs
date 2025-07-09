@@ -341,11 +341,6 @@ impl Registry {
         name: &str,
         action: A,
     ) -> Result<()> {
-        println!(
-            "Registry::register_action: registering action named `{}` of type {:?}",
-            name,
-            std::any::Any::type_id(&action)
-        );
         let action_arc: Arc<dyn ErasedAction> = Arc::new(action);
         let mut state = self.state.lock().unwrap();
         let meta = action_arc.metadata();

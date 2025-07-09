@@ -23,6 +23,7 @@
 use crate::error::{Error, Result};
 use crate::status::StatusCode;
 use async_trait::async_trait;
+use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::collections::HashMap;
@@ -37,7 +38,7 @@ tokio::task_local! {
 /// This is the Rust equivalent of the `ActionContext` interface in TypeScript.
 /// `serde_json::Value` is used for the `auth` field to maintain flexibility,
 /// and `#[serde(flatten)]` allows for arbitrary additional fields.
-#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, JsonSchema)]
 pub struct ActionContext {
     /// Information about the currently authenticated user if provided.
     #[serde(default, skip_serializing_if = "Option::is_none")]

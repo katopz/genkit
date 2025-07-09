@@ -178,7 +178,6 @@ impl Plugin for EchoModelPlugin {
                                 Role::User | Role::Model => "".to_string(),
                                 _ => format!("{}: ", m.role.to_string().to_lowercase()),
                             };
-                            // In JS, joining parts of a message defaults to a comma.
                             let content = m
                                 .content
                                 .iter()
@@ -189,7 +188,7 @@ impl Plugin for EchoModelPlugin {
                         })
                         .collect();
 
-                    // 2. Join all message strings with a comma, exactly like the TS version.
+                    // 2. Join all parts with a comma, exactly like the TS version.
                     let concatenated_text = all_text_parts.join(",");
 
                     let config_str = serde_json::to_string(&req.config.unwrap_or_default())

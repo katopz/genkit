@@ -128,7 +128,7 @@ pub struct GenerateOptions<O = Value> {
     #[serde(skip)]
     pub r#use: Option<Vec<ModelMiddleware>>,
     /// Additional context (data, like e.g. auth) to be passed down to tools, prompts and other sub actions.
-    #[serde(skip)]
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub context: Option<ActionContext>,
     /// When provided, models supporting streaming will call this callback with chunks.
     #[serde(skip)]
