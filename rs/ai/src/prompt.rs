@@ -246,6 +246,14 @@ where
         input: I,
         opts: Option<PromptGenerateOptions<O>>,
     ) -> Result<GenerateOptions<O>> {
+        if (self.config.prompt.is_some() || self.config.prompt_fn.is_some())
+            && (self.config.messages.is_some() || self.config.messages_fn.is_some())
+        {
+            return Err(Error::new_internal(
+                "Prompt cannot have both `prompt` and `messages` fields defined.",
+            ));
+        }
+
         let mut handlebars = Handlebars::new();
         // Allow missing fields to match JS behavior (e.g. {{foo}} is ok if foo is not provided)
         handlebars.set_strict_mode(false);

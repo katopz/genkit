@@ -69,7 +69,7 @@ async fn test_calls_prompt_with_default_model(#[future] genkit_instance: Arc<Gen
 
 #[rstest]
 #[tokio::test]
-/// 'calls legacy prompt with default model'
+/// 'calls legacy prompt with default model via function'
 async fn test_calls_legacy_prompt_with_default_model(#[future] genkit_instance: Arc<Genkit>) {
     let genkit = genkit_instance.await;
 
@@ -107,7 +107,7 @@ async fn test_calls_legacy_prompt_with_default_model(#[future] genkit_instance: 
 
 #[rstest]
 #[tokio::test]
-/// 'calls legacy prompt with string shorthand'
+/// 'calls legacy prompt with default model'
 async fn test_calls_legacy_prompt_with_string_shorthand(#[future] genkit_instance: Arc<Genkit>) {
     let genkit = genkit_instance.await;
 
@@ -132,6 +132,43 @@ async fn test_calls_legacy_prompt_with_string_shorthand(#[future] genkit_instanc
         .unwrap();
 
     assert_eq!(response.text().unwrap(), "Echo: hi Genkit; config: {}");
+}
+
+#[rstest]
+#[tokio::test]
+/// 'throws on prompt with both template and messages'
+async fn test_throws_on_conflicting_fields(#[future] genkit_instance: Arc<Genkit>) {
+    let genkit = genkit_instance.await;
+
+    let hi_prompt = genkit
+        .define_prompt::<TestInput, Value, Value>(PromptConfig {
+            name: "hi_conflicting_test".to_string(),
+            // Both `prompt` and `messages` are defined, which should cause an error.
+            prompt: Some("hi {{name}}".to_string()),
+            messages: Some(vec![MessageData {
+                role: Role::User,
+                content: vec![Part::text("this should not be allowed")],
+                ..Default::default()
+            }]),
+            ..Default::default()
+        })
+        .await;
+
+    let result = hi_prompt
+        .generate(
+            TestInput {
+                name: "Genkit".to_string(),
+            },
+            None,
+        )
+        .await;
+
+    assert!(result.is_err());
+    let err = result.unwrap_err();
+    assert_eq!(
+        err.to_string(),
+        "INTERNAL: Prompt cannot have both `prompt` and `messages` fields defined."
+    );
 }
 
 use serde_json::json;
