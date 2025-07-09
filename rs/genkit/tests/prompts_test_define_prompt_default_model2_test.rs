@@ -136,8 +136,6 @@ async fn test_calls_legacy_prompt_with_string_shorthand(#[future] genkit_instanc
 
 use serde_json::json;
 
-// ...
-
 #[rstest]
 #[tokio::test]
 /// 'calls prompt with default model with config'
@@ -175,4 +173,48 @@ async fn test_calls_prompt_with_default_model_and_config(#[future] genkit_instan
         response.text().unwrap(),
         "Echo: hi Genkit; config: {\"temperature\":11}"
     );
+}
+
+#[rstest]
+#[tokio::test]
+/// 'calls prompt with default model via retrieved prompt'
+async fn test_calls_prompt_with_default_model_via_retrieved_prompt(
+    #[future] genkit_instance: Arc<Genkit>,
+) {
+    let genkit = genkit_instance.await;
+
+    genkit
+        .define_prompt::<TestInput, Value, Value>(PromptConfig {
+            name: "hi_retrieved_default_model2_test".to_string(),
+            messages_fn: Some(Arc::new(|input, _state, _context| {
+                Box::pin(async move {
+                    Ok(vec![MessageData {
+                        role: Role::User,
+                        content: vec![Part::text(format!("hi {}", input.name))],
+                        ..Default::default()
+                    }])
+                })
+            })),
+            ..Default::default()
+        })
+        .await;
+
+    let hi_prompt = genkit_ai::prompt::prompt::<TestInput, Value, Value>(
+        genkit.registry(),
+        "hi_retrieved_default_model2_test",
+    )
+    .await
+    .unwrap();
+
+    let response = hi_prompt
+        .generate(
+            TestInput {
+                name: "Genkit".to_string(),
+            },
+            None,
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(response.text().unwrap(), "Echo: hi Genkit; config: {}");
 }
