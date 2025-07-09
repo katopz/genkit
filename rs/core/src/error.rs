@@ -39,7 +39,7 @@ pub enum Error {
     /// An internal framework error. Details of this error should generally not
     /// be exposed to external users to avoid leaking implementation details.
     /// This is the equivalent of the base `GenkitError` in TypeScript.
-    #[error("Internal error: {message}")]
+    #[error("INTERNAL: {message}")]
     Internal {
         message: String,
         #[source]

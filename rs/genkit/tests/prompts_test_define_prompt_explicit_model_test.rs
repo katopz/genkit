@@ -233,3 +233,35 @@ async fn test_calls_prompt_with_default_model_and_config(#[future] genkit_instan
         "Echo: hi Genkit; config: {\"temperature\":11}"
     );
 }
+
+#[rstest]
+#[tokio::test]
+/// 'rejects on invalid model'
+async fn test_rejects_on_invalid_model(#[future] genkit_instance: Arc<Genkit>) {
+    let genkit = genkit_instance.await;
+
+    let hi_prompt = genkit
+        .define_prompt::<TestInput, Value, Value>(PromptConfig {
+            name: "hi_invalid_model_test".to_string(),
+            model: Some(Model::Name("modelThatDoesNotExist".to_string())),
+            prompt: Some("hi {{name}}".to_string()),
+            ..Default::default()
+        })
+        .await;
+
+    let result = hi_prompt
+        .generate(
+            TestInput {
+                name: "Genkit".to_string(),
+            },
+            None,
+        )
+        .await;
+
+    assert!(result.is_err());
+    let err = result.unwrap_err();
+    assert_eq!(
+        err.to_string(),
+        "INTERNAL: Model 'modelThatDoesNotExist' not found"
+    );
+}
