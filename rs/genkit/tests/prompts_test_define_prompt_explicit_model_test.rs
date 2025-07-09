@@ -201,3 +201,35 @@ async fn test_streams_prompt_with_history(#[future] genkit_instance: Arc<Genkit>
         ])
     );
 }
+
+#[rstest]
+#[tokio::test]
+/// 'calls dotprompt with default model with config'
+async fn test_calls_prompt_with_default_model_and_config(#[future] genkit_instance: Arc<Genkit>) {
+    let genkit = genkit_instance.await;
+
+    let hi_prompt = genkit
+        .define_prompt::<TestInput, Value, Value>(PromptConfig {
+            name: "hi_explicit_model_with_config_test".to_string(),
+            model: Some(Model::Name("echoModel".to_string())),
+            prompt: Some("hi {{name}}".to_string()),
+            config: Some(json!({ "temperature": 11 })),
+            ..Default::default()
+        })
+        .await;
+
+    let response = hi_prompt
+        .generate(
+            TestInput {
+                name: "Genkit".to_string(),
+            },
+            None,
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(
+        response.text().unwrap(),
+        "Echo: hi Genkit; config: {\"temperature\":11}"
+    );
+}
