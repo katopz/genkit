@@ -14,8 +14,9 @@
 
 use genkit_ai::{
     document::{Part, ToolRequest, ToolResponse},
-    tool::{define_interrupt, define_tool, Resumable, ToolAction, ToolConfig},
+    tool::{define_interrupt, define_tool, InterruptConfig, Resumable, ToolAction, ToolConfig},
 };
+use genkit_core::error::Result;
 use genkit_core::{
     error::Error,
     registry::{ErasedAction, Registry},
@@ -23,8 +24,8 @@ use genkit_core::{
 use rstest::{fixture, rstest};
 use schemars::{schema_for, JsonSchema};
 use serde::{Deserialize, Serialize};
-use serde_json::json;
-use std::sync::Arc;
+use serde_json::{json, Value};
+use std::{fmt::Debug, future::Future, pin::Pin, sync::Arc};
 
 #[fixture]
 fn registry() -> Registry {
@@ -56,26 +57,10 @@ struct TestOutput {
     foo: String,
 }
 
-#[rstest]
-#[tokio::test]
-async fn test_define_interrupt_throws_interrupt(mut registry: Registry) {
-    define_interrupt::<(), ()>(
-        &mut registry,
-        ToolConfig {
-            name: "simple".to_string(),
-            description: "simple interrupt".to_string(),
-            ..Default::default()
-        },
-    );
-
-    let tool = get_tool_action::<(), (), ()>(&registry, "simple").await;
-    let result = tool.run((), None).await;
-
+async fn assert_interrupt(result: Result<impl Serialize + Debug>, expected_metadata: &str) {
     assert!(result.is_err());
     if let Err(Error::Internal { message, .. }) = result {
-        // The runner for `define_interrupt` calls the interrupt function with `None`,
-        // which serializes to the string "null".
-        assert_eq!(message, "INTERRUPT::null");
+        assert_eq!(message, format!("INTERRUPT::{}", expected_metadata));
     } else {
         panic!(
             "Expected an internal error for interrupt, but got {:?}",
@@ -86,10 +71,101 @@ async fn test_define_interrupt_throws_interrupt(mut registry: Registry) {
 
 #[rstest]
 #[tokio::test]
-async fn test_define_interrupt_registers_output_schema(mut registry: Registry) {
+/// Corresponds to: it('should throw a simple interrupt with no metadata', ...)
+async fn test_interrupt_with_no_metadata(mut registry: Registry) {
+    define_interrupt::<(), ()>(
+        &mut registry,
+        InterruptConfig {
+            name: "simple".to_string(),
+            description: "simple interrupt".to_string(),
+            ..Default::default()
+        },
+    );
+
+    let tool = get_tool_action::<(), (), ()>(&registry, "simple").await;
+    let result = tool.run((), None).await;
+    assert_interrupt(result, "null").await;
+}
+
+#[rstest]
+#[tokio::test]
+/// Corresponds to: it('should throw a simple interrupt with fixed metadata', ...)
+async fn test_interrupt_with_fixed_metadata(mut registry: Registry) {
+    let factory = Arc::new(|_: ()| {
+        Box::pin(async { Some(json!({ "foo": "bar" })) })
+            as Pin<Box<dyn Future<Output = Option<Value>> + Send>>
+    });
+    define_interrupt::<(), ()>(
+        &mut registry,
+        InterruptConfig {
+            name: "simple".to_string(),
+            description: "simple interrupt".to_string(),
+            request_metadata_factory: Some(factory),
+            ..Default::default()
+        },
+    );
+    let tool = get_tool_action::<(), (), ()>(&registry, "simple").await;
+    let result = tool.run((), None).await;
+    assert_interrupt(result, r#"{"foo":"bar"}"#).await;
+}
+
+#[rstest]
+#[tokio::test]
+/// Corresponds to: it('should throw a simple interrupt with function-returned metadata', ...)
+async fn test_interrupt_with_function_metadata(mut registry: Registry) {
+    let factory = Arc::new(|input: String| {
+        Box::pin(async move { Some(json!({ "foo": input })) })
+            as Pin<Box<dyn Future<Output = Option<Value>> + Send>>
+    });
+
+    define_interrupt::<String, ()>(
+        &mut registry,
+        InterruptConfig {
+            name: "simple".to_string(),
+            description: "simple interrupt".to_string(),
+            input_schema: Some("".to_string()),
+            request_metadata_factory: Some(factory),
+            ..Default::default()
+        },
+    );
+    let tool = get_tool_action::<String, (), ()>(&registry, "simple").await;
+    let result = tool.run("bar".to_string(), None).await;
+    assert_interrupt(result, r#"{"foo":"bar"}"#).await;
+}
+
+#[rstest]
+#[tokio::test]
+/// Corresponds to: it('should throw a simple interrupt with async function-returned metadata', ...)
+async fn test_interrupt_with_async_function_metadata(mut registry: Registry) {
+    // The implementation is identical to the sync version because the factory
+    // already returns a Future.
+    let factory = Arc::new(|input: String| {
+        Box::pin(async move { Some(json!({ "foo": input })) })
+            as Pin<Box<dyn Future<Output = Option<Value>> + Send>>
+    });
+
+    define_interrupt::<String, ()>(
+        &mut registry,
+        InterruptConfig {
+            name: "simple".to_string(),
+            description: "simple interrupt".to_string(),
+            input_schema: Some("".to_string()),
+            request_metadata_factory: Some(factory),
+            ..Default::default()
+        },
+    );
+    let tool = get_tool_action::<String, (), ()>(&registry, "simple").await;
+    let result = tool.run("bar".to_string(), None).await;
+    assert_interrupt(result, r#"{"foo":"bar"}"#).await;
+}
+
+#[rstest]
+#[tokio::test]
+/// Corresponds to: it('should register the reply schema / json schema as the output schema of the tool', ...)
+async fn test_interrupt_registers_output_schema(mut registry: Registry) {
     define_interrupt::<(), TestOutput>(
         &mut registry,
-        ToolConfig {
+        InterruptConfig {
             name: "simple".to_string(),
             description: "simple".to_string(),
             output_schema: Some(TestOutput {
@@ -108,6 +184,7 @@ async fn test_define_interrupt_registers_output_schema(mut registry: Registry) {
 
 #[rstest]
 #[tokio::test]
+/// Corresponds to: .respond() -> 'constructs a ToolResponsePart'
 async fn test_respond_constructs_tool_response_part(mut registry: Registry) {
     define_tool(
         &mut registry,
@@ -145,6 +222,7 @@ async fn test_respond_constructs_tool_response_part(mut registry: Registry) {
 
 #[rstest]
 #[tokio::test]
+/// Corresponds to: .respond() -> 'includes metadata'
 async fn test_respond_includes_metadata(mut registry: Registry) {
     define_tool(
         &mut registry,
@@ -186,6 +264,7 @@ async fn test_respond_includes_metadata(mut registry: Registry) {
 
 #[rstest]
 #[tokio::test]
+/// Corresponds to: .respond() -> 'validates schema'
 async fn test_respond_validates_schema(mut registry: Registry) {
     #[derive(Default, JsonSchema, Serialize, Deserialize, Debug, PartialEq)]
     struct MyNumber(i32);
@@ -210,9 +289,6 @@ async fn test_respond_validates_schema(mut registry: Registry) {
         ..Default::default()
     };
 
-    // The Rust `respond` method is strongly typed, so we can't pass invalid data
-    // in the same way the TypeScript test does with `as any`.
-    // Instead, we confirm that valid data passes the schema check inside `respond`.
     let valid_response = tool.respond(&request_part, MyNumber(55), None).unwrap();
     let expected = Part {
         tool_response: Some(ToolResponse {
@@ -228,6 +304,7 @@ async fn test_respond_validates_schema(mut registry: Registry) {
 
 #[rstest]
 #[tokio::test]
+/// Corresponds to: .restart() -> 'constructs a ToolRequestPart'
 async fn test_restart_constructs_tool_request_part(mut registry: Registry) {
     define_tool(
         &mut registry,
@@ -264,6 +341,7 @@ async fn test_restart_constructs_tool_request_part(mut registry: Registry) {
 
 #[rstest]
 #[tokio::test]
+/// Corresponds to: .restart() -> 'includes metadata'
 async fn test_restart_includes_metadata(mut registry: Registry) {
     define_tool(
         &mut registry,
@@ -301,6 +379,7 @@ async fn test_restart_includes_metadata(mut registry: Registry) {
 
 #[rstest]
 #[tokio::test]
+/// Corresponds to: .restart() -> 'validates schema'
 async fn test_restart_validates_schema(mut registry: Registry) {
     #[derive(Default, Clone, JsonSchema, Serialize, Deserialize, Debug, PartialEq)]
     struct ValidatedInput {

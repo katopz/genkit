@@ -256,7 +256,6 @@ impl From<Arc<dyn ErasedAction>> for ToolArgument {
 }
 
 /// Configuration for defining a tool.
-/// Configuration for defining a tool.
 #[derive(Default, JsonSchema)]
 pub struct ToolConfig<I = (), O = ()> {
     pub name: String,
@@ -306,8 +305,34 @@ where
     registry.register_action(&config.name, tool_action).unwrap();
 }
 
+/// A factory for producing metadata for an interrupt.
+/// This is a boxed, clonable, async closure that takes the tool's input.
+pub type InterruptMetadataFactory<I> =
+    Arc<dyn Fn(I) -> Pin<Box<dyn Future<Output = Option<Value>> + Send>> + Send + Sync>;
+
 /// Configuration for an interrupt.
-pub type InterruptConfig<I, O> = ToolConfig<I, O>;
+pub struct InterruptConfig<I = (), O = ()> {
+    pub name: String,
+    pub description: String,
+    pub input_schema: Option<I>,
+    pub output_schema: Option<O>,
+    pub metadata: Option<Value>,
+    /// A factory to dynamically generate metadata for the interrupt from the tool's input.
+    pub request_metadata_factory: Option<InterruptMetadataFactory<I>>,
+}
+
+impl<I, O> Default for InterruptConfig<I, O> {
+    fn default() -> Self {
+        Self {
+            name: Default::default(),
+            description: Default::default(),
+            input_schema: Default::default(),
+            output_schema: Default::default(),
+            metadata: Default::default(),
+            request_metadata_factory: Default::default(),
+        }
+    }
+}
 
 /// Defines a tool that interrupts the flow to wait for user input.
 pub fn define_interrupt<I, O>(registry: &mut Registry, config: InterruptConfig<I, O>)
@@ -315,9 +340,29 @@ where
     I: JsonSchema + Serialize + DeserializeOwned + Send + Sync + Clone + 'static,
     O: JsonSchema + Serialize + DeserializeOwned + Send + Sync + 'static,
 {
-    define_tool(registry, config, |_, ctx: ToolFnOptions| async move {
-        Err((ctx.interrupt)(None))
-    });
+    let tool_config = ToolConfig {
+        name: config.name,
+        description: config.description,
+        input_schema: config.input_schema,
+        output_schema: config.output_schema,
+        metadata: config.metadata,
+    };
+    let factory = config.request_metadata_factory;
+    define_tool(
+        registry,
+        tool_config,
+        move |input: I, ctx: ToolFnOptions| {
+            let factory = factory.clone();
+            async move {
+                let metadata = if let Some(f) = factory {
+                    f(input).await
+                } else {
+                    None
+                };
+                Err((ctx.interrupt)(metadata))
+            }
+        },
+    );
 }
 
 /// Represents a tool definition that is not yet registered with the framework.
