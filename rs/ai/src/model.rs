@@ -397,12 +397,13 @@ fn get_model_middleware(options: &DefineModelOptions) -> Vec<ModelMiddleware> {
         middleware.push(middleware::simulate_system_prompt(None));
     }
 
-    middleware.push(middleware::augment_with_context(None));
+    if supports.context != Some(true) {
+        middleware.push(middleware::augment_with_context(None));
+    }
     middleware.push(middleware::simulate_constrained_generation(None));
 
     middleware
 }
-
 pub fn define_model<F, Fut>(
     registry: &mut genkit_core::Registry,
     options: DefineModelOptions,

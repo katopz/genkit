@@ -170,7 +170,7 @@ impl Plugin for EchoModelPlugin {
                     }
 
                     // 1. Collect all message parts into a vector of strings.
-                    let mut all_text_parts: Vec<String> = req
+                    let all_text_parts: Vec<String> = req
                         .messages
                         .iter()
                         .map(|m| {
@@ -178,39 +178,24 @@ impl Plugin for EchoModelPlugin {
                                 Role::User | Role::Model => "".to_string(),
                                 _ => format!("{}: ", m.role.to_string().to_lowercase()),
                             };
+                            // In JS, joining parts of a message defaults to a comma.
                             let content = m
                                 .content
                                 .iter()
                                 .map(|p| p.text.as_deref().unwrap_or(""))
                                 .collect::<Vec<_>>()
-                                .join("");
+                                .join(",");
                             format!("{}{}", prefix, content)
                         })
                         .collect();
 
-                    // 2. If docs exist, format them as a single string block and add it as one item.
-                    if let Some(docs) = &req.docs {
-                        if !docs.is_empty() {
-                            let doc_lines: Vec<String> = docs
-                                .iter()
-                                .enumerate()
-                                .map(|(i, d)| format!("- [{}]: {}", i, d.text()))
-                                .collect();
-                            let docs_block = format!(
-                                "\n\nUse the following information to complete your task:\n\n{}\n",
-                                doc_lines.join("\n")
-                            );
-                            all_text_parts.push(docs_block);
-                        }
-                    }
-
-                    // 3. Join all parts with a comma, exactly like the TS version.
+                    // 2. Join all message strings with a comma, exactly like the TS version.
                     let concatenated_text = all_text_parts.join(",");
 
                     let config_str = serde_json::to_string(&req.config.unwrap_or_default())
                         .unwrap_or_else(|_| "null".to_string());
 
-                    // 4. Construct the final response string.
+                    // 3. Construct the final response string.
                     let response_text = format!("Echo: {}", concatenated_text);
                     let config_text = format!("; config: {}", config_str);
 

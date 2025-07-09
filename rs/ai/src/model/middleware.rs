@@ -271,15 +271,21 @@ fn default_item_template(
 }
 
 /// Injects retrieved documents as context into the last user message.
+// Injects retrieved documents as context into the last user message.
 pub fn augment_with_context(options: Option<AugmentWithContextOptions>) -> ModelMiddleware {
     let opts = Arc::new(options.unwrap_or_default());
     Arc::new(
         move |mut req: GenerateRequest, next: ModelMiddlewareNext<'_>| {
             let opts = Arc::clone(&opts);
             Box::pin(async move {
-                let docs = match req.docs.as_ref() {
+                let taken_docs = req.docs.take();
+
+                let docs = match taken_docs.as_ref() {
                     Some(d) if !d.is_empty() => d,
-                    _ => return next(req).await,
+                    _ => {
+                        req.docs = taken_docs; // Put it back
+                        return next(req).await;
+                    }
                 };
 
                 if let Some(user_message) = req
@@ -302,6 +308,7 @@ pub fn augment_with_context(options: Option<AugmentWithContextOptions>) -> Model
                             .and_then(|v| v.as_bool())
                             .unwrap_or(false);
                         if !is_pending {
+                            req.docs = taken_docs; // Put it back
                             return next(req).await;
                         }
                     }
