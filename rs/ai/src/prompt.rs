@@ -24,7 +24,8 @@ use crate::generate::{
     GenerateStreamResponse, OutputOptions,
 };
 use crate::message::MessageData;
-use crate::model::{GenerateRequest, Model};
+use crate::model::{middleware::ModelMiddleware, GenerateRequest, Model};
+
 use crate::tool::ToolArgument;
 use genkit_core::action::{Action, ActionBuilder};
 use genkit_core::context::{get_context, ActionContext};
@@ -152,14 +153,46 @@ where
 }
 
 /// Options for generating a response from a prompt.
-#[derive(Clone, Default, Debug, Serialize, Deserialize)]
+#[derive(Default, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct PromptGenerateOptions<O = Value> {
     pub config: Option<Value>,
     pub messages: Option<Vec<MessageData>>,
     pub output: Option<OutputOptions>,
     pub context: Option<ActionContext>,
+    /// Middleware to be used with this model call.
+    #[serde(skip)]
+    pub r#use: Option<Vec<ModelMiddleware>>,
+    #[serde(skip)]
     pub _marker: std::marker::PhantomData<O>,
+}
+
+// Manual Clone implementation because ModelMiddleware is not derived.
+impl<O> Clone for PromptGenerateOptions<O> {
+    fn clone(&self) -> Self {
+        Self {
+            config: self.config.clone(),
+            messages: self.messages.clone(),
+            output: self.output.clone(),
+            context: self.context.clone(),
+            r#use: self.r#use.clone(),
+            _marker: self._marker,
+        }
+    }
+}
+
+// Manual Debug implementation because ModelMiddleware (Arc<dyn Fn(...)>) is not Debug.
+impl<O> fmt::Debug for PromptGenerateOptions<O> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("PromptGenerateOptions")
+            .field("config", &self.config)
+            .field("messages", &self.messages)
+            .field("output", &self.output)
+            .field("context", &self.context)
+            .field("use", &self.r#use.as_ref().map(|v| v.len())) // Print length instead of the functions
+            .field("_marker", &self._marker)
+            .finish()
+    }
 }
 
 /// A prompt that can be executed as a function.
@@ -324,7 +357,8 @@ where
             docs: if docs.is_empty() { None } else { Some(docs) },
             config: final_config,
             output: self.config.output.clone(),
-            context: opts.and_then(|o| o.context),
+            context: opts.as_ref().and_then(|o| o.context.clone()),
+            r#use: opts.and_then(|o| o.r#use),
             ..Default::default()
         };
 
