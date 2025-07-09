@@ -53,11 +53,11 @@ name = "extract_test"
 path = "tests/extract_test.rs"
 
 [[test]]
-name = "formats"
-path = "tests/formats/formats.rs"
+name = "formats_test"
+path = "tests/formats/formats_test.rs"
 
 [[test]]
-name = "message"
+name = "message_test"
 path = "tests/message/message_test.rs"
 
 [[test]]
@@ -77,5 +77,9 @@ name = "model"
 path = "tests/model/middleware_test.rs"
 
 [[test]]
-name = "generate"
-path = "tests/generate/generate.rs"
+name = "generate_test"
+path = "tests/generate/generate_test.rs"
+
+[[test]]
+name = "reranker_test"
+path = "tests/reranker/reranker_test.rs"
