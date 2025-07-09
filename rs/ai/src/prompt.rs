@@ -302,15 +302,15 @@ where
         }
 
         // Messages
+        if let Some(opts_messages) = opts.as_ref().and_then(|o| o.messages.as_ref()) {
+            messages.extend(opts_messages.clone());
+        }
         if let Some(resolver) = &self.config.messages_fn {
             let resolved_messages =
                 resolver(input.clone(), state.clone(), resolver_context.clone()).await?;
             messages.extend(resolved_messages);
         } else if let Some(config_messages) = &self.config.messages {
             messages.extend(config_messages.clone());
-        }
-        if let Some(opts_messages) = opts.as_ref().and_then(|o| o.messages.as_ref()) {
-            messages.extend(opts_messages.clone());
         }
 
         // Main User Prompt

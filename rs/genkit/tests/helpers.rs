@@ -235,18 +235,15 @@ impl Plugin for EchoModelPlugin {
                     "{}".to_string()
                 };
 
-                let last_msg = req
+                let all_text = req
                     .messages
-                    .last()
-                    .ok_or_else(|| genkit::error::Error::new_internal("No message found"))?;
-                let default_string = "".to_string();
-                let prompt_text = last_msg
-                    .content
-                    .first()
-                    .and_then(|p| p.text.as_ref())
-                    .unwrap_or(&default_string);
+                    .iter()
+                    .flat_map(|m| &m.content)
+                    .filter_map(|p| p.text.as_deref())
+                    .collect::<Vec<_>>()
+                    .join("");
 
-                let text = format!("Echo: {}; config: {}", prompt_text, config_str);
+                let text = format!("Echo: {}; config: {}", all_text, config_str);
 
                 Ok(GenerateResponseData {
                     candidates: vec![CandidateData {

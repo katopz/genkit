@@ -14,11 +14,14 @@
 
 mod helpers;
 
+use genkit::prompt::PromptGenerateOptions;
 use genkit::{model::Model, prompt::PromptConfig, Genkit};
+use genkit::{Part, Role};
+use genkit_ai::MessageData;
 use rstest::{fixture, rstest};
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
-use serde_json::Value;
+use serde_json::{json, to_value, Value};
 use std::sync::Arc;
 
 #[derive(Serialize, Deserialize, JsonSchema, Debug, Clone, Default)]
@@ -33,8 +36,8 @@ async fn genkit_instance() -> Arc<Genkit> {
 
 #[rstest]
 #[tokio::test]
-/// 'calls dotprompt with explicit model'
-async fn test_calls_prompt_with_explicit_model(#[future] genkit_instance: Arc<Genkit>) {
+/// 'calls dotprompt with default model'
+async fn test_calls_prompt_with_default_model(#[future] genkit_instance: Arc<Genkit>) {
     let genkit = genkit_instance.await;
 
     let hi_prompt = genkit
@@ -57,4 +60,70 @@ async fn test_calls_prompt_with_explicit_model(#[future] genkit_instance: Arc<Ge
         .unwrap();
 
     assert_eq!(response.text().unwrap(), "Echo: hi Genkit; config: {}");
+}
+
+#[rstest]
+#[tokio::test]
+/// 'calls dotprompt with history and places it before user message'
+async fn test_calls_prompt_with_history(#[future] genkit_instance: Arc<Genkit>) {
+    let genkit = genkit_instance.await;
+
+    let hi_prompt = genkit
+        .define_prompt::<TestInput, Value, Value>(PromptConfig {
+            name: "hi_with_history_test".to_string(),
+            model: Some(Model::Name("echoModel".to_string())),
+            prompt: Some("hi {{name}}".to_string()),
+            ..Default::default()
+        })
+        .await;
+
+    let history = vec![
+        MessageData {
+            role: Role::User,
+            content: vec![Part::text("hi")],
+            ..Default::default()
+        },
+        MessageData {
+            role: Role::Model,
+            content: vec![Part::text("bye")],
+            ..Default::default()
+        },
+    ];
+
+    let response = hi_prompt
+        .generate(
+            TestInput {
+                name: "Genkit".to_string(),
+            },
+            Some(PromptGenerateOptions {
+                messages: Some(history.clone()),
+                ..Default::default()
+            }),
+        )
+        .await
+        .unwrap();
+
+    let actual_messages = response.messages().unwrap();
+
+    assert_eq!(
+        to_value(&actual_messages).unwrap(),
+        json!([
+            {
+                "role": "user",
+                "content": [{"text": "hi"}]
+            },
+            {
+                "role": "model",
+                "content": [{"text": "bye"}]
+            },
+            {
+                "role": "user",
+                "content": [{"text": "hi Genkit"}]
+            },
+            {
+                "role": "model",
+                "content": [{"text": "Echo: hibyehi Genkit; config: {}"}]
+            }
+        ])
+    );
 }
