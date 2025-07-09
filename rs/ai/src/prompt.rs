@@ -30,7 +30,7 @@ use crate::tool::ToolArgument;
 use genkit_core::action::{Action, ActionBuilder};
 use genkit_core::context::{get_context, ActionContext};
 use genkit_core::error::{Error, Result};
-use genkit_core::registry::{ActionType, ErasedAction, Registry};
+use genkit_core::registry::{ActionType, Registry};
 use handlebars::Handlebars;
 use schemars::{self, JsonSchema};
 use serde::{de::DeserializeOwned, Deserialize, Serialize};

@@ -13,15 +13,13 @@
 //! limitations under the License.
 
 mod helpers;
+mod prompts_helpers;
 
 use genkit::Genkit;
 use genkit_ai::{
     define_prompt,
     message::{MessageData, Role},
-    model::{
-        middleware::{BoxFuture, ModelMiddleware, ModelMiddlewareNext},
-        GenerateRequest,
-    },
+    model::GenerateRequest,
     prompt::{PromptConfig, PromptGenerateOptions},
     Part,
 };
@@ -34,59 +32,6 @@ use std::sync::{Arc, Mutex};
 #[fixture]
 async fn genkit_instance_for_test() -> (Arc<Genkit>, Arc<Mutex<Option<GenerateRequest>>>) {
     helpers::genkit_instance_for_test().await
-}
-
-// Middleware that wraps the request message text in parentheses.
-fn wrap_request() -> ModelMiddleware {
-    Arc::new(
-        |req: GenerateRequest,
-         next: ModelMiddlewareNext<'_>|
-         -> BoxFuture<'_, genkit::error::Result<genkit_ai::GenerateResponseData>> {
-            Box::pin(async move {
-                let all_text = req
-                    .messages
-                    .iter()
-                    .flat_map(|m| &m.content)
-                    .filter_map(|p| p.text.as_deref())
-                    .collect::<Vec<_>>()
-                    .join(",");
-
-                let mut new_req = req;
-                new_req.messages = vec![MessageData::user(vec![Part::text(format!(
-                    "({})",
-                    all_text
-                ))])];
-
-                next(new_req).await
-            })
-        },
-    )
-}
-
-// Middleware that wraps the response message text in square brackets.
-fn wrap_response() -> ModelMiddleware {
-    Arc::new(
-        |req: GenerateRequest,
-         next: ModelMiddlewareNext<'_>|
-         -> BoxFuture<'_, genkit::error::Result<genkit_ai::GenerateResponseData>> {
-            Box::pin(async move {
-                let mut res = next(req).await?;
-
-                if let Some(candidate) = res.candidates.get_mut(0) {
-                    let all_text = candidate
-                        .message
-                        .content
-                        .iter()
-                        .filter_map(|p| p.text.as_deref())
-                        .collect::<Vec<_>>()
-                        .join(",");
-                    candidate.message.content = vec![Part::text(format!("[{}]", all_text))];
-                }
-
-                Ok(res)
-            })
-        },
-    )
 }
 
 #[derive(Serialize, Deserialize, JsonSchema, Clone, Default)]
@@ -118,7 +63,10 @@ async fn test_should_apply_middleware_to_a_prompt_call(
         define_prompt::<HiInput, Value, Value>(&mut genkit.registry().clone(), prompt_config);
 
     let opts = PromptGenerateOptions {
-        r#use: Some(vec![wrap_request(), wrap_response()]),
+        r#use: Some(vec![
+            prompts_helpers::wrap_request(),
+            prompts_helpers::wrap_response(),
+        ]),
         ..Default::default()
     };
 
@@ -144,7 +92,10 @@ async fn test_should_apply_middleware_configured_on_prompt(
 
     let prompt_config = PromptConfig {
         name: "hi_with_middleware".to_string(),
-        r#use: Some(vec![wrap_request(), wrap_response()]),
+        r#use: Some(vec![
+            prompts_helpers::wrap_request(),
+            prompts_helpers::wrap_response(),
+        ]),
         messages_fn: Some(Arc::new(|input: HiInput, _, _| {
             Box::pin(async move {
                 Ok(vec![MessageData {
@@ -181,7 +132,10 @@ async fn test_should_apply_middleware_to_a_looked_up_prompt(
 
     let prompt_config = PromptConfig {
         name: "hi_lookup".to_string(),
-        r#use: Some(vec![wrap_request(), wrap_response()]),
+        r#use: Some(vec![
+            prompts_helpers::wrap_request(),
+            prompts_helpers::wrap_response(),
+        ]),
         messages_fn: Some(Arc::new(|input: HiInput, _, _| {
             Box::pin(async move {
                 Ok(vec![MessageData {
@@ -243,7 +197,10 @@ async fn test_should_apply_middleware_to_a_prompt_call_on_a_looked_up_prompt(
     .unwrap();
 
     let opts = PromptGenerateOptions {
-        r#use: Some(vec![wrap_request(), wrap_response()]),
+        r#use: Some(vec![
+            prompts_helpers::wrap_request(),
+            prompts_helpers::wrap_response(),
+        ]),
         ..Default::default()
     };
 

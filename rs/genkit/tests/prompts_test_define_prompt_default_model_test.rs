@@ -13,13 +13,19 @@
 //! limitations under the License.
 
 mod helpers;
+mod prompts_helpers;
 
-use genkit::{prompt::PromptConfig, Genkit};
+use genkit::{
+    prompt::{PromptConfig, PromptGenerateOptions},
+    Genkit,
+};
 use rstest::{fixture, rstest};
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use std::sync::Arc;
+
+use crate::prompts_helpers::{wrap_request, wrap_response};
 
 #[derive(Serialize, Deserialize, JsonSchema, Debug, Clone, Default)]
 struct TestInput {
@@ -33,6 +39,7 @@ async fn genkit_instance() -> Arc<Genkit> {
 
 #[rstest]
 #[tokio::test]
+/// 'calls dotprompt with default model'
 async fn test_calls_prompt_with_default_model(#[future] genkit_instance: Arc<Genkit>) {
     let genkit = genkit_instance.await;
 
@@ -59,6 +66,7 @@ async fn test_calls_prompt_with_default_model(#[future] genkit_instance: Arc<Gen
 
 #[rstest]
 #[tokio::test]
+/// 'calls dotprompt with default model with config'
 async fn test_calls_prompt_with_default_model_and_config(#[future] genkit_instance: Arc<Genkit>) {
     let genkit = genkit_instance.await;
 
@@ -89,6 +97,7 @@ async fn test_calls_prompt_with_default_model_and_config(#[future] genkit_instan
 
 #[rstest]
 #[tokio::test]
+/// 'calls dotprompt with default model via retrieved prompt'
 async fn test_calls_prompt_with_default_model_via_retrieved_prompt(
     #[future] genkit_instance: Arc<Genkit>,
 ) {
@@ -113,10 +122,43 @@ async fn test_calls_prompt_with_default_model_via_retrieved_prompt(
             TestInput {
                 name: "Genkit".to_string(),
             },
-            None,
+            Some(PromptGenerateOptions {
+                r#use: Some(vec![wrap_request(), wrap_response()]),
+                ..Default::default()
+            }),
         )
         .await
         .unwrap();
 
-    assert_eq!(response.text().unwrap(), "Echo: hi Genkit; config: {}");
+    assert_eq!(response.text().unwrap(), "[Echo: (hi Genkit); config: {}]");
+}
+
+#[rstest]
+#[tokio::test]
+/// 'should apply middleware to a prompt call'
+async fn test_should_apply_middleware_to_a_prompt_call(#[future] genkit_instance: Arc<Genkit>) {
+    let genkit = genkit_instance.await;
+
+    let hi_prompt = genkit
+        .define_prompt::<TestInput, Value, Value>(PromptConfig {
+            name: "hi_middleware_test".to_string(),
+            prompt: Some("hi {{name}}".to_string()),
+            ..Default::default()
+        })
+        .await;
+
+    let response = hi_prompt
+        .generate(
+            TestInput {
+                name: "Genkit".to_string(),
+            },
+            Some(PromptGenerateOptions {
+                r#use: Some(vec![wrap_request(), wrap_response()]),
+                ..Default::default()
+            }),
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(response.text().unwrap(), "[Echo: (hi Genkit); config: {}]");
 }
