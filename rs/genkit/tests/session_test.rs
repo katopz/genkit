@@ -19,7 +19,7 @@ use genkit::Genkit;
 use genkit_ai::model::GenerateRequest;
 use genkit_ai::session::Session;
 use rstest::{fixture, rstest};
-use serde_json::Value;
+use serde_json::{json, to_value, Value};
 use std::sync::{Arc, Mutex};
 
 #[fixture]
@@ -43,13 +43,32 @@ async fn test_maintains_history_in_the_session(
 
     // First message
     let response1 = chat.send("hi").await.unwrap();
-    assert_eq!(response1.text().unwrap(), "Echo: hi; config: null");
+    assert_eq!(response1.text().unwrap(), "Echo: hi; config: {}");
 
     // Second message
     let response2 = chat.send("bye").await.unwrap();
     assert_eq!(
         response2.text().unwrap(),
-        "Echo: hi,Echo: hi; config: null,bye; config: null"
+        "Echo: hi,Echo: hi,; config: {},bye; config: {}"
+    );
+
+    assert_eq!(
+        to_value(response2.messages().unwrap()).unwrap(),
+        json!([
+          { "content": [{ "text": "hi" }], "role": "user" },
+          {
+            "content": [{ "text": "Echo: hi" }, { "text": "; config: {}" }],
+            "role": "model",
+          },
+          { "content": [{ "text": "bye" }], "role": "user" },
+          {
+            "content": [
+              { "text": "Echo: hi,Echo: hi,; config: {},bye" },
+              { "text": "; config: {}" },
+            ],
+            "role": "model",
+          },
+        ])
     );
 
     // Verify message history
@@ -59,7 +78,7 @@ async fn test_maintains_history_in_the_session(
     assert_eq!(history[0].text(), "hi");
 
     assert_eq!(history[1].role, Role::Model);
-    assert_eq!(history[1].text(), "Echo: hi; config: null");
+    assert_eq!(history[1].text(), "Echo: hi; config: {}");
 
     assert_eq!(history[2].role, Role::User);
     assert_eq!(history[2].text(), "bye");
@@ -67,6 +86,6 @@ async fn test_maintains_history_in_the_session(
     assert_eq!(history[3].role, Role::Model);
     assert_eq!(
         history[3].text(),
-        "Echo: hi,Echo: hi; config: null,bye; config: null"
+        "Echo: hi,Echo: hi,; config: {},bye; config: {}"
     );
 }

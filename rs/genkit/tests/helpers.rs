@@ -343,16 +343,20 @@ impl Plugin for TsEchoModelPlugin {
                             let content = m
                                 .content
                                 .iter()
-                                .filter_map(|p| p.text.clone())
+                                .filter_map(|p| p.text.as_deref())
                                 .collect::<Vec<_>>()
-                                .join("");
+                                .join(",");
                             format!("{}{}", prefix, content)
                         })
                         .collect::<Vec<_>>()
                         .join(",");
 
-                    let config_str =
-                        serde_json::to_string(&req.config).unwrap_or_else(|_| "null".to_string());
+                    let config_str = match &req.config {
+                        Some(c) if !c.is_null() => {
+                            serde_json::to_string(c).unwrap_or_else(|_| "{}".to_string())
+                        }
+                        _ => "{}".to_string(),
+                    };
 
                     let response_text_part = Part::text(format!("Echo: {}", concatenated_messages));
 

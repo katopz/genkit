@@ -46,16 +46,13 @@ async fn test_explicit_model_calls_the_explicitly_passed_in_model(
     let response: genkit::GenerateResponse = genkit
         .generate_with_options(GenerateOptions {
             model: Some(Model::Name("echoModel".to_string())),
-            prompt: Some(vec![Part::text("short and sweet")]),
+            prompt: Some(vec![Part::text("hi")]),
             ..Default::default()
         })
         .await
         .unwrap();
 
-    assert_eq!(
-        response.text().unwrap(),
-        "Echo: short and sweet; config: null"
-    );
+    assert_eq!(response.text().unwrap(), "Echo: hi; config: {}");
 }
 
 #[rstest]

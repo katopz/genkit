@@ -57,7 +57,7 @@ async fn test_calls_default_model(
         .await
         .unwrap();
 
-    assert_eq!(response.text().unwrap(), "Echo: hi; config: null");
+    assert_eq!(response.text().unwrap(), "Echo: hi; config: {}");
 }
 
 #[rstest]
@@ -74,7 +74,7 @@ async fn test_calls_default_model_with_string_prompt(
         .await
         .unwrap();
 
-    assert_eq!(response.text().unwrap(), "Echo: hi; config: null");
+    assert_eq!(response.text().unwrap(), "Echo: hi; config: {}");
 }
 
 #[rstest]
@@ -91,7 +91,7 @@ async fn test_calls_default_model_with_parts_prompt(
         .await
         .unwrap();
 
-    assert_eq!(response.text().unwrap(), "Echo: hi; config: null");
+    assert_eq!(response.text().unwrap(), "Echo: hi; config: {}");
 }
 
 #[rstest]
@@ -111,7 +111,7 @@ async fn test_calls_default_model_system_message(
 
     assert_eq!(
         response.text().unwrap(),
-        "Echo: system: talk like a pirate,hi; config: null"
+        "Echo: system: talk like a pirate,hi; config: {}"
     );
 
     let locked_request = last_request.lock().unwrap();
@@ -138,7 +138,7 @@ async fn test_calls_default_model_with_tool_choice(
         .await
         .unwrap();
 
-    assert_eq!(response.text().unwrap(), "Echo: hi; config: null");
+    assert_eq!(response.text().unwrap(), "Echo: hi; config: {}");
 
     let locked_request = last_request.lock().unwrap();
     let request_tool_choice = locked_request.as_ref().unwrap().tool_choice.clone();
