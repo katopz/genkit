@@ -226,7 +226,24 @@ impl Plugin for EchoModelPlugin {
                 name: "echoModel".to_string(),
                 ..Default::default()
             },
-            |req: GenerateRequest, _cb| async move {
+            |req: GenerateRequest, streaming_callback| async move {
+                if let Some(cb) = streaming_callback {
+                    cb(GenerateResponseChunkData {
+                        index: 0,
+                        content: vec![genkit::model::Part::text("3")],
+                        ..Default::default()
+                    });
+                    cb(GenerateResponseChunkData {
+                        index: 0,
+                        content: vec![genkit::model::Part::text("2")],
+                        ..Default::default()
+                    });
+                    cb(GenerateResponseChunkData {
+                        index: 0,
+                        content: vec![genkit::model::Part::text("1")],
+                        ..Default::default()
+                    });
+                }
                 let config_str = if let Some(config) = req.config.as_ref().filter(|c| !c.is_null())
                 {
                     serde_json::to_string(config)
