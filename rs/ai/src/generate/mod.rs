@@ -100,17 +100,29 @@ pub struct ResumeOptions {
 #[derive(Clone, Serialize, Deserialize, JsonSchema, Default)]
 #[serde(rename_all = "camelCase")]
 pub struct GenerateOptions<O = Value> {
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub model: Option<crate::model::Model>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub system: Option<Vec<Part>>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub prompt: Option<Vec<Part>>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub docs: Option<Vec<Document>>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub messages: Option<Vec<MessageData>>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub tools: Option<Vec<ToolArgument>>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub tool_choice: Option<ToolChoice>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub config: Option<Value>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub output: Option<OutputOptions>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub resume: Option<ResumeOptions>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub max_turns: Option<u32>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub return_tool_requests: Option<bool>,
     /// Middleware to be used with this model call.
     #[serde(skip)]

@@ -81,16 +81,7 @@ async fn test_docs_from_function() -> Result<()> {
             "docs": [
                 { "content": [{ "text": "doc foo" }] },
                 { "content": [{ "text": "doc bar" }] }
-            ],
-            "tools": null,
-            "tool_choice": null,
-            "output": null,
-            "resume": null,
-            "max_turns": null,
-            "return_tool_requests": null,
-            "system": null,
-            "prompt": null,
-            "context": null,
+            ]
         }),
         context: None,
     })
