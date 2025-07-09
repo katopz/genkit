@@ -248,7 +248,7 @@ async fn test_restart_constructs_tool_request_part(mut registry: Registry) {
         }),
         ..Default::default()
     };
-    let restarted_part = tool.restart(&request_part, None).unwrap();
+    let restarted_part = tool.restart(&request_part, None, None).unwrap();
     let expected = Part {
         tool_request: Some(ToolRequest {
             name: "test".to_string(),
@@ -285,7 +285,7 @@ async fn test_restart_includes_metadata(mut registry: Registry) {
         ..Default::default()
     };
     let restarted_part = tool
-        .restart(&request_part, Some(json!({ "extra": "data" })))
+        .restart(&request_part, Some(json!({ "extra": "data" })), None)
         .unwrap();
     let expected = Part {
         tool_request: Some(ToolRequest {
@@ -299,6 +299,72 @@ async fn test_restart_includes_metadata(mut registry: Registry) {
     assert_eq!(restarted_part, expected);
 }
 
-// Note: The `restart().validates schema` test from the TypeScript suite was not ported
-// because the Rust implementation of `Resumable::restart` does not include logic
-// for replacing the input (`replaceInput`), which is what that test validates.
+#[rstest]
+#[tokio::test]
+async fn test_restart_validates_schema(mut registry: Registry) {
+    #[derive(Default, Clone, JsonSchema, Serialize, Deserialize, Debug, PartialEq)]
+    struct ValidatedInput {
+        #[schemars(length(min = 5))]
+        text: String,
+    }
+
+    define_tool(
+        &mut registry,
+        ToolConfig::<ValidatedInput, ()> {
+            name: "test".to_string(),
+            description: "test".to_string(),
+            input_schema: Some(ValidatedInput { text: "".into() }),
+            ..Default::default()
+        },
+        |_, options| async move { Err((options.interrupt)(None)) },
+    );
+    let tool = get_tool_action::<ValidatedInput, (), ()>(&registry, "test").await;
+
+    let request_part = Part {
+        tool_request: Some(ToolRequest {
+            name: "test".to_string(),
+            ..Default::default()
+        }),
+        ..Default::default()
+    };
+
+    // Test with invalid input
+    let result = tool.restart(
+        &request_part,
+        None,
+        Some(ValidatedInput {
+            text: "four".into(),
+        }),
+    );
+    assert!(result.is_err());
+    assert!(matches!(result.unwrap_err(), Error::Validation(_)));
+
+    // Test with valid input
+    let valid_result = tool
+        .restart(
+            &request_part,
+            None,
+            Some(ValidatedInput {
+                text: "long enough".into(),
+            }),
+        )
+        .unwrap();
+
+    let expected_request = ToolRequest {
+        name: "test".to_string(),
+        input: Some(json!({"text": "long enough"})),
+        ..Default::default()
+    };
+    let expected = Part {
+        tool_request: Some(expected_request),
+        metadata: Some(
+            [
+                ("resumed".to_string(), json!(true)),
+                ("replacedInput".to_string(), json!({})),
+            ]
+            .into(),
+        ),
+        ..Default::default()
+    };
+    assert_eq!(valid_result, expected);
+}

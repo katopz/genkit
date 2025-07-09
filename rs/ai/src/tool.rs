@@ -26,7 +26,7 @@ use genkit_core::registry::{ActionType, ErasedAction, Registry};
 use genkit_core::schema::{parse_schema, ProvidedSchema};
 use schemars::{self, JsonSchema};
 use serde::{de::DeserializeOwned, Deserialize, Serialize};
-use serde_json::{self, Value};
+use serde_json::{self, json, Value};
 use std::any::Any;
 use std::future::Future;
 use std::ops::Deref;
@@ -79,6 +79,7 @@ pub trait Resumable<I, O> {
         &self,
         interrupt: &ToolRequestPart,
         resumed_metadata: Option<Value>,
+        replace_input: Option<I>,
     ) -> Result<ToolRequestPart>;
 }
 
@@ -95,7 +96,7 @@ impl<I, O, S> Deref for ToolAction<I, O, S> {
 
 impl<I, O, S> Resumable<I, O> for ToolAction<I, O, S>
 where
-    I: JsonSchema,
+    I: JsonSchema + Serialize,
     O: Serialize + JsonSchema,
 {
     fn respond(
@@ -133,14 +134,32 @@ where
         &self,
         interrupt: &ToolRequestPart,
         resumed_metadata: Option<Value>,
+        replace_input: Option<I>,
     ) -> Result<ToolRequestPart> {
         let mut metadata = interrupt.metadata.clone().unwrap_or_default();
         metadata.insert(
             "resumed".to_string(),
             resumed_metadata.unwrap_or(Value::Bool(true)),
         );
+
+        let mut tool_request = interrupt.tool_request.clone().unwrap();
+
+        if let Some(new_input) = replace_input {
+            let schema_def = self.0.meta.input_schema.clone().ok_or_else(|| {
+                Error::new_internal("Tool has no input schema for restart validation.")
+            })?;
+            let input_value = serde_json::to_value(new_input).map_err(|e| {
+                Error::new_internal(format!("Failed to serialize new input: {}", e))
+            })?;
+
+            parse_schema::<Value>(input_value.clone(), ProvidedSchema::FromType(schema_def))?;
+
+            tool_request.input = Some(input_value);
+            metadata.insert("replacedInput".to_string(), json!({}));
+        }
+
         Ok(Part {
-            tool_request: interrupt.tool_request.clone(),
+            tool_request: Some(tool_request),
             metadata: Some(metadata),
             ..Default::default()
         })
