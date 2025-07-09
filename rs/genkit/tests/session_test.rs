@@ -14,7 +14,6 @@
 
 mod helpers;
 
-use genkit::model::Role;
 use genkit::Genkit;
 use genkit_ai::model::GenerateRequest;
 use genkit_ai::session::Session;
@@ -52,6 +51,7 @@ async fn test_maintains_history_in_the_session(
         "Echo: hi,Echo: hi,; config: {},bye; config: {}"
     );
 
+    // Verify message history
     assert_eq!(
         to_value(response2.messages().unwrap()).unwrap(),
         json!([
@@ -69,23 +69,5 @@ async fn test_maintains_history_in_the_session(
             "role": "model",
           },
         ])
-    );
-
-    // Verify message history
-    let history = response2.messages().unwrap();
-    assert_eq!(history.len(), 4);
-    assert_eq!(history[0].role, Role::User);
-    assert_eq!(history[0].text(), "hi");
-
-    assert_eq!(history[1].role, Role::Model);
-    assert_eq!(history[1].text(), "Echo: hi; config: {}");
-
-    assert_eq!(history[2].role, Role::User);
-    assert_eq!(history[2].text(), "bye");
-
-    assert_eq!(history[3].role, Role::Model);
-    assert_eq!(
-        history[3].text(),
-        "Echo: hi,Echo: hi,; config: {},bye; config: {}"
     );
 }
