@@ -18,7 +18,7 @@ use genkit::{prompt::PromptConfig, Genkit};
 use rstest::{fixture, rstest};
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
-use serde_json::Value;
+use serde_json::{json, Value};
 use std::sync::Arc;
 
 #[derive(Serialize, Deserialize, JsonSchema, Debug, Clone, Default)]
@@ -55,4 +55,34 @@ async fn test_calls_prompt_with_default_model(#[future] genkit_instance: Arc<Gen
         .unwrap();
 
     assert_eq!(response.text().unwrap(), "Echo: hi Genkit; config: {}");
+}
+
+#[rstest]
+#[tokio::test]
+async fn test_calls_prompt_with_default_model_and_config(#[future] genkit_instance: Arc<Genkit>) {
+    let genkit = genkit_instance.await;
+
+    let hi_prompt = genkit
+        .define_prompt::<TestInput, Value, Value>(PromptConfig {
+            name: "hi_default_model_config_test".to_string(),
+            prompt: Some("hi {{name}}".to_string()),
+            config: Some(json!({ "temperature": 11 })),
+            ..Default::default()
+        })
+        .await;
+
+    let response = hi_prompt
+        .generate(
+            TestInput {
+                name: "Genkit".to_string(),
+            },
+            None,
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(
+        response.text().unwrap(),
+        "Echo: hi Genkit; config: {\"temperature\":11}"
+    );
 }
