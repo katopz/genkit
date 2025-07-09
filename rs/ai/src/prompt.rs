@@ -35,6 +35,7 @@ use handlebars::Handlebars;
 use schemars::{self, JsonSchema};
 use serde::{de::DeserializeOwned, Deserialize, Serialize};
 use serde_json::{json, Value};
+use std::any::Any;
 use std::fmt;
 use std::future::Future;
 use std::pin::Pin;
@@ -421,7 +422,13 @@ where
         .build()
     };
 
-    let _ = registry.register_action(prompt_action.clone().name(), prompt_action);
+    let _ = registry.register_action(&config_arc.name, prompt_action);
+
+    registry.register_any(
+        "prompt",
+        &config_arc.name,
+        config_arc.clone() as Arc<dyn Any + Send + Sync>,
+    );
 
     ExecutablePrompt {
         config: config_arc,
@@ -448,11 +455,22 @@ where
         + 'static,
     C: Serialize + DeserializeOwned + JsonSchema + Send + Sync + 'static,
 {
-    let _action = registry
-        .lookup_action(&format!("/prompt/{}", name))
+    let config_any = registry
+        .lookup_any("prompt", name)
         .await
-        .ok_or_else(|| Error::new_internal(format!("Prompt '{}' not found", name)))?;
-    unimplemented!(
-        "Looking up prompts by name is not fully supported yet without a way to retrieve the original config from the registry."
-    )
+        .ok_or_else(|| Error::new_internal(format!("Prompt '{}' not found in registry", name)))?;
+
+    let config = config_any
+        .downcast::<PromptConfig<I, O, C>>()
+        .map_err(|_| {
+            Error::new_internal(format!(
+                "Type mismatch for prompt '{}'. Could not downcast to the expected type.",
+                name
+            ))
+        })?;
+
+    Ok(ExecutablePrompt {
+        config,
+        registry: Arc::new(registry.clone()),
+    })
 }

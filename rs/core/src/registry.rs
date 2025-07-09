@@ -427,27 +427,48 @@ impl Registry {
             .insert(key, Arc::new(value));
     }
 
+    /// Registers a type-erased value with the registry.
+    pub fn register_any(
+        &mut self,
+        value_type: &str,
+        name: &str,
+        value: Arc<dyn Any + Send + Sync>,
+    ) {
+        let key = format!("{}/{}", value_type, name);
+        self.state.lock().unwrap().values.insert(key, value);
+    }
+
+    /// Looks up a type-erased value from the registry.
+    pub async fn lookup_any(
+        &self,
+        value_type: &str,
+        name: &str,
+    ) -> Option<Arc<dyn Any + Send + Sync>> {
+        let key = format!("{}/{}", value_type, name);
+        let parent = {
+            let state = self.state.lock().unwrap();
+            if let Some(value) = state.values.get(&key) {
+                return Some(value.clone());
+            }
+            state.parent.clone()
+        };
+
+        if let Some(parent) = parent {
+            return Box::pin(parent.lookup_any(value_type, name)).await;
+        }
+
+        None
+    }
+
     /// Looks up a generic value from the registry.
     pub async fn lookup_value<T: Any + Send + Sync>(
         &self,
         value_type: &str,
         name: &str,
     ) -> Option<Arc<T>> {
-        let key = format!("{}/{}", value_type, name);
-        let parent = {
-            let state = self.state.lock().unwrap();
-            if let Some(value) = state.values.get(&key) {
-                // Attempt to downcast the `Arc<dyn Any>` to `Arc<T>`.
-                return value.clone().downcast().ok();
-            }
-            state.parent.clone()
-        };
-
-        if let Some(parent) = parent {
-            return Box::pin(parent.lookup_value(value_type, name)).await;
-        }
-
-        None
+        self.lookup_any(value_type, name)
+            .await
+            .and_then(|v| v.downcast().ok())
     }
 
     pub fn list_values(&self, value_type: &str) -> HashMap<String, Arc<dyn Any + Send + Sync>> {
