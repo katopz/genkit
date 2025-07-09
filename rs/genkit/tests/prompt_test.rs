@@ -134,3 +134,40 @@ async fn test_should_apply_middleware_to_a_prompt_call(
 
     assert_eq!(response.text().unwrap(), "[Echo: (hi Genkit),; config: {}]");
 }
+
+#[rstest]
+#[tokio::test]
+async fn test_should_apply_middleware_configured_on_prompt(
+    #[future] genkit_instance_for_test: (Arc<Genkit>, Arc<Mutex<Option<GenerateRequest>>>),
+) {
+    let (genkit, _) = genkit_instance_for_test.await;
+
+    let prompt_config = PromptConfig {
+        name: "hi_with_middleware".to_string(),
+        r#use: Some(vec![wrap_request(), wrap_response()]),
+        messages_fn: Some(Arc::new(|input: HiInput, _, _| {
+            Box::pin(async move {
+                Ok(vec![MessageData {
+                    role: Role::User,
+                    content: vec![Part::text(format!("hi {}", input.name))],
+                    ..Default::default()
+                }])
+            })
+        })),
+        ..Default::default()
+    };
+    let prompt =
+        define_prompt::<HiInput, Value, Value>(&mut genkit.registry().clone(), prompt_config);
+
+    let response = prompt
+        .generate(
+            HiInput {
+                name: "Genkit".to_string(),
+            },
+            None,
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(response.text().unwrap(), "[Echo: (hi Genkit),; config: {}]");
+}

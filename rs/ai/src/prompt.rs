@@ -115,6 +115,9 @@ pub struct PromptConfig<I = Value, O = Value, C = Value> {
     pub output: Option<OutputOptions>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub tools: Option<Vec<ToolArgument>>,
+    #[serde(skip, default)]
+    #[schemars(skip)]
+    pub r#use: Option<Vec<ModelMiddleware>>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub _marker: Option<std::marker::PhantomData<O>>,
 }
@@ -147,6 +150,7 @@ where
             .field("docs_fn", &self.docs_fn.as_ref().map(|_| "Some(<fn>)"))
             .field("output", &self.output)
             .field("tools", &self.tools)
+            .field("use", &self.r#use.as_ref().map(|u| u.len()))
             .field("_marker", &self._marker)
             .finish()
     }
@@ -358,7 +362,17 @@ where
             config: final_config,
             output: self.config.output.clone(),
             context: opts.as_ref().and_then(|o| o.context.clone()),
-            r#use: opts.and_then(|o| o.r#use),
+            r#use: {
+                let mut middleware = self.config.r#use.clone().unwrap_or_default();
+                if let Some(opts_middleware) = opts.as_ref().and_then(|o| o.r#use.as_ref()) {
+                    middleware.extend(opts_middleware.iter().cloned());
+                }
+                if middleware.is_empty() {
+                    None
+                } else {
+                    Some(middleware)
+                }
+            },
             ..Default::default()
         };
 
