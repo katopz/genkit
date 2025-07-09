@@ -227,8 +227,13 @@ impl Plugin for EchoModelPlugin {
                 ..Default::default()
             },
             |req: GenerateRequest, _cb| async move {
-                let config_str = serde_json::to_string(&req.config.unwrap_or_default())
-                    .map_err(|e| genkit::error::Error::new_internal(e.to_string()))?;
+                let config_str = if let Some(config) = req.config.as_ref().filter(|c| !c.is_null())
+                {
+                    serde_json::to_string(config)
+                        .map_err(|e| genkit::error::Error::new_internal(e.to_string()))?
+                } else {
+                    "{}".to_string()
+                };
 
                 let last_msg = req
                     .messages
