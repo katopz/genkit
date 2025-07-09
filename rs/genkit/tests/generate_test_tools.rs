@@ -1058,6 +1058,7 @@ async fn test_can_resume_generation() {
                             ..Default::default()
                         },
                         23,
+                        None,
                     )
                     .unwrap()]),
                 // Restart the 'resumable' tool with new metadata.
@@ -1072,6 +1073,7 @@ async fn test_can_resume_generation() {
                             ..Default::default()
                         },
                         Some(json!({ "status": "ok" })),
+                        None,
                     )
                     .unwrap()]),
                 ..Default::default()
