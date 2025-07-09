@@ -162,3 +162,33 @@ async fn test_should_apply_middleware_to_a_prompt_call(#[future] genkit_instance
 
     assert_eq!(response.text().unwrap(), "[Echo: (hi Genkit); config: {}]");
 }
+
+#[rstest]
+#[tokio::test]
+/// 'should apply middleware configured on a prompt'
+async fn test_should_apply_middleware_configured_on_a_prompt(
+    #[future] genkit_instance: Arc<Genkit>,
+) {
+    let genkit = genkit_instance.await;
+
+    let hi_prompt = genkit
+        .define_prompt::<TestInput, Value, Value>(PromptConfig {
+            name: "hi_configured_middleware_test".to_string(),
+            prompt: Some("hi {{name}}".to_string()),
+            r#use: Some(vec![wrap_request(), wrap_response()]),
+            ..Default::default()
+        })
+        .await;
+
+    let response = hi_prompt
+        .generate(
+            TestInput {
+                name: "Genkit".to_string(),
+            },
+            None,
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(response.text().unwrap(), "[Echo: (hi Genkit); config: {}]");
+}
