@@ -69,7 +69,12 @@ pub type ToolFn<I, O> =
     dyn Fn(I, ToolFnOptions) -> Pin<Box<dyn Future<Output = Result<O>> + Send>> + Send + Sync;
 
 pub trait Resumable<I, O> {
-    fn respond(&self, interrupt: &ToolRequestPart, output_data: O) -> Result<ToolResponsePart>;
+    fn respond(
+        &self,
+        interrupt: &ToolRequestPart,
+        output_data: O,
+        response_metadata: Option<Value>,
+    ) -> Result<ToolResponsePart>;
     fn restart(
         &self,
         interrupt: &ToolRequestPart,
@@ -93,13 +98,20 @@ where
     I: JsonSchema,
     O: Serialize + JsonSchema,
 {
-    fn respond(&self, interrupt: &ToolRequestPart, output_data: O) -> Result<ToolResponsePart> {
+    fn respond(
+        &self,
+        interrupt: &ToolRequestPart,
+        output_data: O,
+        response_metadata: Option<Value>,
+    ) -> Result<ToolResponsePart> {
         let schema_def = self.0.meta.output_schema.clone().ok_or_else(|| {
             Error::new_internal("Tool has no output schema for response validation.")
         })?;
         let data_value = serde_json::to_value(output_data)
             .map_err(|e| Error::new_internal(format!("Failed to serialize tool output: {}", e)))?;
         parse_schema::<Value>(data_value.clone(), ProvidedSchema::FromType(schema_def))?;
+
+        let interrupt_response_value = response_metadata.unwrap_or(Value::Bool(true));
 
         Ok(Part {
             tool_response: Some(crate::document::ToolResponse {
@@ -108,13 +120,10 @@ where
                 output: Some(data_value),
             }),
             metadata: Some(
-                [(
-                    "interruptResponse".to_string(),
-                    serde_json::Value::Bool(true),
-                )]
-                .iter()
-                .cloned()
-                .collect(),
+                [("interruptResponse".to_string(), interrupt_response_value)]
+                    .iter()
+                    .cloned()
+                    .collect(),
             ),
             ..Default::default()
         })

@@ -106,9 +106,6 @@ async fn test_define_interrupt_registers_output_schema(mut registry: Registry) {
     assert_eq!(metadata.output_schema.as_ref().unwrap(), &expected_schema);
 }
 
-// defineTool
-// .respond()
-
 #[rstest]
 #[tokio::test]
 async fn test_respond_constructs_tool_response_part(mut registry: Registry) {
@@ -130,7 +127,9 @@ async fn test_respond_constructs_tool_response_part(mut registry: Registry) {
         }),
         ..Default::default()
     };
-    let response = tool.respond(&request_part, "output".to_string()).unwrap();
+    let response = tool
+        .respond(&request_part, "output".to_string(), None)
+        .unwrap();
 
     let expected = Part {
         tool_response: Some(ToolResponse {
@@ -139,6 +138,47 @@ async fn test_respond_constructs_tool_response_part(mut registry: Registry) {
             ..Default::default()
         }),
         metadata: Some([("interruptResponse".to_string(), json!(true))].into()),
+        ..Default::default()
+    };
+    assert_eq!(response, expected);
+}
+
+#[rstest]
+#[tokio::test]
+async fn test_respond_includes_metadata(mut registry: Registry) {
+    define_tool(
+        &mut registry,
+        ToolConfig::<(), String> {
+            name: "test".to_string(),
+            description: "test".to_string(),
+            ..Default::default()
+        },
+        |_, _| async { Ok("".to_string()) },
+    );
+    let tool = get_tool_action::<(), String, ()>(&registry, "test").await;
+    let request_part = Part {
+        tool_request: Some(ToolRequest {
+            name: "test".to_string(),
+            input: Some(json!({})),
+            ..Default::default()
+        }),
+        ..Default::default()
+    };
+    let response = tool
+        .respond(
+            &request_part,
+            "output".to_string(),
+            Some(json!({ "extra": "data" })),
+        )
+        .unwrap();
+
+    let expected = Part {
+        tool_response: Some(ToolResponse {
+            name: "test".to_string(),
+            output: Some(json!("output")),
+            ..Default::default()
+        }),
+        metadata: Some([("interruptResponse".to_string(), json!({ "extra": "data" }))].into()),
         ..Default::default()
     };
     assert_eq!(response, expected);
@@ -173,7 +213,7 @@ async fn test_respond_validates_schema(mut registry: Registry) {
     // The Rust `respond` method is strongly typed, so we can't pass invalid data
     // in the same way the TypeScript test does with `as any`.
     // Instead, we confirm that valid data passes the schema check inside `respond`.
-    let valid_response = tool.respond(&request_part, MyNumber(55)).unwrap();
+    let valid_response = tool.respond(&request_part, MyNumber(55), None).unwrap();
     let expected = Part {
         tool_response: Some(ToolResponse {
             name: "test".to_string(),
@@ -185,8 +225,6 @@ async fn test_respond_validates_schema(mut registry: Registry) {
     };
     assert_eq!(valid_response, expected);
 }
-
-// .restart()
 
 #[rstest]
 #[tokio::test]
