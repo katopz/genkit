@@ -227,3 +227,42 @@ async fn test_should_apply_middleware_to_looked_up_prompt(#[future] genkit_insta
 
     assert_eq!(response.text().unwrap(), "[Echo: (hi Genkit); config: {}]");
 }
+
+#[rstest]
+#[tokio::test]
+/// 'should apply middleware to a prompt call on a looked up prompt with options'
+async fn test_should_apply_middleware_to_looked_up_prompt_with_options(
+    #[future] genkit_instance: Arc<Genkit>,
+) {
+    let genkit = genkit_instance.await;
+
+    genkit
+        .define_prompt::<TestInput, Value, Value>(PromptConfig {
+            name: "hi_lookup_options_middleware".to_string(),
+            prompt: Some("hi {{name}}".to_string()),
+            ..Default::default()
+        })
+        .await;
+
+    let hi_prompt = genkit_ai::prompt::prompt::<TestInput, Value, Value>(
+        genkit.registry(),
+        "hi_lookup_options_middleware",
+    )
+    .await
+    .unwrap();
+
+    let response = hi_prompt
+        .generate(
+            TestInput {
+                name: "Genkit".to_string(),
+            },
+            Some(PromptGenerateOptions {
+                r#use: Some(vec![wrap_request(), wrap_response()]),
+                ..Default::default()
+            }),
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(response.text().unwrap(), "[Echo: (hi Genkit); config: {}]");
+}
