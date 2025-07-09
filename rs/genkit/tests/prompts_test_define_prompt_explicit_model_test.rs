@@ -127,3 +127,77 @@ async fn test_calls_prompt_with_history(#[future] genkit_instance: Arc<Genkit>) 
         ])
     );
 }
+
+use tokio_stream::StreamExt;
+
+#[rstest]
+#[tokio::test]
+/// 'streams dotprompt with history and places it before user message'
+async fn test_streams_prompt_with_history(#[future] genkit_instance: Arc<Genkit>) {
+    let genkit = genkit_instance.await;
+
+    let hi_prompt = genkit
+        .define_prompt::<TestInput, Value, Value>(PromptConfig {
+            name: "hi_stream_with_history_test".to_string(),
+            model: Some(Model::Name("echoModel".to_string())),
+            prompt: Some("hi {{name}}".to_string()),
+            ..Default::default()
+        })
+        .await;
+
+    let history = vec![
+        MessageData {
+            role: Role::User,
+            content: vec![Part::text("hi")],
+            ..Default::default()
+        },
+        MessageData {
+            role: Role::Model,
+            content: vec![Part::text("bye")],
+            ..Default::default()
+        },
+    ];
+
+    let mut stream_response = hi_prompt
+        .stream(
+            TestInput {
+                name: "Genkit".to_string(),
+            },
+            Some(PromptGenerateOptions {
+                messages: Some(history.clone()),
+                ..Default::default()
+            }),
+        )
+        .await
+        .unwrap();
+
+    // We must drain the stream to allow the final response task to complete.
+    while stream_response.stream.next().await.is_some() {
+        // In a real application, you would process each chunk here.
+    }
+
+    let final_response = stream_response.response.await.unwrap().unwrap();
+    let actual_messages = final_response.messages().unwrap();
+
+    assert_eq!(
+        to_value(&actual_messages).unwrap(),
+        json!([
+            {
+                "role": "user",
+                "content": [{"text": "hi"}]
+            },
+            {
+                "role": "model",
+                "content": [{"text": "bye"}]
+            },
+            {
+                "role": "user",
+                "content": [{"text": "hi Genkit"}]
+            },
+            {
+                "role": "model",
+                "content": [{"text": "Echo: hibyehi Genkit; config: {}"}]
+            }
+        ])
+    );
+}
