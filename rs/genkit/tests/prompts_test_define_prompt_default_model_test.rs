@@ -86,3 +86,37 @@ async fn test_calls_prompt_with_default_model_and_config(#[future] genkit_instan
         "Echo: hi Genkit; config: {\"temperature\":11}"
     );
 }
+
+#[rstest]
+#[tokio::test]
+async fn test_calls_prompt_with_default_model_via_retrieved_prompt(
+    #[future] genkit_instance: Arc<Genkit>,
+) {
+    let genkit = genkit_instance.await;
+
+    let prompt_config = PromptConfig {
+        name: "hi_retrieved".to_string(),
+        prompt: Some("hi {{name}}".to_string()),
+        ..Default::default()
+    };
+    genkit
+        .define_prompt::<TestInput, Value, Value>(prompt_config)
+        .await;
+
+    let hi_prompt =
+        genkit_ai::prompt::prompt::<TestInput, Value, Value>(genkit.registry(), "hi_retrieved")
+            .await
+            .unwrap();
+
+    let response = hi_prompt
+        .generate(
+            TestInput {
+                name: "Genkit".to_string(),
+            },
+            None,
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(response.text().unwrap(), "Echo: hi Genkit; config: {}");
+}
