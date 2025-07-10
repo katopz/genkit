@@ -276,10 +276,8 @@ fn to_vertex_request(req: &GenerateRequest) -> Result<VertexGeminiRequest> {
                 .iter()
                 .map(|def| {
                     let mut params = def.input_schema.clone();
-                    if let Some(val) = params.as_mut() {
-                        if let serde_json::Value::Object(map) = val {
-                            map.remove("$schema");
-                        }
+                    if let Some(serde_json::Value::Object(map)) = params.as_mut() {
+                        map.remove("$schema");
                     }
                     VertexFunctionDeclaration {
                         name: def.name.clone(),
