@@ -61,7 +61,7 @@ async fn test_maintains_history_in_session(#[future] genkit_instance: Arc<Genkit
 
     assert_eq!(
         response.text().unwrap(),
-        "Echo: hiEcho: hi; config: {}bye; config: {}"
+        "Echo: hi,Echo: hi; config: {},bye; config: {}"
     );
 
     let expected_messages = vec![
@@ -82,7 +82,7 @@ async fn test_maintains_history_in_session(#[future] genkit_instance: Arc<Genkit
         },
         MessageData {
             role: Role::Model,
-            content: vec![Part::text("Echo: hiEcho: hi; config: {}bye; config: {}")],
+            content: vec![Part::text("Echo: hi,Echo: hi,; config: {},bye; config: {}")],
             ..Default::default()
         },
     ];
@@ -137,7 +137,7 @@ async fn test_maintains_history_in_session_with_streaming(#[future] genkit_insta
     assert_eq!(chunks, vec!["3", "2", "1"]);
     assert_eq!(
         final_response.text().unwrap(),
-        "Echo: hiEcho: hi; config: {}bye; config: {}"
+        "Echo: hi,Echo: hi,; config: {},bye; config: {}"
     );
 
     let expected_messages = vec![
@@ -158,7 +158,10 @@ async fn test_maintains_history_in_session_with_streaming(#[future] genkit_insta
         },
         MessageData {
             role: Role::Model,
-            content: vec![Part::text("Echo: hiEcho: hi; config: {}bye; config: {}")],
+            content: vec![
+                Part::text("Echo: hi,Echo: hi,; config: {},bye"),
+                Part::text("e; config: {}"),
+            ],
             ..Default::default()
         },
     ];
@@ -339,5 +342,49 @@ async fn test_start_chat_from_prompt_file_with_input(#[future] genkit_instance: 
     assert_eq!(
         response.text().unwrap(),
         "Echo: hi Genkit from templatesend it; config: {\"version\":\"abc\"}"
+    );
+}
+
+#[rstest]
+#[tokio::test]
+#[ignore]
+/// 'can send a rendered prompt to chat'
+async fn test_can_send_rendered_prompt_to_chat(#[future] genkit_instance: Arc<Genkit>) {
+    let genkit = genkit_instance.await;
+
+    let prompt = genkit.define_prompt::<NameInput, Value, Value>(PromptConfig {
+        name: "hi".to_string(),
+        config: Some(json!({ "version": "abc" })),
+        prompt: Some("hi {{name}}".to_string()),
+        ..Default::default()
+    });
+
+    let session =
+        genkit_ai::Session::<()>::new(Arc::new(genkit.registry().clone()), None, None, None)
+            .await
+            .unwrap();
+    let chat = Arc::new(session)
+        .chat::<()>(Some(ChatOptions::default()))
+        .await
+        .unwrap();
+
+    let rendered = prompt
+        .render(
+            NameInput {
+                name: "Genkit".to_string(),
+            },
+            Some(PromptGenerateOptions {
+                config: Some(json!({ "temperature": 11 })),
+                ..Default::default()
+            }),
+        )
+        .await
+        .unwrap();
+
+    let response = chat.send(rendered).await.unwrap();
+
+    assert_eq!(
+        response.text().unwrap(),
+        "Echo: hi Genkit; config: {\"temperature\":11,\"version\":\"abc\"}"
     );
 }
