@@ -267,3 +267,174 @@ async fn test_loads_from_folder_with_all_options(#[future] genkit_instance: Arc<
     // assert_eq!(request.tool_choice, Some(ToolChoice::Required));
     // assert!(request.tools.is_some());
 }
+
+#[rstest]
+#[tokio::test]
+/// 'renders loaded prompt via executable-prompt'
+async fn test_renders_loaded_prompt_via_executable_prompt(#[future] genkit_instance: Arc<Genkit>) {
+    let genkit = genkit_instance.await;
+
+    genkit_ai::model::define_model(
+        &mut genkit.registry().clone(),
+        genkit_ai::model::DefineModelOptions {
+            name: "googleai/gemini-5.0-ultimate-pro-plus".to_string(),
+            ..Default::default()
+        },
+        |_req, _| async { Ok(genkit_ai::model::GenerateResponseData::default()) },
+    );
+
+    genkit.define_tool(
+        genkit::tool::ToolConfig {
+            name: "toolA".to_string(),
+            description: "toolA it is".to_string(),
+            input_schema: Some(()),
+            output_schema: Some(()),
+            metadata: None,
+        },
+        |_, _| async { Ok(()) },
+    );
+    genkit.define_tool(
+        genkit::tool::ToolConfig {
+            name: "toolB".to_string(),
+            description: "toolB it is".to_string(),
+            input_schema: Some(()),
+            output_schema: Some(()),
+            metadata: None,
+        },
+        |_, _| async { Ok(()) },
+    );
+
+    let kitchen_sink_config = PromptConfig {
+        name: "kitchensink".to_string(),
+        model: Some(Model::Name(
+            "googleai/gemini-5.0-ultimate-pro-plus".to_string(),
+        )),
+        config: Some(json!({ "temperature": 11 })),
+        output: Some(OutputOptions {
+            format: Some("csv".to_string()),
+            json_schema: Some(json!({
+                "type": "object",
+                "properties": {
+                    "obj": {
+                        "type": ["object", "null"],
+                        "description": "a nested object",
+                        "properties": {
+                            "nest1": { "type": ["string", "null"] }
+                        },
+                        "additionalProperties": false
+                    },
+                    "arr": {
+                        "type": "array",
+                        "description": "array of objects",
+                        "items": {
+                            "type": "object",
+                            "properties": {
+                                "nest2": { "type": ["boolean", "null"] }
+                            },
+                            "additionalProperties": false
+                        }
+                    }
+                },
+                "required": ["arr"],
+                "additionalProperties": false
+            })),
+            ..Default::default()
+        }),
+        system: Some(" Hello ".to_string()),
+        messages: Some(vec![MessageData {
+            role: Role::Model,
+            content: vec![Part::text(" from the prompt file {{subject}}".to_string())],
+            ..Default::default()
+        }]),
+        tools: Some(vec![
+            ToolArgument::from("toolA"),
+            ToolArgument::from("toolB"),
+        ]),
+        max_turns: Some(77),
+        return_tool_requests: Some(true),
+        ..Default::default()
+    };
+    genkit
+        .define_prompt::<KitchenSinkInput, Value, Value>(kitchen_sink_config)
+        .await;
+
+    let action = genkit
+        .registry()
+        .lookup_action("/prompt/kitchensink")
+        .await
+        .unwrap();
+
+    let response_value = action
+        .run_http_json(json!({ "subject": "banana" }), None)
+        .await
+        .unwrap();
+
+    let generate_request: genkit_ai::model::GenerateRequest =
+        serde_json::from_value(response_value["result"].clone()).unwrap();
+
+    let tool_a = genkit
+        .registry()
+        .lookup_action("/tool/toolA")
+        .await
+        .unwrap();
+    let tool_b = genkit
+        .registry()
+        .lookup_action("/tool/toolB")
+        .await
+        .unwrap();
+    let expected_tools = Some(vec![
+        genkit::tool::to_tool_definition(tool_a.as_ref()).unwrap(),
+        genkit::tool::to_tool_definition(tool_b.as_ref()).unwrap(),
+    ]);
+
+    let expected_output_options = OutputOptions {
+        format: Some("csv".to_string()),
+        json_schema: Some(json!({
+            "type": "object",
+            "properties": {
+                "obj": {
+                    "type": ["object", "null"],
+                    "description": "a nested object",
+                    "properties": { "nest1": { "type": ["string", "null"] } },
+                    "additionalProperties": false
+                },
+                "arr": {
+                    "type": "array",
+                    "description": "array of objects",
+                    "items": {
+                        "type": "object",
+                        "properties": { "nest2": { "type": ["boolean", "null"] } },
+                        "additionalProperties": false
+                    }
+                }
+            },
+            "required": ["arr"],
+            "additionalProperties": false
+        })),
+        ..Default::default()
+    };
+
+    let expected_request = genkit_ai::model::GenerateRequest {
+        config: Some(json!({ "temperature": 11 })),
+        max_turns: Some(77),
+        messages: vec![
+            MessageData {
+                role: Role::System,
+                content: vec![Part::text(" Hello ")],
+                ..Default::default()
+            },
+            MessageData {
+                role: Role::Model,
+                content: vec![Part::text(" from the prompt file banana")],
+                ..Default::default()
+            },
+        ],
+        output: Some(serde_json::to_value(&expected_output_options).unwrap()),
+        return_tool_requests: Some(true),
+        tools: expected_tools,
+        tool_choice: None,
+        docs: None,
+    };
+
+    assert_eq!(generate_request, expected_request);
+}
