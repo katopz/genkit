@@ -5,7 +5,7 @@ use genkit_vertexai::{common::VertexAIPluginOptions, vertex_ai};
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
-#[derive(Serialize, Deserialize, JsonSchema, Debug, PartialEq)]
+#[derive(JsonSchema, Deserialize, Serialize, Debug, Clone, Default)]
 pub struct JokeSubject {
     #[serde(rename = "jokeSubject")]
     pub joke_subject: String,
@@ -13,11 +13,9 @@ pub struct JokeSubject {
 
 pub fn joke_subject_generator(genkit: &Genkit) {
     genkit.define_tool(
-        ToolConfig {
+        ToolConfig::<JokeSubject, String> {
             name: "jokeSubjectGenerator".to_string(),
             description: "Can be called to generate a subject for a joke".to_string(),
-            input_schema: Some(String::new()),
-            output_schema: Some(String::new()),
             ..Default::default()
         },
         |_, _| async { Ok("banana".to_string()) },

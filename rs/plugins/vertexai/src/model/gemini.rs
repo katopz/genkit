@@ -268,7 +268,33 @@ fn to_vertex_request(req: &GenerateRequest) -> Result<VertexGeminiRequest> {
         })
         .collect::<Result<Vec<VertexContent>>>()?;
 
-    let tools = None;
+    let tools = if let Some(tool_defs) = &req.tools {
+        if tool_defs.is_empty() {
+            None
+        } else {
+            let declarations = tool_defs
+                .iter()
+                .map(|def| {
+                    let mut params = def.input_schema.clone();
+                    if let Some(val) = params.as_mut() {
+                        if let serde_json::Value::Object(map) = val {
+                            map.remove("$schema");
+                        }
+                    }
+                    VertexFunctionDeclaration {
+                        name: def.name.clone(),
+                        description: def.description.clone(),
+                        parameters: params,
+                    }
+                })
+                .collect();
+            Some(vec![VertexTool {
+                function_declarations: declarations,
+            }])
+        }
+    } else {
+        None
+    };
 
     let generation_config = req
         .config
@@ -475,6 +501,11 @@ async fn gemini_runner(
     );
 
     let client = reqwest::Client::new();
+
+    let request_body_json_str =
+        serde_json::to_string_pretty(&vertex_req).unwrap_or_else(|e| e.to_string());
+    log::debug!("Vertex AI Request Body: {}", request_body_json_str);
+
     let response = client
         .post(&url)
         .headers(headers)
