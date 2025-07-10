@@ -45,9 +45,7 @@ async fn test_loads_from_folder(#[future] genkit_instance: Arc<Genkit>) {
         output: Some(OutputOptions::default()),
         ..Default::default()
     };
-    genkit
-        .define_prompt::<EmptyInput, Value, Value>(test_prompt_config)
-        .await;
+    genkit.define_prompt::<EmptyInput, Value, Value>(test_prompt_config);
 
     // Look up the prompt from the registry.
     let test_prompt =
@@ -92,9 +90,7 @@ async fn test_loads_from_sub_folder(#[future] genkit_instance: Arc<Genkit>) {
         output: Some(OutputOptions::default()),
         ..Default::default()
     };
-    genkit
-        .define_prompt::<EmptyInput, Value, Value>(sub_test_prompt_config)
-        .await;
+    genkit.define_prompt::<EmptyInput, Value, Value>(sub_test_prompt_config);
 
     // Look up the prompt using its full name.
     let test_prompt =
@@ -187,9 +183,7 @@ async fn test_loads_from_folder_with_all_options(#[future] genkit_instance: Arc<
         return_tool_requests: Some(true),
         ..Default::default()
     };
-    genkit
-        .define_prompt::<KitchenSinkInput, Value, Value>(kitchen_sink_config)
-        .await;
+    genkit.define_prompt::<KitchenSinkInput, Value, Value>(kitchen_sink_config);
 
     let test_prompt = genkit_ai::prompt::prompt::<KitchenSinkInput, Value, Value>(
         genkit.registry(),
@@ -355,9 +349,7 @@ async fn test_renders_loaded_prompt_via_executable_prompt(#[future] genkit_insta
         return_tool_requests: Some(true),
         ..Default::default()
     };
-    genkit
-        .define_prompt::<KitchenSinkInput, Value, Value>(kitchen_sink_config)
-        .await;
+    genkit.define_prompt::<KitchenSinkInput, Value, Value>(kitchen_sink_config);
 
     let action = genkit
         .registry()
@@ -464,8 +456,7 @@ async fn test_resolved_schema_refs(#[future] genkit_instance: Arc<Genkit>) {
     };
 
     let prompt = genkit
-        .define_prompt::<serde_json::Value, serde_json::Value, serde_json::Value>(prompt_config)
-        .await;
+        .define_prompt::<serde_json::Value, serde_json::Value, serde_json::Value>(prompt_config);
 
     let rendered = prompt.render(json!({ "foo": "bar" }), None).await.unwrap();
 
@@ -515,8 +506,7 @@ async fn test_lazily_resolved_schema_refs(#[future] genkit_instance: Arc<Genkit>
     };
 
     let prompt = genkit
-        .define_prompt::<serde_json::Value, serde_json::Value, serde_json::Value>(prompt_config)
-        .await;
+        .define_prompt::<serde_json::Value, serde_json::Value, serde_json::Value>(prompt_config);
 
     let result = prompt.render(json!({ "foo": "bar" }), None).await;
 
@@ -542,9 +532,7 @@ async fn test_loads_variant_from_folder(#[future] genkit_instance: Arc<Genkit>) 
         config: Some(json!({ "temperature": 11 })),
         ..Default::default()
     };
-    genkit
-        .define_prompt::<EmptyInput, Value, Value>(test_prompt_config)
-        .await;
+    genkit.define_prompt::<EmptyInput, Value, Value>(test_prompt_config);
 
     // Define the variant
     let variant_prompt_config = PromptConfig {
@@ -554,9 +542,7 @@ async fn test_loads_variant_from_folder(#[future] genkit_instance: Arc<Genkit>) 
         config: Some(json!({ "temperature": 13 })),
         ..Default::default()
     };
-    genkit
-        .define_prompt::<EmptyInput, Value, Value>(variant_prompt_config)
-        .await;
+    genkit.define_prompt::<EmptyInput, Value, Value>(variant_prompt_config);
 
     // Look up the variant
     let test_prompt = genkit_ai::prompt::prompt::<EmptyInput, Value, Value>(

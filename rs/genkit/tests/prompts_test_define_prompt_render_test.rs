@@ -38,13 +38,11 @@ async fn genkit_instance() -> Arc<Genkit> {
 async fn test_renders_prompt_messages(#[future] genkit_instance: Arc<Genkit>) {
     let genkit = genkit_instance.await;
 
-    let hi_prompt = genkit
-        .define_prompt::<TestInput, Value, Value>(PromptConfig {
-            name: "hi_render_test".to_string(),
-            prompt: Some("hi {{name}}".to_string()),
-            ..Default::default()
-        })
-        .await;
+    let hi_prompt = genkit.define_prompt::<TestInput, Value, Value>(PromptConfig {
+        name: "hi_render_test".to_string(),
+        prompt: Some("hi {{name}}".to_string()),
+        ..Default::default()
+    });
 
     let response = hi_prompt
         .render(

@@ -46,21 +46,19 @@ async fn genkit_instance_with_ref() -> Arc<Genkit> {
 async fn test_calls_prompt_with_default_model_ref(#[future] genkit_instance_with_ref: Arc<Genkit>) {
     let genkit = genkit_instance_with_ref.await;
 
-    let hi_prompt = genkit
-        .define_prompt::<TestInput, Value, Value>(PromptConfig {
-            name: "hi_default_model_ref_test".to_string(),
-            messages_fn: Some(Arc::new(|input, _state, _context| {
-                Box::pin(async move {
-                    Ok(vec![MessageData {
-                        role: Role::User,
-                        content: vec![Part::text(format!("hi {}", input.name))],
-                        ..Default::default()
-                    }])
-                })
-            })),
-            ..Default::default()
-        })
-        .await;
+    let hi_prompt = genkit.define_prompt::<TestInput, Value, Value>(PromptConfig {
+        name: "hi_default_model_ref_test".to_string(),
+        messages_fn: Some(Arc::new(|input, _state, _context| {
+            Box::pin(async move {
+                Ok(vec![MessageData {
+                    role: Role::User,
+                    content: vec![Part::text(format!("hi {}", input.name))],
+                    ..Default::default()
+                }])
+            })
+        })),
+        ..Default::default()
+    });
 
     let response = hi_prompt
         .generate(
@@ -83,22 +81,20 @@ async fn test_streams_prompt_with_default_model_ref(
 ) {
     let genkit = genkit_instance_with_ref.await;
 
-    let hi_prompt = genkit
-        .define_prompt::<TestInput, Value, Value>(PromptConfig {
-            name: "hi_stream_default_model_ref_test".to_string(),
-            config: Some(json!({ "temperature": 11 })),
-            messages_fn: Some(Arc::new(|input, _state, _context| {
-                Box::pin(async move {
-                    Ok(vec![MessageData {
-                        role: Role::User,
-                        content: vec![Part::text(format!("hi {}", input.name))],
-                        ..Default::default()
-                    }])
-                })
-            })),
-            ..Default::default()
-        })
-        .await;
+    let hi_prompt = genkit.define_prompt::<TestInput, Value, Value>(PromptConfig {
+        name: "hi_stream_default_model_ref_test".to_string(),
+        config: Some(json!({ "temperature": 11 })),
+        messages_fn: Some(Arc::new(|input, _state, _context| {
+            Box::pin(async move {
+                Ok(vec![MessageData {
+                    role: Role::User,
+                    content: vec![Part::text(format!("hi {}", input.name))],
+                    ..Default::default()
+                }])
+            })
+        })),
+        ..Default::default()
+    });
 
     let mut stream_resp = hi_prompt
         .stream(

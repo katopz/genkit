@@ -42,22 +42,20 @@ async fn genkit_instance() -> Arc<Genkit> {
 async fn test_calls_prompt_with_explicit_model(#[future] genkit_instance: Arc<Genkit>) {
     let genkit = genkit_instance.await;
 
-    let hi_prompt = genkit
-        .define_prompt::<TestInput, Value, Value>(PromptConfig {
-            name: "hi_explicit_model2_test".to_string(),
-            model: Some(Model::Name("echoModel".to_string())),
-            messages_fn: Some(Arc::new(|input, _state, _context| {
-                Box::pin(async move {
-                    Ok(vec![MessageData {
-                        role: Role::User,
-                        content: vec![Part::text(format!("hi {}", input.name))],
-                        ..Default::default()
-                    }])
-                })
-            })),
-            ..Default::default()
-        })
-        .await;
+    let hi_prompt = genkit.define_prompt::<TestInput, Value, Value>(PromptConfig {
+        name: "hi_explicit_model2_test".to_string(),
+        model: Some(Model::Name("echoModel".to_string())),
+        messages_fn: Some(Arc::new(|input, _state, _context| {
+            Box::pin(async move {
+                Ok(vec![MessageData {
+                    role: Role::User,
+                    content: vec![Part::text(format!("hi {}", input.name))],
+                    ..Default::default()
+                }])
+            })
+        })),
+        ..Default::default()
+    });
 
     let response = hi_prompt
         .generate(
@@ -78,23 +76,21 @@ async fn test_calls_prompt_with_explicit_model(#[future] genkit_instance: Arc<Ge
 async fn test_calls_prompt_with_explicit_model_and_config(#[future] genkit_instance: Arc<Genkit>) {
     let genkit = genkit_instance.await;
 
-    let hi_prompt = genkit
-        .define_prompt::<TestInput, Value, Value>(PromptConfig {
-            name: "hi_explicit_model_with_config2_test".to_string(),
-            model: Some(Model::Name("echoModel".to_string())),
-            config: Some(json!({ "temperature": 11 })),
-            messages_fn: Some(Arc::new(|input, _state, _context| {
-                Box::pin(async move {
-                    Ok(vec![MessageData {
-                        role: Role::User,
-                        content: vec![Part::text(format!("hi {}", input.name))],
-                        ..Default::default()
-                    }])
-                })
-            })),
-            ..Default::default()
-        })
-        .await;
+    let hi_prompt = genkit.define_prompt::<TestInput, Value, Value>(PromptConfig {
+        name: "hi_explicit_model_with_config2_test".to_string(),
+        model: Some(Model::Name("echoModel".to_string())),
+        config: Some(json!({ "temperature": 11 })),
+        messages_fn: Some(Arc::new(|input, _state, _context| {
+            Box::pin(async move {
+                Ok(vec![MessageData {
+                    role: Role::User,
+                    content: vec![Part::text(format!("hi {}", input.name))],
+                    ..Default::default()
+                }])
+            })
+        })),
+        ..Default::default()
+    });
 
     let response = hi_prompt
         .generate(
@@ -120,23 +116,21 @@ async fn test_calls_prompt_with_explicit_model_and_call_site_config(
 ) {
     let genkit = genkit_instance.await;
 
-    let hi_prompt = genkit
-        .define_prompt::<TestInput, Value, Value>(PromptConfig {
-            name: "hi_explicit_model_call_site_config_test".to_string(),
-            model: Some(Model::Name("echoModel".to_string())),
-            config: Some(json!({ "temperature": 11 })),
-            messages_fn: Some(Arc::new(|input, _state, _context| {
-                Box::pin(async move {
-                    Ok(vec![MessageData {
-                        role: Role::User,
-                        content: vec![Part::text(format!("hi {}", input.name))],
-                        ..Default::default()
-                    }])
-                })
-            })),
-            ..Default::default()
-        })
-        .await;
+    let hi_prompt = genkit.define_prompt::<TestInput, Value, Value>(PromptConfig {
+        name: "hi_explicit_model_call_site_config_test".to_string(),
+        model: Some(Model::Name("echoModel".to_string())),
+        config: Some(json!({ "temperature": 11 })),
+        messages_fn: Some(Arc::new(|input, _state, _context| {
+            Box::pin(async move {
+                Ok(vec![MessageData {
+                    role: Role::User,
+                    content: vec![Part::text(format!("hi {}", input.name))],
+                    ..Default::default()
+                }])
+            })
+        })),
+        ..Default::default()
+    });
 
     let response = hi_prompt
         .generate(

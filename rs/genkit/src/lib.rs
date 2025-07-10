@@ -240,10 +240,7 @@ impl Genkit {
     }
 
     /// Defines and registers a prompt based on a function.
-    pub async fn define_prompt<I, O, C>(
-        &self,
-        config: PromptConfig<I, O, C>,
-    ) -> ExecutablePrompt<I, O, C>
+    pub fn define_prompt<I, O, C>(&self, config: PromptConfig<I, O, C>) -> ExecutablePrompt<I, O, C>
     where
         I: Serialize + DeserializeOwned + JsonSchema + Send + Sync + Clone + 'static,
         O: for<'de> Deserialize<'de>

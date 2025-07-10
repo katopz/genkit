@@ -38,22 +38,20 @@ async fn genkit_instance() -> Arc<Genkit> {
 async fn test_renders_prompt(#[future] genkit_instance: Arc<Genkit>) {
     let genkit = genkit_instance.await;
 
-    let hi_prompt = genkit
-        .define_prompt::<TestInput, Value, Value>(PromptConfig {
-            name: "hi_render_explicit_model_test".to_string(),
-            model: Some(Model::Name("echoModel".to_string())),
-            messages_fn: Some(Arc::new(|input, _state, _context| {
-                Box::pin(async move {
-                    Ok(vec![MessageData {
-                        role: Role::User,
-                        content: vec![Part::text(format!("hi {}", input.name))],
-                        ..Default::default()
-                    }])
-                })
-            })),
-            ..Default::default()
-        })
-        .await;
+    let hi_prompt = genkit.define_prompt::<TestInput, Value, Value>(PromptConfig {
+        name: "hi_render_explicit_model_test".to_string(),
+        model: Some(Model::Name("echoModel".to_string())),
+        messages_fn: Some(Arc::new(|input, _state, _context| {
+            Box::pin(async move {
+                Ok(vec![MessageData {
+                    role: Role::User,
+                    content: vec![Part::text(format!("hi {}", input.name))],
+                    ..Default::default()
+                }])
+            })
+        })),
+        ..Default::default()
+    });
 
     let response = hi_prompt
         .render(

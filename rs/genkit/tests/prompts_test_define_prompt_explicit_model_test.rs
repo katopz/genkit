@@ -40,14 +40,12 @@ async fn genkit_instance() -> Arc<Genkit> {
 async fn test_calls_prompt_with_default_model(#[future] genkit_instance: Arc<Genkit>) {
     let genkit = genkit_instance.await;
 
-    let hi_prompt = genkit
-        .define_prompt::<TestInput, Value, Value>(PromptConfig {
-            name: "hi_explicit_model_test".to_string(),
-            model: Some(Model::Name("echoModel".to_string())),
-            prompt: Some("hi {{name}}".to_string()),
-            ..Default::default()
-        })
-        .await;
+    let hi_prompt = genkit.define_prompt::<TestInput, Value, Value>(PromptConfig {
+        name: "hi_explicit_model_test".to_string(),
+        model: Some(Model::Name("echoModel".to_string())),
+        prompt: Some("hi {{name}}".to_string()),
+        ..Default::default()
+    });
 
     let response = hi_prompt
         .generate(
@@ -68,14 +66,12 @@ async fn test_calls_prompt_with_default_model(#[future] genkit_instance: Arc<Gen
 async fn test_calls_prompt_with_history(#[future] genkit_instance: Arc<Genkit>) {
     let genkit = genkit_instance.await;
 
-    let hi_prompt = genkit
-        .define_prompt::<TestInput, Value, Value>(PromptConfig {
-            name: "hi_with_history_test".to_string(),
-            model: Some(Model::Name("echoModel".to_string())),
-            prompt: Some("hi {{name}}".to_string()),
-            ..Default::default()
-        })
-        .await;
+    let hi_prompt = genkit.define_prompt::<TestInput, Value, Value>(PromptConfig {
+        name: "hi_with_history_test".to_string(),
+        model: Some(Model::Name("echoModel".to_string())),
+        prompt: Some("hi {{name}}".to_string()),
+        ..Default::default()
+    });
 
     let history = vec![
         MessageData {
@@ -136,14 +132,12 @@ use tokio_stream::StreamExt;
 async fn test_streams_prompt_with_history(#[future] genkit_instance: Arc<Genkit>) {
     let genkit = genkit_instance.await;
 
-    let hi_prompt = genkit
-        .define_prompt::<TestInput, Value, Value>(PromptConfig {
-            name: "hi_stream_with_history_test".to_string(),
-            model: Some(Model::Name("echoModel".to_string())),
-            prompt: Some("hi {{name}}".to_string()),
-            ..Default::default()
-        })
-        .await;
+    let hi_prompt = genkit.define_prompt::<TestInput, Value, Value>(PromptConfig {
+        name: "hi_stream_with_history_test".to_string(),
+        model: Some(Model::Name("echoModel".to_string())),
+        prompt: Some("hi {{name}}".to_string()),
+        ..Default::default()
+    });
 
     let history = vec![
         MessageData {
@@ -208,15 +202,13 @@ async fn test_streams_prompt_with_history(#[future] genkit_instance: Arc<Genkit>
 async fn test_calls_prompt_with_default_model_and_config(#[future] genkit_instance: Arc<Genkit>) {
     let genkit = genkit_instance.await;
 
-    let hi_prompt = genkit
-        .define_prompt::<TestInput, Value, Value>(PromptConfig {
-            name: "hi_explicit_model_with_config_test".to_string(),
-            model: Some(Model::Name("echoModel".to_string())),
-            prompt: Some("hi {{name}}".to_string()),
-            config: Some(json!({ "temperature": 11 })),
-            ..Default::default()
-        })
-        .await;
+    let hi_prompt = genkit.define_prompt::<TestInput, Value, Value>(PromptConfig {
+        name: "hi_explicit_model_with_config_test".to_string(),
+        model: Some(Model::Name("echoModel".to_string())),
+        prompt: Some("hi {{name}}".to_string()),
+        config: Some(json!({ "temperature": 11 })),
+        ..Default::default()
+    });
 
     let response = hi_prompt
         .generate(
@@ -240,14 +232,12 @@ async fn test_calls_prompt_with_default_model_and_config(#[future] genkit_instan
 async fn test_rejects_on_invalid_model(#[future] genkit_instance: Arc<Genkit>) {
     let genkit = genkit_instance.await;
 
-    let hi_prompt = genkit
-        .define_prompt::<TestInput, Value, Value>(PromptConfig {
-            name: "hi_invalid_model_test".to_string(),
-            model: Some(Model::Name("modelThatDoesNotExist".to_string())),
-            prompt: Some("hi {{name}}".to_string()),
-            ..Default::default()
-        })
-        .await;
+    let hi_prompt = genkit.define_prompt::<TestInput, Value, Value>(PromptConfig {
+        name: "hi_invalid_model_test".to_string(),
+        model: Some(Model::Name("modelThatDoesNotExist".to_string())),
+        prompt: Some("hi {{name}}".to_string()),
+        ..Default::default()
+    });
 
     let result = hi_prompt
         .generate(

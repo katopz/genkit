@@ -43,13 +43,11 @@ async fn genkit_instance() -> Arc<Genkit> {
 async fn test_calls_prompt_with_default_model(#[future] genkit_instance: Arc<Genkit>) {
     let genkit = genkit_instance.await;
 
-    let hi_prompt = genkit
-        .define_prompt::<TestInput, Value, Value>(PromptConfig {
-            name: "hi_default_model_test".to_string(),
-            prompt: Some("hi {{name}}".to_string()),
-            ..Default::default()
-        })
-        .await;
+    let hi_prompt = genkit.define_prompt::<TestInput, Value, Value>(PromptConfig {
+        name: "hi_default_model_test".to_string(),
+        prompt: Some("hi {{name}}".to_string()),
+        ..Default::default()
+    });
 
     let response = hi_prompt
         .generate(
@@ -70,14 +68,12 @@ async fn test_calls_prompt_with_default_model(#[future] genkit_instance: Arc<Gen
 async fn test_calls_prompt_with_default_model_and_config(#[future] genkit_instance: Arc<Genkit>) {
     let genkit = genkit_instance.await;
 
-    let hi_prompt = genkit
-        .define_prompt::<TestInput, Value, Value>(PromptConfig {
-            name: "hi_default_model_config_test".to_string(),
-            prompt: Some("hi {{name}}".to_string()),
-            config: Some(json!({ "temperature": 11 })),
-            ..Default::default()
-        })
-        .await;
+    let hi_prompt = genkit.define_prompt::<TestInput, Value, Value>(PromptConfig {
+        name: "hi_default_model_config_test".to_string(),
+        prompt: Some("hi {{name}}".to_string()),
+        config: Some(json!({ "temperature": 11 })),
+        ..Default::default()
+    });
 
     let response = hi_prompt
         .generate(
@@ -108,9 +104,7 @@ async fn test_calls_prompt_with_default_model_via_retrieved_prompt(
         prompt: Some("hi {{name}}".to_string()),
         ..Default::default()
     };
-    genkit
-        .define_prompt::<TestInput, Value, Value>(prompt_config)
-        .await;
+    genkit.define_prompt::<TestInput, Value, Value>(prompt_config);
 
     let hi_prompt = genkit_ai::prompt::prompt::<TestInput, Value, Value>(
         genkit.registry(),
@@ -142,13 +136,11 @@ async fn test_calls_prompt_with_default_model_via_retrieved_prompt(
 async fn test_should_apply_middleware_to_a_prompt_call(#[future] genkit_instance: Arc<Genkit>) {
     let genkit = genkit_instance.await;
 
-    let hi_prompt = genkit
-        .define_prompt::<TestInput, Value, Value>(PromptConfig {
-            name: "hi_middleware_test".to_string(),
-            prompt: Some("hi {{name}}".to_string()),
-            ..Default::default()
-        })
-        .await;
+    let hi_prompt = genkit.define_prompt::<TestInput, Value, Value>(PromptConfig {
+        name: "hi_middleware_test".to_string(),
+        prompt: Some("hi {{name}}".to_string()),
+        ..Default::default()
+    });
 
     let response = hi_prompt
         .generate(
@@ -174,14 +166,12 @@ async fn test_should_apply_middleware_configured_on_a_prompt(
 ) {
     let genkit = genkit_instance.await;
 
-    let hi_prompt = genkit
-        .define_prompt::<TestInput, Value, Value>(PromptConfig {
-            name: "hi_configured_middleware_test".to_string(),
-            prompt: Some("hi {{name}}".to_string()),
-            r#use: Some(vec![wrap_request(), wrap_response()]),
-            ..Default::default()
-        })
-        .await;
+    let hi_prompt = genkit.define_prompt::<TestInput, Value, Value>(PromptConfig {
+        name: "hi_configured_middleware_test".to_string(),
+        prompt: Some("hi {{name}}".to_string()),
+        r#use: Some(vec![wrap_request(), wrap_response()]),
+        ..Default::default()
+    });
 
     let response = hi_prompt
         .generate(
@@ -202,14 +192,12 @@ async fn test_should_apply_middleware_configured_on_a_prompt(
 async fn test_should_apply_middleware_to_looked_up_prompt(#[future] genkit_instance: Arc<Genkit>) {
     let genkit = genkit_instance.await;
 
-    genkit
-        .define_prompt::<TestInput, Value, Value>(PromptConfig {
-            name: "hi_lookup_with_middleware".to_string(),
-            prompt: Some("hi {{name}}".to_string()),
-            r#use: Some(vec![wrap_request(), wrap_response()]),
-            ..Default::default()
-        })
-        .await;
+    genkit.define_prompt::<TestInput, Value, Value>(PromptConfig {
+        name: "hi_lookup_with_middleware".to_string(),
+        prompt: Some("hi {{name}}".to_string()),
+        r#use: Some(vec![wrap_request(), wrap_response()]),
+        ..Default::default()
+    });
 
     let hi_prompt = genkit_ai::prompt::prompt::<TestInput, Value, Value>(
         genkit.registry(),
@@ -240,13 +228,11 @@ async fn test_should_apply_middleware_to_looked_up_prompt_with_options(
 ) {
     let genkit = genkit_instance.await;
 
-    genkit
-        .define_prompt::<TestInput, Value, Value>(PromptConfig {
-            name: "hi_lookup_options_middleware".to_string(),
-            prompt: Some("hi {{name}}".to_string()),
-            ..Default::default()
-        })
-        .await;
+    genkit.define_prompt::<TestInput, Value, Value>(PromptConfig {
+        name: "hi_lookup_options_middleware".to_string(),
+        prompt: Some("hi {{name}}".to_string()),
+        ..Default::default()
+    });
 
     let hi_prompt = genkit_ai::prompt::prompt::<TestInput, Value, Value>(
         genkit.registry(),
