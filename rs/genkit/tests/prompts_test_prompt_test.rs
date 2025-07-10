@@ -675,3 +675,53 @@ async fn test_returns_ref_to_functional_prompts(#[future] genkit_instance: Arc<G
         "Echo: hi banana; config: {\"temperature\":11}"
     );
 }
+
+#[rstest]
+#[tokio::test]
+/// 'includes metadata for functional prompts'
+async fn test_includes_metadata_for_functional_prompts(#[future] genkit_instance: Arc<Genkit>) {
+    let genkit = genkit_instance.await;
+
+    let prompt_config = PromptConfig {
+        name: "hi".to_string(),
+        model: Some(Model::Name("echoModel".to_string())),
+        config: Some(json!({ "temperature": 0.13 })),
+        messages_fn: Some(Arc::new(|_input: HiInput, _, _| {
+            Box::pin(async { Ok(vec![]) })
+        })),
+        ..Default::default()
+    };
+
+    genkit.define_prompt::<HiInput, Value, Value>(prompt_config);
+
+    let test_prompt_action = genkit.registry().lookup_action("/prompt/hi").await.unwrap();
+
+    let metadata = test_prompt_action.metadata();
+    let custom_metadata = &metadata.metadata;
+    let custom_metadata_value = serde_json::to_value(custom_metadata).unwrap();
+
+    let expected_input_schema = serde_json::to_value(schemars::schema_for!(HiInput)).unwrap();
+
+    let expected_metadata = json!({
+        "prompt": {
+            "name": "hi",
+            "model": "echoModel",
+            "config": {
+                "temperature": 0.13,
+            },
+            "input": {
+                "schema": expected_input_schema
+            },
+            "metadata": {},
+            "raw": {
+                "config": {
+                    "temperature": 0.13
+                },
+                "description": null
+            }
+        },
+        "type": "prompt"
+    });
+
+    assert_eq!(custom_metadata_value, expected_metadata);
+}
