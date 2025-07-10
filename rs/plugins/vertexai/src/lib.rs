@@ -80,6 +80,8 @@ impl VertexAIPlugin {
     }
 
     async fn register_models(&self, registry: &Registry) -> Result<()> {
+        println!("🦀 register_models");
+
         const KNOWN_DECOMISSIONED_MODELS: &[&str] = &[
             "gemini-pro-vision",
             "gemini-pro",
@@ -97,14 +99,15 @@ impl VertexAIPlugin {
             }
 
             if short_name.contains("gemini") {
+                println!("🦀 call define_gemini_model:{}", short_name);
                 let action = define_gemini_model(short_name, &self.options);
-                registry.register_action(short_name, action)?;
+                registry.register_action(&format!("vertexai/{}", short_name), action)?;
             } else if short_name.contains("imagen") {
                 let action = define_imagen_model(short_name, &self.options);
-                registry.register_action(short_name, action)?;
+                registry.register_action(&format!("vertexai/{}", short_name), action)?;
             } else if SUPPORTED_EMBEDDER_MODELS.contains(&short_name) {
                 let embedder = define_vertex_ai_embedder(short_name, &self.options);
-                registry.register_action(short_name, embedder)?;
+                registry.register_action(&format!("vertexai/{}", short_name), embedder)?;
             }
         }
         Ok(())

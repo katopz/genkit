@@ -18,6 +18,7 @@
 //! `predict` endpoint, which is used by models like Imagen and the text embedders.
 
 use crate::{common::get_derived_params, Error, Result, VertexAIPluginOptions};
+use log;
 use reqwest::header::{HeaderMap, AUTHORIZATION, CONTENT_TYPE};
 use serde::{de::DeserializeOwned, Serialize};
 
@@ -86,19 +87,21 @@ where
         .map_err(Error::Request)?;
 
     let status = response.status();
+    let response_text = response.text().await.map_err(Error::Request)?;
+
     if !status.is_success() {
-        let error_text = response
-            .text()
-            .await
-            .unwrap_or_else(|_| "Unknown error".to_string());
         return Err(Error::VertexAI(format!(
             "API request failed with status {}: {}",
-            status, error_text
+            status, response_text
         )));
     }
 
-    response
-        .json::<PredictionResponse<R>>()
-        .await
-        .map_err(Error::Request)
+    serde_json::from_str::<PredictionResponse<R>>(&response_text).map_err(|e| {
+        log::error!(
+            "Failed to decode response body: {}. Body: {}",
+            e,
+            response_text
+        );
+        Error::Json(e)
+    })
 }

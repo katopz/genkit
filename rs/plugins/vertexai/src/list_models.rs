@@ -18,6 +18,7 @@
 
 use crate::common::get_derived_params;
 use crate::{Error, Result, VertexAIPluginOptions};
+use log;
 use reqwest::header::{HeaderMap, AUTHORIZATION, CONTENT_TYPE};
 use serde::Deserialize;
 
@@ -26,8 +27,8 @@ use serde::Deserialize;
 #[serde(rename_all = "camelCase")]
 pub struct Model {
     pub name: String,
-    pub launch_stage: String,
-    // Other fields from the API can be added here if needed.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub launch_stage: Option<String>,
 }
 
 /// The response from the list models API.
@@ -62,19 +63,30 @@ pub async fn list_models(options: &VertexAIPluginOptions) -> Result<Vec<Model>> 
     let client = reqwest::Client::new();
     let response = client.get(&url).headers(headers).send().await?;
 
-    if !response.status().is_success() {
-        let status = response.status();
-        let error_text = response.text().await?;
+    let status = response.status();
+    let response_text = response.text().await?;
+
+    if !status.is_success() {
+        log::error!(
+            "API request to list models failed with status {}: {}",
+            status,
+            &response_text[200..].to_string()
+        );
         return Err(Error::VertexAI(format!(
             "API request to list models failed with status {}: {}",
-            status, error_text
+            status, response_text
         )));
     }
 
-    let list_response = response
-        .json::<ListModelsResponse>()
-        .await
-        .map_err(Error::from)?;
+    let list_response =
+        serde_json::from_str::<ListModelsResponse>(&response_text).map_err(|e| {
+            log::error!(
+                "Failed to decode list_models response body: {}. Body: {}",
+                e,
+                &response_text[200..].to_string()
+            );
+            Error::from(e)
+        })?;
 
     Ok(list_response.publisher_models)
 }

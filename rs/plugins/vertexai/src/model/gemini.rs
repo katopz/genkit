@@ -19,6 +19,7 @@
 
 use crate::common::get_derived_params;
 use crate::{context_caching, Error, Result, VertexAIPluginOptions};
+use log;
 
 use genkit_ai::{
     message::Role,
@@ -437,6 +438,7 @@ async fn gemini_runner(
     model_id: String,
     options: VertexAIPluginOptions,
 ) -> Result<GenerateResponseData> {
+    println!("🦀 gemini_runner");
     let mut vertex_req = to_vertex_request(&req)?;
     let params = get_derived_params(&options).await?;
 
@@ -456,7 +458,7 @@ async fn gemini_runner(
     }
 
     let url = format!(
-        "https://{}-aiplatform.googleapis.com/v1/projects/{}/locations/{}/publishers/google/models/{}:streamGenerateContent",
+        "https://{}-aiplatform.googleapis.com/v1/projects/{}/locations/{}/publishers/google/models/{}:generateContent",
         params.location, params.project_id, params.location, model_id
     );
 
@@ -473,6 +475,7 @@ async fn gemini_runner(
         format!("Bearer {}", token.as_str()).parse().unwrap(),
     );
 
+    println!("🦀 GOOOO");
     let client = reqwest::Client::new();
     let response = client
         .post(&url)
@@ -481,51 +484,26 @@ async fn gemini_runner(
         .send()
         .await?;
 
-    if !response.status().is_success() {
-        let status = response.status();
-        let error_text = response.text().await?;
+    let status = response.status();
+    let response_text = response.text().await?;
+
+    if !status.is_success() {
+        log::error!("Vertex AI API Error: {} - {}", status, &response_text);
         return Err(Error::VertexAI(format!(
             "API request failed with status {}: {}",
-            status, error_text
+            status, response_text
         )));
     }
-
-    // In a real implementation, this would handle the streaming response properly.
-    // For now, we will collect the response and parse it as a single object for simplicity.
-    // This is a placeholder for true streaming.
-    let full_response_text = response.text().await?;
-    let aggregated_response: Vec<VertexGeminiResponse> =
-        serde_json::from_str(&full_response_text.replace("]\n[", ",")).map_err(|e| {
-            Error::VertexAI(format!(
-                "Failed to parse streaming response: {}. Body: {}",
-                e, full_response_text
-            ))
-        })?;
-
-    // We need to aggregate the candidates and usage from all chunks.
-    let mut all_candidates = Vec::new();
-    let mut total_usage = GenerationUsage::default();
-
-    for chunk in aggregated_response {
-        all_candidates.extend(chunk.candidates);
-        if let Some(usage) = chunk.usage_metadata {
-            total_usage.input_tokens = Some(usage.prompt_token_count); // Input tokens are the same in all chunks
-            total_usage.output_tokens =
-                Some(total_usage.output_tokens.unwrap_or(0) + usage.candidates_token_count);
-            total_usage.total_tokens =
-                Some(total_usage.total_tokens.unwrap_or(0) + usage.total_token_count);
-        }
-    }
-
-    // Create a single response from aggregated data.
-    let final_resp = VertexGeminiResponse {
-        candidates: all_candidates,
-        usage_metadata: Some(VertexUsageMetadata {
-            prompt_token_count: total_usage.input_tokens.unwrap_or(0),
-            candidates_token_count: total_usage.output_tokens.unwrap_or(0),
-            total_token_count: total_usage.total_tokens.unwrap_or(0),
-        }),
-    };
+    log::debug!("Gemini Raw Response: {}", response_text);
+    println!("🦀 Gemini Raw Response: {}", response_text);
+    let final_resp: VertexGeminiResponse = serde_json::from_str(&response_text).map_err(|e| {
+        log::error!(
+            "Failed to decode gemini response body: {}. Body: {}",
+            e,
+            response_text
+        );
+        Error::Json(e)
+    })?;
 
     to_genkit_response(&req, final_resp)
 }

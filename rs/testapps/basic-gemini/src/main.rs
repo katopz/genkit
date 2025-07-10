@@ -28,16 +28,18 @@ pub fn joke_subject_generator(genkit: &Genkit) {
 async fn main() -> genkit::Result<()> {
     env_logger::init();
     let vertexai_plugin = vertex_ai(VertexAIPluginOptions {
-        project_id: None, //Some("talent-finder-437508".to_string()),
-        location: None,   //Some("asia-northeast1".to_string()),
+        project_id: None,
+        location: None,
         service_account: None,
     });
     let genkit = Genkit::init(GenkitOptions {
         plugins: vec![vertexai_plugin],
-        default_model: Some("gemini-1.5-flash".to_string()),
+        default_model: Some("vertexai/gemini-2.0-flash-lite-001".to_string()),
         ..Default::default()
     })
     .await?;
+
+    joke_subject_generator(&genkit);
 
     let joke_flow: Flow<String, String, ()> =
         genkit.clone().define_flow("banana", move |input, _| {
