@@ -349,7 +349,7 @@ impl Registry {
             format!("{:?}", meta.action_type).to_lowercase(),
             meta.name
         );
-        println!("[Registry] Registering action with key: {}", key);
+
         if state.actions.contains_key(&key) {
             // In a production framework, you might want to log a warning here.
         }
@@ -360,7 +360,6 @@ impl Registry {
 
     /// Looks up an action by its full key (e.g., "/flow/myflow").
     pub async fn lookup_action(&self, key: &str) -> Option<Arc<dyn ErasedAction>> {
-        println!("[Registry] Looking up action with key: {}", key);
         let parent = {
             let state = self.state.lock().unwrap();
             if let Some(action) = state.actions.get(key) {

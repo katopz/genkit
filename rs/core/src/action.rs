@@ -330,10 +330,6 @@ where
 
     /// Finalizes the build and creates the `Action` struct.
     pub fn build(self) -> Action<I, O, S> {
-        println!(
-            "[ActionBuilder::build] for action '{}'. Metadata is: {:?}",
-            self.name, self.metadata
-        );
         let meta = Arc::new(ActionMetadata {
             action_type: self.action_type,
             name: self.name,
