@@ -107,7 +107,7 @@ pub struct ChatOptions<'a, I, S> {
     pub preamble: Option<&'a ExecutablePrompt<I>>,
     pub base_options: Option<BaseGenerateOptions>,
     pub prompt_render_input: Option<I>,
-    _marker: std::marker::PhantomData<S>,
+    pub _marker: std::marker::PhantomData<S>,
 }
 
 impl<'a, I, S> Default for ChatOptions<'a, I, S> {
