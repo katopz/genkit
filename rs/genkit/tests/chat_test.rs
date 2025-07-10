@@ -261,3 +261,83 @@ async fn test_start_chat_from_prompt(#[future] genkit_instance: Arc<Genkit>) {
         "Echo: hi from templatesend it; config: {\"version\":\"abc\"}"
     );
 }
+
+#[rstest]
+#[tokio::test]
+/// 'can start chat from a prompt with input'
+async fn test_start_chat_from_prompt_with_input(#[future] genkit_instance: Arc<Genkit>) {
+    let genkit = genkit_instance.await;
+
+    let preamble = genkit.define_prompt::<NameInput, Value, Value>(PromptConfig {
+        name: "hi".to_string(),
+        config: Some(json!({ "version": "abc" })),
+        prompt: Some("hi {{name}} from template".to_string()),
+        ..Default::default()
+    });
+
+    let session =
+        genkit_ai::Session::<()>::new(Arc::new(genkit.registry().clone()), None, None, None)
+            .await
+            .unwrap();
+
+    let chat = Arc::new(session)
+        .chat(Some(ChatOptions {
+            preamble: Some(&preamble),
+            prompt_render_input: Some(NameInput {
+                name: "Genkit".to_string(),
+            }),
+            ..Default::default()
+        }))
+        .await
+        .unwrap();
+
+    let response = chat.send("send it").await.unwrap();
+
+    assert_eq!(
+        response.text().unwrap(),
+        "Echo: hi Genkit from templatesend it; config: {\"version\":\"abc\"}"
+    );
+}
+
+#[rstest]
+#[tokio::test]
+/// 'can start chat from a prompt file with input'
+async fn test_start_chat_from_prompt_file_with_input(#[future] genkit_instance: Arc<Genkit>) {
+    let genkit = genkit_instance.await;
+
+    // Define the prompt to simulate it being loaded from a file
+    genkit.define_prompt::<NameInput, Value, Value>(PromptConfig {
+        name: "chat_preamble".to_string(),
+        config: Some(json!({ "version": "abc" })),
+        prompt: Some("hi {{name}} from template".to_string()),
+        ..Default::default()
+    });
+
+    // Look up the prompt
+    let preamble = genkit_ai::prompt::prompt(genkit.registry(), "chat_preamble", None)
+        .await
+        .unwrap();
+
+    let session =
+        genkit_ai::Session::<()>::new(Arc::new(genkit.registry().clone()), None, None, None)
+            .await
+            .unwrap();
+
+    let chat = Arc::new(session)
+        .chat(Some(ChatOptions {
+            preamble: Some(&preamble),
+            prompt_render_input: Some(NameInput {
+                name: "Genkit".to_string(),
+            }),
+            ..Default::default()
+        }))
+        .await
+        .unwrap();
+
+    let response = chat.send("send it").await.unwrap();
+
+    assert_eq!(
+        response.text().unwrap(),
+        "Echo: hi Genkit from templatesend it; config: {\"version\":\"abc\"}"
+    );
+}
