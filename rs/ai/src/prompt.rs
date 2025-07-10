@@ -116,6 +116,10 @@ pub struct PromptConfig<I = Value, O = Value, C = Value> {
     pub output: Option<OutputOptions>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub tools: Option<Vec<ToolArgument>>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub max_turns: Option<u32>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub return_tool_requests: Option<bool>,
     #[serde(skip, default)]
     #[schemars(skip)]
     pub r#use: Option<Vec<ModelMiddleware>>,
@@ -151,6 +155,8 @@ where
             .field("docs_fn", &self.docs_fn.as_ref().map(|_| "Some(<fn>)"))
             .field("output", &self.output)
             .field("tools", &self.tools)
+            .field("max_turns", &self.max_turns)
+            .field("return_tool_requests", &self.return_tool_requests)
             .field("use", &self.r#use.as_ref().map(|u| u.len()))
             .field("_marker", &self._marker)
             .finish()
@@ -318,7 +324,29 @@ where
                 resolver(input.clone(), state.clone(), resolver_context.clone()).await?;
             messages.extend(resolved_messages);
         } else if let Some(config_messages) = &self.config.messages {
-            messages.extend(config_messages.clone());
+            let mut rendered_messages = Vec::new();
+            for msg_template in config_messages {
+                let mut new_msg = msg_template.clone();
+                let mut rendered_content = Vec::new();
+                for part_template in &msg_template.content {
+                    let mut new_part = part_template.clone();
+                    if let Some(text_template) = &part_template.text {
+                        let rendered_text = handlebars
+                            .render_template(text_template, &render_data)
+                            .map_err(|e| {
+                                Error::new_internal(format!(
+                                    "Failed to render message template: {}",
+                                    e
+                                ))
+                            })?;
+                        new_part.text = Some(rendered_text);
+                    }
+                    rendered_content.push(new_part);
+                }
+                new_msg.content = rendered_content;
+                rendered_messages.push(new_msg);
+            }
+            messages.extend(rendered_messages);
         }
 
         // Main User Prompt
@@ -371,6 +399,8 @@ where
             config: final_config,
             output: self.config.output.clone(),
             context: opts.as_ref().and_then(|o| o.context.clone()),
+            max_turns: self.config.max_turns,
+            return_tool_requests: self.config.return_tool_requests,
             r#use: {
                 let mut middleware = self.config.r#use.clone().unwrap_or_default();
                 if let Some(opts_middleware) = opts.as_ref().and_then(|o| o.r#use.as_ref()) {

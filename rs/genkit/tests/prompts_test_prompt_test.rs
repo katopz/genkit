@@ -77,3 +77,193 @@ async fn test_loads_from_folder(#[future] genkit_instance: Arc<Genkit>) {
     // The render method itself doesn't apply the default model, so this should be None.
     assert!(rendered_opts.model.is_none());
 }
+
+#[rstest]
+#[tokio::test]
+/// 'loads from the sub folder'
+async fn test_loads_from_sub_folder(#[future] genkit_instance: Arc<Genkit>) {
+    let genkit = genkit_instance.await;
+
+    // Simulate loading from `prompts/sub/test.prompt` by defining it with that name.
+    let sub_test_prompt_config = PromptConfig {
+        name: "sub/test".to_string(),
+        prompt: Some("Hello from the sub folder prompt file".to_string()),
+        config: Some(json!({ "temperature": 12 })),
+        output: Some(OutputOptions::default()),
+        ..Default::default()
+    };
+    genkit
+        .define_prompt::<EmptyInput, Value, Value>(sub_test_prompt_config)
+        .await;
+
+    // Look up the prompt using its full name.
+    let test_prompt =
+        genkit_ai::prompt::prompt::<EmptyInput, Value, Value>(genkit.registry(), "sub/test")
+            .await
+            .unwrap();
+
+    // Test generation.
+    let response = test_prompt.generate(EmptyInput {}, None).await.unwrap();
+    assert_eq!(
+        response.text().unwrap(),
+        "Echo: Hello from the sub folder prompt file; config: {\"temperature\":12}"
+    );
+
+    // Test rendering.
+    let rendered_opts = test_prompt.render(EmptyInput {}, None).await.unwrap();
+
+    let expected_messages = Some(vec![MessageData {
+        role: Role::User,
+        content: vec![Part::text("Hello from the sub folder prompt file")],
+        ..Default::default()
+    }]);
+
+    assert_eq!(rendered_opts.messages, expected_messages);
+    assert_eq!(rendered_opts.config, Some(json!({ "temperature": 12 })));
+    assert_eq!(rendered_opts.output, Some(OutputOptions::default()));
+}
+
+use genkit::{model::Model, tool::ToolArgument};
+
+#[derive(Serialize, Deserialize, JsonSchema, Debug, Clone, Default)]
+struct KitchenSinkInput {
+    subject: String,
+}
+
+#[rstest]
+#[tokio::test]
+/// 'loads from the folder with all the options'
+async fn test_loads_from_folder_with_all_options(#[future] genkit_instance: Arc<Genkit>) {
+    let genkit = genkit_instance.await;
+
+    // Simulate loading a complex prompt from a file.
+    let kitchen_sink_config = PromptConfig {
+        name: "kitchensink".to_string(),
+        model: Some(Model::Name(
+            "googleai/gemini-5.0-ultimate-pro-plus".to_string(),
+        )),
+        config: Some(json!({ "temperature": 11 })),
+        output: Some(OutputOptions {
+            format: Some("csv".to_string()),
+            json_schema: Some(json!({
+                "type": "object",
+                "properties": {
+                    "obj": {
+                        "type": ["object", "null"],
+                        "description": "a nested object",
+                        "properties": {
+                            "nest1": { "type": ["string", "null"] }
+                        },
+                        "additionalProperties": false
+                    },
+                    "arr": {
+                        "type": "array",
+                        "description": "array of objects",
+                        "items": {
+                            "type": "object",
+                            "properties": {
+                                "nest2": { "type": ["boolean", "null"] }
+                            },
+                            "additionalProperties": false
+                        }
+                    }
+                },
+                "required": ["arr"],
+                "additionalProperties": false
+            })),
+            ..Default::default()
+        }),
+        system: Some(" Hello ".to_string()),
+        messages: Some(vec![MessageData {
+            role: Role::Model,
+            content: vec![Part::text(" from the prompt file {{subject}}".to_string())],
+            ..Default::default()
+        }]),
+        tools: Some(vec![
+            ToolArgument::from("toolA"),
+            ToolArgument::from("toolB"),
+        ]),
+        max_turns: Some(77),
+        return_tool_requests: Some(true),
+        ..Default::default()
+    };
+    genkit
+        .define_prompt::<KitchenSinkInput, Value, Value>(kitchen_sink_config)
+        .await;
+
+    let test_prompt = genkit_ai::prompt::prompt::<KitchenSinkInput, Value, Value>(
+        genkit.registry(),
+        "kitchensink",
+    )
+    .await
+    .unwrap();
+
+    let request = test_prompt
+        .render(
+            KitchenSinkInput {
+                subject: "banana".to_string(),
+            },
+            None,
+        )
+        .await
+        .unwrap();
+
+    // Assertions are split to make debugging easier.
+    assert_eq!(
+        request.model,
+        Some(Model::Name(
+            "googleai/gemini-5.0-ultimate-pro-plus".to_string()
+        ))
+    );
+    assert_eq!(request.config, Some(json!({ "temperature": 11 })));
+    assert_eq!(
+        request.output,
+        Some(OutputOptions {
+            format: Some("csv".to_string()),
+            json_schema: Some(json!({
+                "type": "object",
+                "properties": {
+                    "obj": {
+                        "type": ["object", "null"],
+                        "description": "a nested object",
+                        "properties": { "nest1": { "type": ["string", "null"] } },
+                        "additionalProperties": false
+                    },
+                    "arr": {
+                        "type": "array",
+                        "description": "array of objects",
+                        "items": {
+                            "type": "object",
+                            "properties": { "nest2": { "type": ["boolean", "null"] } },
+                            "additionalProperties": false
+                        }
+                    }
+                },
+                "required": ["arr"],
+                "additionalProperties": false
+            })),
+            ..Default::default()
+        })
+    );
+    assert_eq!(
+        request.messages,
+        Some(vec![
+            MessageData {
+                role: Role::System,
+                content: vec![Part::text(" Hello ")],
+                ..Default::default()
+            },
+            MessageData {
+                role: Role::Model,
+                content: vec![Part::text(" from the prompt file banana")],
+                ..Default::default()
+            },
+        ])
+    );
+    assert_eq!(request.max_turns, Some(77));
+    assert_eq!(request.return_tool_requests, Some(true));
+    // The `tools` field in GenerateOptions is resolved from ToolArgument to ToolDefinition,
+    // so we can't directly compare them here. We'll add tool definitions if needed.
+    // assert_eq!(request.tool_choice, Some(ToolChoice::Required));
+    // assert!(request.tools.is_some());
+}
