@@ -72,9 +72,9 @@ async fn assert_interrupt(result: Result<impl Serialize + Debug>, expected_metad
 #[rstest]
 #[tokio::test]
 /// Corresponds to: it('should throw a simple interrupt with no metadata', ...)
-async fn test_interrupt_with_no_metadata(mut registry: Registry) {
+async fn test_interrupt_with_no_metadata(registry: Registry) {
     define_interrupt::<(), ()>(
-        &mut registry,
+        &registry,
         InterruptConfig {
             name: "simple".to_string(),
             description: "simple interrupt".to_string(),
@@ -90,13 +90,13 @@ async fn test_interrupt_with_no_metadata(mut registry: Registry) {
 #[rstest]
 #[tokio::test]
 /// Corresponds to: it('should throw a simple interrupt with fixed metadata', ...)
-async fn test_interrupt_with_fixed_metadata(mut registry: Registry) {
+async fn test_interrupt_with_fixed_metadata(registry: Registry) {
     let factory = Arc::new(|_: ()| {
         Box::pin(async { Some(json!({ "foo": "bar" })) })
             as Pin<Box<dyn Future<Output = Option<Value>> + Send>>
     });
     define_interrupt::<(), ()>(
-        &mut registry,
+        &registry,
         InterruptConfig {
             name: "simple".to_string(),
             description: "simple interrupt".to_string(),
@@ -112,14 +112,14 @@ async fn test_interrupt_with_fixed_metadata(mut registry: Registry) {
 #[rstest]
 #[tokio::test]
 /// Corresponds to: it('should throw a simple interrupt with function-returned metadata', ...)
-async fn test_interrupt_with_function_metadata(mut registry: Registry) {
+async fn test_interrupt_with_function_metadata(registry: Registry) {
     let factory = Arc::new(|input: String| {
         Box::pin(async move { Some(json!({ "foo": input })) })
             as Pin<Box<dyn Future<Output = Option<Value>> + Send>>
     });
 
     define_interrupt::<String, ()>(
-        &mut registry,
+        &registry,
         InterruptConfig {
             name: "simple".to_string(),
             description: "simple interrupt".to_string(),
@@ -136,7 +136,7 @@ async fn test_interrupt_with_function_metadata(mut registry: Registry) {
 #[rstest]
 #[tokio::test]
 /// Corresponds to: it('should throw a simple interrupt with async function-returned metadata', ...)
-async fn test_interrupt_with_async_function_metadata(mut registry: Registry) {
+async fn test_interrupt_with_async_function_metadata(registry: Registry) {
     // The implementation is identical to the sync version because the factory
     // already returns a Future.
     let factory = Arc::new(|input: String| {
@@ -145,7 +145,7 @@ async fn test_interrupt_with_async_function_metadata(mut registry: Registry) {
     });
 
     define_interrupt::<String, ()>(
-        &mut registry,
+        &registry,
         InterruptConfig {
             name: "simple".to_string(),
             description: "simple interrupt".to_string(),
@@ -162,9 +162,9 @@ async fn test_interrupt_with_async_function_metadata(mut registry: Registry) {
 #[rstest]
 #[tokio::test]
 /// Corresponds to: it('should register the reply schema / json schema as the output schema of the tool', ...)
-async fn test_interrupt_registers_output_schema(mut registry: Registry) {
+async fn test_interrupt_registers_output_schema(registry: Registry) {
     define_interrupt::<(), TestOutput>(
-        &mut registry,
+        &registry,
         InterruptConfig {
             name: "simple".to_string(),
             description: "simple".to_string(),
@@ -185,9 +185,9 @@ async fn test_interrupt_registers_output_schema(mut registry: Registry) {
 #[rstest]
 #[tokio::test]
 /// Corresponds to: .respond() -> 'constructs a ToolResponsePart'
-async fn test_respond_constructs_tool_response_part(mut registry: Registry) {
+async fn test_respond_constructs_tool_response_part(registry: Registry) {
     define_tool(
-        &mut registry,
+        &registry,
         ToolConfig::<(), String> {
             name: "test".to_string(),
             description: "test".to_string(),
@@ -223,9 +223,9 @@ async fn test_respond_constructs_tool_response_part(mut registry: Registry) {
 #[rstest]
 #[tokio::test]
 /// Corresponds to: .respond() -> 'includes metadata'
-async fn test_respond_includes_metadata(mut registry: Registry) {
+async fn test_respond_includes_metadata(registry: Registry) {
     define_tool(
-        &mut registry,
+        &registry,
         ToolConfig::<(), String> {
             name: "test".to_string(),
             description: "test".to_string(),
@@ -265,12 +265,12 @@ async fn test_respond_includes_metadata(mut registry: Registry) {
 #[rstest]
 #[tokio::test]
 /// Corresponds to: .respond() -> 'validates schema'
-async fn test_respond_validates_schema(mut registry: Registry) {
+async fn test_respond_validates_schema(registry: Registry) {
     #[derive(Default, JsonSchema, Serialize, Deserialize, Debug, PartialEq)]
     struct MyNumber(i32);
 
     define_tool(
-        &mut registry,
+        &registry,
         ToolConfig::<(), MyNumber> {
             name: "test".to_string(),
             description: "test".to_string(),
@@ -305,9 +305,9 @@ async fn test_respond_validates_schema(mut registry: Registry) {
 #[rstest]
 #[tokio::test]
 /// Corresponds to: .restart() -> 'constructs a ToolRequestPart'
-async fn test_restart_constructs_tool_request_part(mut registry: Registry) {
+async fn test_restart_constructs_tool_request_part(registry: Registry) {
     define_tool(
-        &mut registry,
+        &registry,
         ToolConfig::<(), ()> {
             name: "test".to_string(),
             description: "test".to_string(),
@@ -342,9 +342,9 @@ async fn test_restart_constructs_tool_request_part(mut registry: Registry) {
 #[rstest]
 #[tokio::test]
 /// Corresponds to: .restart() -> 'includes metadata'
-async fn test_restart_includes_metadata(mut registry: Registry) {
+async fn test_restart_includes_metadata(registry: Registry) {
     define_tool(
-        &mut registry,
+        &registry,
         ToolConfig::<(), ()> {
             name: "test".to_string(),
             description: "test".to_string(),
@@ -380,7 +380,7 @@ async fn test_restart_includes_metadata(mut registry: Registry) {
 #[rstest]
 #[tokio::test]
 /// Corresponds to: .restart() -> 'validates schema'
-async fn test_restart_validates_schema(mut registry: Registry) {
+async fn test_restart_validates_schema(registry: Registry) {
     #[derive(Default, Clone, JsonSchema, Serialize, Deserialize, Debug, PartialEq)]
     struct ValidatedInput {
         #[schemars(length(min = 5))]
@@ -388,7 +388,7 @@ async fn test_restart_validates_schema(mut registry: Registry) {
     }
 
     define_tool(
-        &mut registry,
+        &registry,
         ToolConfig::<ValidatedInput, ()> {
             name: "test".to_string(),
             description: "test".to_string(),

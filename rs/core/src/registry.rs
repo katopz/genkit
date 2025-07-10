@@ -337,7 +337,7 @@ impl Registry {
     /// The action key is automatically generated from its type and name.
     /// The action must be wrapped in an `Arc` to allow for shared ownership.
     pub fn register_action<A: ErasedAction + Send + Sync + 'static>(
-        &mut self,
+        &self,
         name: &str,
         action: A,
     ) -> Result<()> {
@@ -428,12 +428,7 @@ impl Registry {
     }
 
     /// Registers a type-erased value with the registry.
-    pub fn register_any(
-        &mut self,
-        value_type: &str,
-        name: &str,
-        value: Arc<dyn Any + Send + Sync>,
-    ) {
+    pub fn register_any(&self, value_type: &str, name: &str, value: Arc<dyn Any + Send + Sync>) {
         let key = format!("{}/{}", value_type, name);
         self.state.lock().unwrap().values.insert(key, value);
     }
@@ -516,7 +511,7 @@ mod tests {
             value: String,
         }
 
-        let mut registry = Registry::new();
+        let registry = Registry::new();
         let test_action = ActionBuilder::<TestInput, TestOutput, (), _>::new(
             ActionType::Flow,
             "myFlow",
@@ -540,7 +535,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_child_registry_fallback() {
-        let mut parent_registry = Registry::new();
+        let parent_registry = Registry::new();
         let parent_action =
             ActionBuilder::<(), (), (), _>::new(ActionType::Util, "parentUtil", |_, _| async {
                 Ok(())
@@ -550,7 +545,7 @@ mod tests {
             .register_action("parentUtil", parent_action)
             .unwrap();
 
-        let mut child_registry = Registry::with_parent(&parent_registry);
+        let child_registry = Registry::with_parent(&parent_registry);
         let child_action =
             ActionBuilder::<(), (), (), _>::new(ActionType::Util, "childUtil", |_, _| async {
                 Ok(())

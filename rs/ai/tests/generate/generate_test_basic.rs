@@ -37,9 +37,9 @@ struct AddInput {
 
 #[fixture]
 fn registry() -> Registry {
-    let mut registry = Registry::new();
+    let registry = Registry::new();
     define_tool(
-            &mut registry,
+            &registry,
             ToolConfig::<JokeInput, String> {
                 name: "tellAFunnyJoke".to_string(),
                 description:
@@ -50,7 +50,7 @@ fn registry() -> Registry {
             |input, _| async move { Ok(format!("Why did the {} cross the road?", input.topic)) },
         );
     define_tool(
-        &mut registry,
+        &registry,
         ToolConfig::<AddInput, i32> {
             name: "namespaced/add".to_string(),
             description: "add two numbers together".to_string(),

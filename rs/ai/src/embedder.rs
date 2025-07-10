@@ -132,11 +132,7 @@ pub struct EmbedderInfo {
 //
 
 /// Defines a new embedder and registers it.
-pub fn define_embedder<I, F, Fut>(
-    registry: &mut Registry,
-    name: &str,
-    runner: F,
-) -> EmbedderAction<I>
+pub fn define_embedder<I, F, Fut>(registry: &Registry, name: &str, runner: F) -> EmbedderAction<I>
 where
     I: JsonSchema + DeserializeOwned + Send + Sync + Clone + 'static,
     F: Fn(EmbedRequest<I>, genkit_core::action::ActionFnArg<()>) -> Fut + Send + Sync + 'static,

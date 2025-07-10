@@ -266,7 +266,7 @@ pub struct ToolConfig<I = (), O = ()> {
 }
 
 /// Defines a new tool and registers it as a Genkit action.
-pub fn define_tool<I, O, F, Fut>(registry: &mut Registry, config: ToolConfig<I, O>, runner: F)
+pub fn define_tool<I, O, F, Fut>(registry: &Registry, config: ToolConfig<I, O>, runner: F)
 where
     I: JsonSchema + Serialize + DeserializeOwned + Send + Sync + Clone + 'static,
     O: JsonSchema + Serialize + DeserializeOwned + Send + Sync + 'static,
@@ -335,7 +335,7 @@ impl<I, O> Default for InterruptConfig<I, O> {
 }
 
 /// Defines a tool that interrupts the flow to wait for user input.
-pub fn define_interrupt<I, O>(registry: &mut Registry, config: InterruptConfig<I, O>)
+pub fn define_interrupt<I, O>(registry: &Registry, config: InterruptConfig<I, O>)
 where
     I: JsonSchema + Serialize + DeserializeOwned + Send + Sync + Clone + 'static,
     O: JsonSchema + Serialize + DeserializeOwned + Send + Sync + 'static,
@@ -385,7 +385,7 @@ where
     Fut: Future<Output = Result<O>> + Send + 'static,
 {
     /// Attaches the dynamic tool to a registry, making it an executable action.
-    pub fn attach(self, registry: &mut Registry) -> ToolArgument {
+    pub fn attach(self, registry: &Registry) -> ToolArgument {
         let runner_arc = Arc::new(self.runner);
         let action = detached_action(
             ActionType::Tool,

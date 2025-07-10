@@ -38,14 +38,14 @@ fn ranked_doc_text(doc: &RankedDocument) -> String {
 
 #[rstest]
 #[tokio::test]
-async fn test_reranks_documents_based_on_custom_logic(mut registry: Registry) {
+async fn test_reranks_documents_based_on_custom_logic(registry: Registry) {
     #[derive(Debug, Serialize, Deserialize, JsonSchema, Clone)]
     struct TestOptions {
         k: Option<usize>,
     }
 
     let custom_reranker = define_reranker(
-        &mut registry,
+        &registry,
         "customReranker",
         |req: RerankerRequest<TestOptions>, _| async move {
             let query_len = req.query.text().len();
@@ -105,14 +105,14 @@ async fn test_reranks_documents_based_on_custom_logic(mut registry: Registry) {
 
 #[rstest]
 #[tokio::test]
-async fn test_handles_missing_options_gracefully(mut registry: Registry) {
+async fn test_handles_missing_options_gracefully(registry: Registry) {
     #[derive(Debug, Serialize, Deserialize, JsonSchema, Clone)]
     struct TestOptions {
         k: Option<usize>,
     }
 
     let custom_reranker = define_reranker(
-        &mut registry,
+        &registry,
         "reranker",
         |req: RerankerRequest<TestOptions>, _| async move {
             let reranked_docs = req
@@ -159,9 +159,9 @@ async fn test_handles_missing_options_gracefully(mut registry: Registry) {
 
 #[rstest]
 #[tokio::test]
-async fn test_preserves_document_metadata(mut registry: Registry) {
+async fn test_preserves_document_metadata(registry: Registry) {
     let custom_reranker = define_reranker(
-        &mut registry,
+        &registry,
         "reranker",
         |req: RerankerRequest<()>, _| async move {
             let reranked_docs = req
@@ -228,8 +228,8 @@ async fn test_preserves_document_metadata(mut registry: Registry) {
 
 #[rstest]
 #[tokio::test]
-async fn test_handles_errors_thrown_by_the_reranker(mut registry: Registry) {
-    let custom_reranker = define_reranker(&mut registry, "reranker", |_, _| async move {
+async fn test_handles_errors_thrown_by_the_reranker(registry: Registry) {
+    let custom_reranker = define_reranker(&registry, "reranker", |_, _| async move {
         Err(genkit_core::error::Error::new_internal(
             "Something went wrong during reranking",
         ))

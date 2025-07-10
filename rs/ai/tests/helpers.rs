@@ -268,10 +268,10 @@ pub async fn registry_with_programmable_model() -> (Arc<Registry>, ProgrammableM
 pub async fn registry_with_echo_model_and_tool(
 ) -> (Arc<Registry>, Arc<Mutex<Option<GenerateRequest>>>) {
     let (registry_arc, last_request) = registry_with_echo_model().await;
-    let mut registry = (*registry_arc).clone();
+    let registry = (*registry_arc).clone();
 
     define_tool(
-        &mut registry,
+        &registry,
         ToolConfig {
             name: "toolA".to_string(),
             description: "toolA descr".to_string(),

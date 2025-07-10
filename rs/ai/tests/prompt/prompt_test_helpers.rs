@@ -36,9 +36,7 @@ pub struct TestCase {
 
 pub async fn test_runner(case: TestCase) -> Result<()> {
     let (registry, _last_request) = helpers::registry_with_echo_model().await;
-    let mut mut_registry = (*registry).clone();
-
-    let p = define_prompt(&mut mut_registry, case.config);
+    let p = define_prompt(&registry, case.config);
 
     let session = if let Some(state) = case.state.clone() {
         Some(Arc::new(

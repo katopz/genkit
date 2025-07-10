@@ -182,11 +182,7 @@ where
 //
 
 /// Defines a new retriever and registers it.
-pub fn define_retriever<I, F, Fut>(
-    registry: &mut Registry,
-    name: &str,
-    runner: F,
-) -> RetrieverAction<I>
+pub fn define_retriever<I, F, Fut>(registry: &Registry, name: &str, runner: F) -> RetrieverAction<I>
 where
     I: JsonSchema + DeserializeOwned + Send + Sync + Clone + 'static,
     F: Fn(RetrieverRequest<I>, genkit_core::action::ActionFnArg<()>) -> Fut + Send + Sync + 'static,
@@ -201,7 +197,7 @@ where
 }
 
 /// Defines a new indexer and registers it.
-pub fn define_indexer<I, F, Fut>(registry: &mut Registry, name: &str, runner: F) -> IndexerAction<I>
+pub fn define_indexer<I, F, Fut>(registry: &Registry, name: &str, runner: F) -> IndexerAction<I>
 where
     I: JsonSchema + DeserializeOwned + Send + Sync + Clone + 'static,
     F: Fn(IndexerRequest<I>, genkit_core::action::ActionFnArg<()>) -> Fut + Send + Sync + 'static,

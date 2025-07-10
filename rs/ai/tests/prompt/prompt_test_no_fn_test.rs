@@ -241,9 +241,7 @@ struct TestCase {
 #[tokio::test]
 async fn test_prompt_logic(#[case] case: TestCase) {
     let (registry, _last_request) = registry_with_echo_model_and_tool().await;
-    let mut mut_registry = (*registry).clone();
-
-    let p = define_prompt(&mut mut_registry, case.prompt);
+    let p = define_prompt(&registry, case.prompt);
 
     let p_clone = p.clone();
     let input_clone = case.input.clone().unwrap_or(Value::Null);

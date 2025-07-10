@@ -182,11 +182,7 @@ pub struct EvaluatorInfo {
 //
 
 /// Defines a new evaluator and registers it.
-pub fn define_evaluator<I, F, Fut>(
-    registry: &mut Registry,
-    name: &str,
-    runner: F,
-) -> EvaluatorAction<I>
+pub fn define_evaluator<I, F, Fut>(registry: &Registry, name: &str, runner: F) -> EvaluatorAction<I>
 where
     I: JsonSchema + DeserializeOwned + Send + Sync + Clone + 'static,
     F: Fn(BaseEvalDataPoint) -> Fut + Send + Sync + 'static,

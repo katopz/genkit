@@ -180,8 +180,7 @@ impl Genkit {
         F: Fn(I, ToolFnOptions) -> Fut + Send + Sync + Clone + 'static,
         Fut: Future<Output = Result<O>> + Send + 'static,
     {
-        let mut registry = self.registry.clone();
-        define_tool(&mut registry, config, runner)
+        define_tool(&self.registry, config, runner)
     }
 
     /// Defines a new dynamic tool and registers it with the Genkit registry.
@@ -192,8 +191,7 @@ impl Genkit {
         F: Fn(I, ToolFnOptions) -> Fut + Send + Sync + Clone + 'static,
         Fut: Future<Output = Result<O>> + Send + 'static,
     {
-        let mut registry = self.registry.clone();
-        dynamic_tool(config, runner).attach(&mut registry)
+        dynamic_tool(config, runner).attach(&self.registry)
     }
 
     /// Defines a new dynamic tool and registers it with the Genkit registry.
@@ -215,7 +213,7 @@ impl Genkit {
         Fut: Future<Output = Result<O>> + Send,
         Action<I, O, S>: genkit_core::registry::ErasedAction + 'static,
     {
-        define_flow(&mut self.registry.clone(), name, func)
+        define_flow(&self.registry, name, func)
     }
 
     /// Defines a new model and adds it to the registry.
@@ -229,16 +227,16 @@ impl Genkit {
             + Send
             + 'static,
     {
-        define_model(&mut self.registry.clone(), options, f)
+        define_model(&self.registry, options, f)
     }
 
     /// Defines a new background model and adds it to the registry.
     pub fn define_background_model(
         &self,
-        registry: &mut genkit_core::Registry,
+        registry: &Registry,
         options: DefineBackgroundModelOptions,
     ) -> BackgroundModelAction {
-        define_background_model(&mut self.registry.clone(), options)
+        define_background_model(&self.registry, options)
     }
 
     /// Defines and registers a prompt based on a function.
@@ -258,7 +256,7 @@ impl Genkit {
             + 'static,
         C: Serialize + DeserializeOwned + JsonSchema + Send + Sync + 'static,
     {
-        define_prompt(&mut self.registry.clone(), config)
+        define_prompt(&self.registry, config)
     }
 
     /// Creates a retriever action for the provided RetrieverFn implementation.
@@ -271,7 +269,7 @@ impl Genkit {
             + 'static,
         Fut: Future<Output = Result<RetrieverResponse>> + Send + 'static,
     {
-        define_retriever(&mut self.registry.clone(), name, runner)
+        define_retriever(&self.registry, name, runner)
     }
 
     // TODO
@@ -285,7 +283,7 @@ impl Genkit {
     //     C: Serialize + for<'de> DeserializeOwned + Send + Sync + 'static,
     //     R: SimpleRetrieverFn<C> + 'static,
     // {
-    //     define_simple_retriever(&mut self.registry, options, handler).await
+    //     define_simple_retriever(&self.registry, options, handler).await
     // }
 
     /// Creates an indexer action for the provided IndexerFn implementation.
@@ -298,7 +296,7 @@ impl Genkit {
             + 'static,
         Fut: Future<Output = Result<()>> + Send + 'static,
     {
-        define_indexer(&mut self.registry.clone(), name, runner)
+        define_indexer(&self.registry, name, runner)
     }
 
     /// Creates evaluator action for the provided EvaluatorFn implementation.
@@ -308,7 +306,7 @@ impl Genkit {
         F: Fn(BaseEvalDataPoint) -> Fut + Send + Sync + 'static,
         Fut: Future<Output = Result<EvalResponse>> + Send + 'static,
     {
-        define_evaluator(&mut self.registry.clone(), name, runner)
+        define_evaluator(&self.registry, name, runner)
     }
 
     /// Creates embedder model for the provided EmbedderFn model implementation.
@@ -318,7 +316,7 @@ impl Genkit {
         F: Fn(EmbedRequest<I>, genkit_core::action::ActionFnArg<()>) -> Fut + Send + Sync + 'static,
         Fut: Future<Output = Result<EmbedResponse>> + Send + 'static,
     {
-        define_embedder(&mut self.registry.clone(), name, runner)
+        define_embedder(&self.registry, name, runner)
     }
 
     /// Creates reranker action for the provided RerankerFn implementation.
@@ -331,16 +329,16 @@ impl Genkit {
             + 'static,
         Fut: Future<Output = Result<RerankerResponse>> + Send + 'static,
     {
-        define_reranker(&mut self.registry.clone(), name, runner)
+        define_reranker(&self.registry, name, runner)
     }
 
     pub fn define_format(
-        &self,
+        &mut self,
         name: impl Into<String>,
         config: FormatterConfig,
         handler: FormatHandler,
     ) -> Formatter {
-        define_format(&mut self.registry.clone(), name, config, handler)
+        define_format(&mut self.registry, name, config, handler)
     }
 
     pub fn define_interrupt<I, O>(&self, config: InterruptConfig<I, O>)
@@ -348,7 +346,7 @@ impl Genkit {
         I: JsonSchema + Serialize + DeserializeOwned + Send + Sync + Clone + 'static,
         O: JsonSchema + Serialize + DeserializeOwned + Send + Sync + 'static,
     {
-        define_interrupt(&mut self.registry.clone(), config);
+        define_interrupt(&self.registry, config);
     }
 
     pub fn define_resource<F, Fut>(
@@ -360,7 +358,7 @@ impl Genkit {
         F: Fn(ResourceInput, ActionContext) -> Fut + Send + Sync + 'static,
         Fut: Future<Output = Result<ResourceOutput>> + Send + 'static,
     {
-        define_resource(&mut self.registry.clone(), opts, runner)
+        define_resource(&self.registry, opts, runner)
     }
 
     pub async fn generate_operation<O>(

@@ -38,9 +38,9 @@ struct AddInput {
 
 #[fixture]
 fn registry() -> Registry {
-    let mut registry = Registry::new();
+    let registry = Registry::new();
     define_tool(
-            &mut registry,
+            &registry,
             ToolConfig::<JokeInput, String> {
                 name: "tellAFunnyJoke".to_string(),
                 description:
@@ -51,7 +51,7 @@ fn registry() -> Registry {
             |input, _| async move { Ok(format!("Why did the {} cross the road?", input.topic)) },
         );
     define_tool(
-        &mut registry,
+        &registry,
         ToolConfig::<AddInput, i32> {
             name: "namespaced/add".to_string(),
             description: "add two numbers together".to_string(),
@@ -71,9 +71,9 @@ use genkit_ai::{
 
 #[fixture]
 fn echo_model() -> Registry {
-    let mut registry = Registry::new();
+    let registry = Registry::new();
     let _ = define_model(
-        &mut registry,
+        &registry,
         genkit_ai::model::DefineModelOptions {
             name: "echoModel".to_string(),
             ..Default::default()
@@ -179,9 +179,9 @@ async fn test_applies_middleware(#[from(echo_model)] registry: Registry) {
 
 #[fixture]
 fn simple_echo() -> Registry {
-    let mut registry = Registry::new();
+    let registry = Registry::new();
     let _ = define_model(
-        &mut registry,
+        &registry,
         genkit_ai::model::DefineModelOptions {
             name: "echo".to_string(),
             supports: Some(genkit_ai::model::ModelInfoSupports {
@@ -228,9 +228,9 @@ async fn test_preserves_request_in_response(#[from(simple_echo)] registry: Regis
 
 #[fixture]
 fn streaming_model() -> Registry {
-    let mut registry = Registry::new();
+    let registry = Registry::new();
     let _ = define_model(
-        &mut registry,
+        &registry,
         genkit_ai::model::DefineModelOptions {
             name: "echo-streaming".to_string(),
             ..Default::default()

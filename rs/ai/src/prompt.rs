@@ -444,7 +444,7 @@ where
 
 /// Defines a prompt which can be used to generate content or render a request.
 pub fn define_prompt<I, O, C>(
-    registry: &mut Registry,
+    registry: &Registry,
     config: PromptConfig<I, O, C>,
 ) -> ExecutablePrompt<I, O, C>
 where

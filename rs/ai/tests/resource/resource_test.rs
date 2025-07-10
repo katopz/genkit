@@ -26,7 +26,7 @@ fn registry() -> Registry {
 
 #[rstest]
 #[tokio::test]
-async fn test_defines_and_matches_static_resource_uri(mut registry: Registry) {
+async fn test_defines_and_matches_static_resource_uri(registry: Registry) {
     let options: ResourceOptions = from_value(json!({
         "name": "testResource",
         "uri": "foo://bar",
@@ -35,7 +35,7 @@ async fn test_defines_and_matches_static_resource_uri(mut registry: Registry) {
     }))
     .unwrap();
 
-    let test_resource = define_resource(&mut registry, options, |_, _| async {
+    let test_resource = define_resource(&registry, options, |_, _| async {
         Ok(from_value(json!({
             "content": [{ "text": "foo stuff" }]
         }))?)
@@ -100,14 +100,14 @@ async fn test_defines_and_matches_static_resource_uri(mut registry: Registry) {
 
 #[rstest]
 #[tokio::test]
-async fn test_defines_and_matches_template_resource_uri(mut registry: Registry) {
+async fn test_defines_and_matches_template_resource_uri(registry: Registry) {
     let options: ResourceOptions = from_value(json!({
         "template": "foo://bar/{baz}",
         "description": "does foo things"
     }))
     .unwrap();
 
-    let test_resource = define_resource(&mut registry, options, |input, _| async move {
+    let test_resource = define_resource(&registry, options, |input, _| async move {
         Ok(from_value(json!({
             "content": [{ "text": format!("foo stuff {}", input.uri) }]
         }))?)
@@ -168,14 +168,14 @@ async fn test_defines_and_matches_template_resource_uri(mut registry: Registry) 
 
 #[rstest]
 #[tokio::test]
-async fn test_handles_parent_resources(mut registry: Registry) {
+async fn test_handles_parent_resources(registry: Registry) {
     let options: ResourceOptions = from_value(json!({
         "name": "testResource",
         "template": "file://{id*}"
     }))
     .unwrap();
 
-    let test_resource = define_resource(&mut registry, options, |file, _| async move {
+    let test_resource = define_resource(&registry, options, |file, _| async move {
         Ok(from_value(json!({
             "content": [
                 {
@@ -220,13 +220,13 @@ async fn test_handles_parent_resources(mut registry: Registry) {
 
 #[rstest]
 #[tokio::test]
-async fn test_finds_matching_resource(mut registry: Registry) {
+async fn test_finds_matching_resource(registry: Registry) {
     let template_options: ResourceOptions = from_value(json!({
         "name": "testTemplateResource",
         "template": "foo://bar/{baz}"
     }))
     .unwrap();
-    define_resource(&mut registry, template_options, |input, _| async move {
+    define_resource(&registry, template_options, |input, _| async move {
         Ok(from_value(json!({
             "content": [{ "text": input.uri }]
         }))?)
@@ -238,7 +238,7 @@ async fn test_finds_matching_resource(mut registry: Registry) {
         "uri": "bar://baz"
     }))
     .unwrap();
-    define_resource(&mut registry, static_options, |_, _| async {
+    define_resource(&registry, static_options, |_, _| async {
         Ok(from_value(json!({
             "content": [{ "text": "bar" }]
         }))?)

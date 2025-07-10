@@ -59,8 +59,7 @@ async fn test_should_apply_middleware_to_a_prompt_call(
         })),
         ..Default::default()
     };
-    let prompt =
-        define_prompt::<HiInput, Value, Value>(&mut genkit.registry().clone(), prompt_config);
+    let prompt = define_prompt::<HiInput, Value, Value>(genkit.registry(), prompt_config);
 
     let opts = PromptGenerateOptions {
         r#use: Some(vec![
@@ -107,8 +106,7 @@ async fn test_should_apply_middleware_configured_on_prompt(
         })),
         ..Default::default()
     };
-    let prompt =
-        define_prompt::<HiInput, Value, Value>(&mut genkit.registry().clone(), prompt_config);
+    let prompt = define_prompt::<HiInput, Value, Value>(genkit.registry(), prompt_config);
 
     let response = prompt
         .generate(
@@ -147,7 +145,7 @@ async fn test_should_apply_middleware_to_a_looked_up_prompt(
         })),
         ..Default::default()
     };
-    define_prompt::<HiInput, Value, Value>(&mut genkit.registry().clone(), prompt_config);
+    define_prompt::<HiInput, Value, Value>(genkit.registry(), prompt_config);
 
     let looked_up_prompt =
         genkit_ai::prompt::prompt::<HiInput, Value, Value>(genkit.registry(), "hi_lookup", None)
@@ -187,7 +185,7 @@ async fn test_should_apply_middleware_to_a_prompt_call_on_a_looked_up_prompt(
         })),
         ..Default::default()
     };
-    define_prompt::<HiInput, Value, Value>(&mut genkit.registry().clone(), prompt_config);
+    define_prompt::<HiInput, Value, Value>(genkit.registry(), prompt_config);
 
     let looked_up_prompt = genkit_ai::prompt::prompt::<HiInput, Value, Value>(
         genkit.registry(),

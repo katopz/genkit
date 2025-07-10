@@ -32,6 +32,7 @@ use ::serde::{Deserialize, Serialize};
 use genkit_core::action::ActionMetadata;
 use genkit_core::context::ActionContext;
 use genkit_core::error::Result;
+use genkit_core::Registry;
 use genkit_core::{action::StreamingResponse, registry::ErasedAction, Action};
 use schemars::JsonSchema;
 use serde_json::{json, Value};
@@ -405,7 +406,7 @@ fn get_model_middleware(options: &DefineModelOptions) -> Vec<ModelMiddleware> {
     middleware
 }
 pub fn define_model<F, Fut>(
-    registry: &mut genkit_core::Registry,
+    registry: &genkit_core::Registry,
     options: DefineModelOptions,
     f: F,
 ) -> ModelAction
@@ -511,7 +512,7 @@ pub struct DefineBackgroundModelOptions {
 }
 
 pub fn define_background_model(
-    registry: &mut genkit_core::Registry,
+    registry: &Registry,
     options: DefineBackgroundModelOptions,
 ) -> BackgroundModelAction {
     let mut supports = options.supports.clone().unwrap_or_default();

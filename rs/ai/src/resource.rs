@@ -71,7 +71,7 @@ pub type ResourceAction = Action<ResourceInput, ResourceOutput, ()>;
 
 /// Defines a resource.
 pub fn define_resource<F, Fut>(
-    registry: &mut Registry,
+    registry: &Registry,
     opts: ResourceOptions,
     runner: F,
 ) -> Result<Arc<ResourceAction>>

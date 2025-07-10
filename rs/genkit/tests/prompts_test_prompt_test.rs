@@ -276,7 +276,7 @@ async fn test_renders_loaded_prompt_via_executable_prompt(#[future] genkit_insta
     let genkit = genkit_instance.await;
 
     genkit_ai::model::define_model(
-        &mut genkit.registry().clone(),
+        genkit.registry(),
         genkit_ai::model::DefineModelOptions {
             name: "googleai/gemini-5.0-ultimate-pro-plus".to_string(),
             ..Default::default()
@@ -575,4 +575,61 @@ async fn test_loads_variant_from_folder(#[future] genkit_instance: Arc<Genkit>) 
         response.text().unwrap(),
         "Echo: Hello from a variant of the hello prompt; config: {\"temperature\":13}"
     );
+}
+
+#[rstest]
+#[tokio::test]
+/// 'includes metadata expected by the dev ui'
+async fn test_includes_metadata_expected_by_dev_ui(#[future] genkit_instance: Arc<Genkit>) {
+    let genkit = genkit_instance.await;
+
+    let variant_prompt_config = PromptConfig {
+        name: "test".to_string(),
+        variant: Some("variant".to_string()),
+        prompt: Some("Hello from a variant of the hello prompt".to_string()),
+        config: Some(json!({ "temperature": 13 })),
+        description: Some("a prompt variant in a file".to_string()),
+        ..Default::default()
+    };
+    genkit
+        .define_prompt::<EmptyInput, Value, Value>(variant_prompt_config)
+        .await;
+
+    let test_prompt_action = genkit
+        .registry()
+        .lookup_action("/prompt/test.variant")
+        .await
+        .unwrap();
+
+    let metadata = test_prompt_action.metadata();
+    let custom_metadata = &metadata.metadata;
+    let custom_metadata_value = serde_json::to_value(custom_metadata).unwrap();
+
+    let expected_input_schema = serde_json::to_value(schemars::schema_for!(EmptyInput)).unwrap();
+
+    let expected_metadata = json!({
+      "prompt": {
+        "config": {
+          "temperature": 13,
+        },
+        "description": "a prompt variant in a file",
+        "input": {
+          "schema": expected_input_schema,
+        },
+        "metadata": {},
+        "model": null,
+        "name": "test",
+        "variant": "variant",
+        "template": "Hello from a variant of the hello prompt",
+        "raw": {
+          "config": {
+            "temperature": 13,
+          },
+          "description": "a prompt variant in a file",
+        },
+      },
+      "type": "prompt",
+    });
+
+    assert_eq!(custom_metadata_value, expected_metadata);
 }

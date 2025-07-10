@@ -142,11 +142,7 @@ pub struct RerankerInfo {
 //
 
 /// Defines a new reranker and registers it.
-pub fn define_reranker<I, F, Fut>(
-    registry: &mut Registry,
-    name: &str,
-    runner: F,
-) -> RerankerAction<I>
+pub fn define_reranker<I, F, Fut>(registry: &Registry, name: &str, runner: F) -> RerankerAction<I>
 where
     I: JsonSchema + DeserializeOwned + Send + Sync + Clone + 'static,
     F: Fn(RerankerRequest<I>, genkit_core::action::ActionFnArg<()>) -> Fut + Send + Sync + 'static,

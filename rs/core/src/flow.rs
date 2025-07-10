@@ -48,7 +48,7 @@ pub type Flow<I, O, S> = Action<I, O, S>;
 ///
 /// An `Action` instance representing the defined flow.
 pub fn define_flow<I, O, S, F, Fut>(
-    registry: &mut Registry,
+    registry: &Registry,
     name: impl Into<String>,
     func: F,
 ) -> Flow<I, O, S>
@@ -135,10 +135,10 @@ mod tests {
 
     #[tokio::test]
     async fn test_define_and_run_flow() {
-        let mut registry = Registry::default();
+        let registry = Registry::default();
         // Define a flow with two instrumented steps.
         let my_flow = define_flow(
-            &mut registry,
+            &registry,
             "testFlow",
             |input: MyInput, _args: ActionFnArg<MyStreamChunk>| async move {
                 let upper_name = run("step1: uppercase", || async {
