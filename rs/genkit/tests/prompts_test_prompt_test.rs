@@ -51,7 +51,7 @@ async fn test_loads_from_folder(#[future] genkit_instance: Arc<Genkit>) {
 
     // Look up the prompt from the registry.
     let test_prompt =
-        genkit_ai::prompt::prompt::<EmptyInput, Value, Value>(genkit.registry(), "test")
+        genkit_ai::prompt::prompt::<EmptyInput, Value, Value>(genkit.registry(), "test", None)
             .await
             .unwrap();
 
@@ -98,7 +98,7 @@ async fn test_loads_from_sub_folder(#[future] genkit_instance: Arc<Genkit>) {
 
     // Look up the prompt using its full name.
     let test_prompt =
-        genkit_ai::prompt::prompt::<EmptyInput, Value, Value>(genkit.registry(), "sub/test")
+        genkit_ai::prompt::prompt::<EmptyInput, Value, Value>(genkit.registry(), "sub/test", None)
             .await
             .unwrap();
 
@@ -194,6 +194,7 @@ async fn test_loads_from_folder_with_all_options(#[future] genkit_instance: Arc<
     let test_prompt = genkit_ai::prompt::prompt::<KitchenSinkInput, Value, Value>(
         genkit.registry(),
         "kitchensink",
+        None,
     )
     .await
     .unwrap();
@@ -524,4 +525,54 @@ async fn test_lazily_resolved_schema_refs(#[future] genkit_instance: Arc<Genkit>
     assert!(error
         .to_string()
         .contains("NOT_FOUND: Schema 'badSchemaRef1' not found"));
+}
+
+use genkit_ai::prompt::PromptLookupOptions;
+
+#[rstest]
+#[tokio::test]
+/// 'loads a variant from from the folder'
+async fn test_loads_variant_from_folder(#[future] genkit_instance: Arc<Genkit>) {
+    let genkit = genkit_instance.await;
+
+    // Define the base prompt
+    let test_prompt_config = PromptConfig {
+        name: "test".to_string(),
+        prompt: Some("Hello from the base prompt".to_string()),
+        config: Some(json!({ "temperature": 11 })),
+        ..Default::default()
+    };
+    genkit
+        .define_prompt::<EmptyInput, Value, Value>(test_prompt_config)
+        .await;
+
+    // Define the variant
+    let variant_prompt_config = PromptConfig {
+        name: "test".to_string(),
+        variant: Some("variant".to_string()),
+        prompt: Some("Hello from a variant of the hello prompt".to_string()),
+        config: Some(json!({ "temperature": 13 })),
+        ..Default::default()
+    };
+    genkit
+        .define_prompt::<EmptyInput, Value, Value>(variant_prompt_config)
+        .await;
+
+    // Look up the variant
+    let test_prompt = genkit_ai::prompt::prompt::<EmptyInput, Value, Value>(
+        genkit.registry(),
+        "test",
+        Some(PromptLookupOptions {
+            variant: Some("variant"),
+        }),
+    )
+    .await
+    .unwrap();
+
+    // Test generation.
+    let response = test_prompt.generate(EmptyInput {}, None).await.unwrap();
+    assert_eq!(
+        response.text().unwrap(),
+        "Echo: Hello from a variant of the hello prompt; config: {\"temperature\":13}"
+    );
 }

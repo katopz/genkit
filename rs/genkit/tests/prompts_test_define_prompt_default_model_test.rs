@@ -112,10 +112,13 @@ async fn test_calls_prompt_with_default_model_via_retrieved_prompt(
         .define_prompt::<TestInput, Value, Value>(prompt_config)
         .await;
 
-    let hi_prompt =
-        genkit_ai::prompt::prompt::<TestInput, Value, Value>(genkit.registry(), "hi_retrieved")
-            .await
-            .unwrap();
+    let hi_prompt = genkit_ai::prompt::prompt::<TestInput, Value, Value>(
+        genkit.registry(),
+        "hi_retrieved",
+        None,
+    )
+    .await
+    .unwrap();
 
     let response = hi_prompt
         .generate(
@@ -211,6 +214,7 @@ async fn test_should_apply_middleware_to_looked_up_prompt(#[future] genkit_insta
     let hi_prompt = genkit_ai::prompt::prompt::<TestInput, Value, Value>(
         genkit.registry(),
         "hi_lookup_with_middleware",
+        None,
     )
     .await
     .unwrap();
@@ -247,6 +251,7 @@ async fn test_should_apply_middleware_to_looked_up_prompt_with_options(
     let hi_prompt = genkit_ai::prompt::prompt::<TestInput, Value, Value>(
         genkit.registry(),
         "hi_lookup_options_middleware",
+        None,
     )
     .await
     .unwrap();

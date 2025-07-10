@@ -18,7 +18,6 @@
 //! creating and executing type-safe, templated prompts. It is the Rust
 // equivalent of `prompt.ts`.
 
-use crate::document::{Document, Part};
 use crate::generate::{
     generate, generate_stream, to_generate_request, GenerateOptions, GenerateResponse,
     GenerateStreamResponse, OutputOptions,
@@ -27,6 +26,7 @@ use crate::message::MessageData;
 use crate::model::{middleware::ModelMiddleware, GenerateRequest, Model};
 
 use crate::tool::ToolArgument;
+use crate::{Document, Part};
 use genkit_core::action::{Action, ActionBuilder};
 use genkit_core::context::{get_context, ActionContext};
 use genkit_core::error::{Error, Result};
@@ -194,7 +194,7 @@ impl<O> Clone for PromptGenerateOptions<O> {
 
 // Manual Debug implementation because ModelMiddleware (Arc<dyn Fn(...)>) is not Debug.
 impl<O> fmt::Debug for PromptGenerateOptions<O> {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> fmt::Result {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("PromptGenerateOptions")
             .field("config", &self.config)
             .field("messages", &self.messages)
@@ -462,10 +462,16 @@ where
     let config_arc = Arc::new(config);
     let registry_clone = registry.clone();
 
+    let key_name = if let Some(variant) = &config_arc.variant {
+        format!("{}.{}", &config_arc.name, variant)
+    } else {
+        config_arc.name.clone()
+    };
+
     let prompt_action = {
         let config_clone = config_arc.clone();
         let registry_clone = registry_clone.clone();
-        let name = config_clone.name.clone();
+        let name = key_name.clone();
 
         ActionBuilder::new(
             ActionType::Prompt,
@@ -483,11 +489,11 @@ where
         .build()
     };
 
-    let _ = registry.register_action(&config_arc.name, prompt_action);
+    let _ = registry.register_action(&key_name, prompt_action);
 
     registry.register_any(
         "prompt",
-        &config_arc.name,
+        &key_name,
         config_arc.clone() as Arc<dyn Any + Send + Sync>,
     );
 
@@ -502,8 +508,18 @@ pub fn is_executable_prompt<I, O, C>(_: &ExecutablePrompt<I, O, C>) -> bool {
     true
 }
 
+/// Options for looking up a prompt.
+#[derive(Default)]
+pub struct PromptLookupOptions<'a> {
+    pub variant: Option<&'a str>,
+}
+
 /// A placeholder function for `prompt()`, which would look up a defined prompt.
-pub async fn prompt<I, O, C>(registry: &Registry, name: &str) -> Result<ExecutablePrompt<I, O, C>>
+pub async fn prompt<I, O, C>(
+    registry: &Registry,
+    name: &str,
+    options: Option<PromptLookupOptions<'_>>,
+) -> Result<ExecutablePrompt<I, O, C>>
 where
     I: Serialize + DeserializeOwned + JsonSchema + Send + Sync + Clone + 'static,
     O: for<'de> Deserialize<'de>
@@ -516,17 +532,25 @@ where
         + 'static,
     C: Serialize + DeserializeOwned + JsonSchema + Send + Sync + 'static,
 {
+    let options = options.unwrap_or_default();
+    let key_name = if let Some(v) = options.variant {
+        format!("{}.{}", name, v)
+    } else {
+        name.to_string()
+    };
     let config_any = registry
-        .lookup_any("prompt", name)
+        .lookup_any("prompt", &key_name)
         .await
-        .ok_or_else(|| Error::new_internal(format!("Prompt '{}' not found in registry", name)))?;
+        .ok_or_else(|| {
+            Error::new_internal(format!("Prompt '{}' not found in registry", key_name))
+        })?;
 
     let config = config_any
         .downcast::<PromptConfig<I, O, C>>()
         .map_err(|_| {
             Error::new_internal(format!(
                 "Type mismatch for prompt '{}'. Could not downcast to the expected type.",
-                name
+                key_name
             ))
         })?;
 

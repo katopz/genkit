@@ -239,6 +239,7 @@ async fn test_calls_prompt_with_default_model_via_retrieved_prompt(
     let hi_prompt = genkit_ai::prompt::prompt::<TestInput, Value, Value>(
         genkit.registry(),
         "hi_retrieved_default_model2_test",
+        None,
     )
     .await
     .unwrap();

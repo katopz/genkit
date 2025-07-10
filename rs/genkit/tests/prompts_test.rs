@@ -150,7 +150,7 @@ async fn test_should_apply_middleware_to_a_looked_up_prompt(
     define_prompt::<HiInput, Value, Value>(&mut genkit.registry().clone(), prompt_config);
 
     let looked_up_prompt =
-        genkit_ai::prompt::prompt::<HiInput, Value, Value>(genkit.registry(), "hi_lookup")
+        genkit_ai::prompt::prompt::<HiInput, Value, Value>(genkit.registry(), "hi_lookup", None)
             .await
             .unwrap();
 
@@ -192,6 +192,7 @@ async fn test_should_apply_middleware_to_a_prompt_call_on_a_looked_up_prompt(
     let looked_up_prompt = genkit_ai::prompt::prompt::<HiInput, Value, Value>(
         genkit.registry(),
         "hi_lookup_with_call_middleware",
+        None,
     )
     .await
     .unwrap();
