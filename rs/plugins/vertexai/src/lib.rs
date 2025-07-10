@@ -80,8 +80,6 @@ impl VertexAIPlugin {
     }
 
     async fn register_models(&self, registry: &Registry) -> Result<()> {
-        println!("🦀 register_models");
-
         const KNOWN_DECOMISSIONED_MODELS: &[&str] = &[
             "gemini-pro-vision",
             "gemini-pro",
@@ -99,7 +97,6 @@ impl VertexAIPlugin {
             }
 
             if short_name.contains("gemini") {
-                println!("🦀 call define_gemini_model:{}", short_name);
                 let action = define_gemini_model(short_name, &self.options);
                 registry.register_action(&format!("vertexai/{}", short_name), action)?;
             } else if short_name.contains("imagen") {

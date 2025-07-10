@@ -58,14 +58,14 @@ async fn main() -> genkit::Result<()> {
         });
 
     println!("Running jokeFlow...");
-    let result = joke_flow
+    let action_result = joke_flow
         .run(
             "come up with a subject to joke about (using the function provided)".to_string(),
             None,
         )
         .await?;
 
-    println!("Flow result: {:?}", result);
+    println!("Flow action_result: {:#?}", action_result);
 
     Ok(())
 }

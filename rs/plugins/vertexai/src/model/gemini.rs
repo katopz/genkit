@@ -438,7 +438,6 @@ async fn gemini_runner(
     model_id: String,
     options: VertexAIPluginOptions,
 ) -> Result<GenerateResponseData> {
-    println!("🦀 gemini_runner");
     let mut vertex_req = to_vertex_request(&req)?;
     let params = get_derived_params(&options).await?;
 
@@ -475,7 +474,6 @@ async fn gemini_runner(
         format!("Bearer {}", token.as_str()).parse().unwrap(),
     );
 
-    println!("🦀 GOOOO");
     let client = reqwest::Client::new();
     let response = client
         .post(&url)
@@ -495,7 +493,6 @@ async fn gemini_runner(
         )));
     }
     log::debug!("Gemini Raw Response: {}", response_text);
-    println!("🦀 Gemini Raw Response: {}", response_text);
     let final_resp: VertexGeminiResponse = serde_json::from_str(&response_text).map_err(|e| {
         log::error!(
             "Failed to decode gemini response body: {}. Body: {}",
