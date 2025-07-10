@@ -22,7 +22,15 @@ use genkit_ai::{
     },
     Part,
 };
+
+use schemars::JsonSchema;
+use serde::{Deserialize, Serialize};
 use std::sync::Arc;
+
+#[derive(Serialize, Deserialize, JsonSchema, Clone, Default)]
+pub struct HiInput {
+    pub name: String,
+}
 
 // Middleware that wraps the request message text in parentheses.
 pub fn wrap_request() -> ModelMiddleware {

@@ -13,6 +13,7 @@
 //! limitations under the License.
 
 mod helpers;
+mod prompts_helpers;
 
 use genkit::{prompt::PromptConfig, Genkit, Part, Role};
 use genkit_ai::{MessageData, OutputOptions};
@@ -519,6 +520,8 @@ async fn test_lazily_resolved_schema_refs(#[future] genkit_instance: Arc<Genkit>
 
 use genkit_ai::prompt::PromptLookupOptions;
 
+use crate::prompts_helpers::HiInput;
+
 #[rstest]
 #[tokio::test]
 /// 'loads a variant from from the folder'
@@ -626,4 +629,49 @@ async fn test_includes_metadata_expected_by_dev_ui(#[future] genkit_instance: Ar
     );
 
     assert_eq!(custom_metadata_value, expected_metadata);
+}
+
+#[rstest]
+#[tokio::test]
+/// 'returns a ref to functional prompts'
+async fn test_returns_ref_to_functional_prompts(#[future] genkit_instance: Arc<Genkit>) {
+    let genkit = genkit_instance.await;
+
+    let prompt_config = PromptConfig {
+        name: "hi".to_string(),
+        model: Some(Model::Name("echoModel".to_string())),
+        config: Some(json!({ "temperature": 11 })),
+        messages_fn: Some(Arc::new(|input: HiInput, _, _| {
+            Box::pin(async move {
+                Ok(vec![MessageData {
+                    role: Role::User,
+                    content: vec![Part::text(format!("hi {}", input.name))],
+                    ..Default::default()
+                }])
+            })
+        })),
+        ..Default::default()
+    };
+
+    genkit.define_prompt::<HiInput, Value, Value>(prompt_config);
+
+    let test_prompt =
+        genkit_ai::prompt::prompt::<HiInput, Value, Value>(genkit.registry(), "hi", None)
+            .await
+            .unwrap();
+
+    let response = test_prompt
+        .generate(
+            HiInput {
+                name: "banana".to_string(),
+            },
+            None,
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(
+        response.text().unwrap(),
+        "Echo: hi banana; config: {\"temperature\":11}"
+    );
 }

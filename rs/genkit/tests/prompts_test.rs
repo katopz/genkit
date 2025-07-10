@@ -24,19 +24,14 @@ use genkit_ai::{
     Part,
 };
 use rstest::{fixture, rstest};
-use schemars::JsonSchema;
-use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::sync::{Arc, Mutex};
+
+use crate::prompts_helpers::HiInput;
 
 #[fixture]
 async fn genkit_instance_for_test() -> (Arc<Genkit>, Arc<Mutex<Option<GenerateRequest>>>) {
     helpers::genkit_instance_for_test().await
-}
-
-#[derive(Serialize, Deserialize, JsonSchema, Clone, Default)]
-struct HiInput {
-    name: String,
 }
 
 #[rstest]
