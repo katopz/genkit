@@ -65,16 +65,12 @@ mod test {
     use genkit_core::registry::Registry;
     #[tokio::test]
     async fn test_run_simple_flow() {
-        let mut registry = Registry::default();
-        let test_flow = define_flow(
-            &mut registry,
-            "testFlow",
-            |input: TestInput, _| async move {
-                Ok(TestOutput {
-                    message: format!("bar {}", input.name),
-                })
-            },
-        );
+        let registry = Registry::default();
+        let test_flow = define_flow(&registry, "testFlow", |input: TestInput, _| async move {
+            Ok(TestOutput {
+                message: format!("bar {}", input.name),
+            })
+        });
 
         let result = run_test_flow(
             &test_flow,
@@ -90,9 +86,9 @@ mod test {
 
     #[tokio::test]
     async fn test_run_flow_with_steps() {
-        let mut registry = Registry::default();
+        let registry = Registry::default();
         let test_flow = define_flow(
-            &mut registry,
+            &registry,
             "flowWithSteps",
             |input: TestInput, _| async move {
                 let step1_result = run("step1", || async { Ok(input.name.to_uppercase()) }).await?;
@@ -118,9 +114,9 @@ mod test {
 
     #[tokio::test]
     async fn test_flow_context_inheritance() {
-        let mut registry = Registry::default();
+        let registry = Registry::default();
         let child_flow = define_flow(
-            &mut registry,
+            &registry,
             "childFlow",
             |input: TestInput, args: ActionFnArg<TestStreamChunk>| async move {
                 let auth_user = args
@@ -134,7 +130,7 @@ mod test {
             },
         );
 
-        let parent_flow = define_flow(&mut registry, "parentFlow", move |input: TestInput, _| {
+        let parent_flow = define_flow(&registry, "parentFlow", move |input: TestInput, _| {
             let child_flow = child_flow.clone();
             async move {
                 // In a real scenario, we wouldn't manually construct the args.

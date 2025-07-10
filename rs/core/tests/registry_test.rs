@@ -54,7 +54,7 @@ impl Plugin for MockPlugin {
         self.name
     }
 
-    async fn initialize(&self, registry: &mut Registry) -> Result<()> {
+    async fn initialize(&self, registry: &Registry) -> Result<()> {
         self.initialized.store(true, Ordering::SeqCst);
         let action_name = format!("{}/model", self.name);
         let test_action = ActionBuilder::<TestInput, TestOutput, (), _>::new(
@@ -85,7 +85,7 @@ mod test {
         );
 
         // Manually initialize the plugin.
-        plugin.initialize(&mut registry).await.unwrap();
+        plugin.initialize(&registry).await.unwrap();
         assert!(
             was_initialized.load(Ordering::SeqCst),
             "Plugin should be initialized after explicit call."
@@ -101,7 +101,7 @@ mod test {
 
     #[tokio::test]
     async fn test_parent_child_registry_lookup() {
-        let mut parent_registry = Registry::new();
+        let parent_registry = Registry::new();
         let parent_action =
             ActionBuilder::<(), (), (), _>::new(ActionType::Util, "parentUtil", |_, _| async {
                 Ok(())
@@ -111,7 +111,7 @@ mod test {
             .register_action("parentUtil", parent_action)
             .unwrap();
 
-        let mut child_registry = Registry::with_parent(&parent_registry);
+        let child_registry = Registry::with_parent(&parent_registry);
         let child_action =
             ActionBuilder::<(), (), (), _>::new(ActionType::Util, "childUtil", |_, _| async {
                 Ok(())
@@ -142,7 +142,7 @@ mod test {
 
     #[tokio::test]
     async fn test_register_and_lookup_action() {
-        let mut registry = Registry::new();
+        let registry = Registry::new();
         let test_action = ActionBuilder::<TestInput, TestOutput, (), _>::new(
             ActionType::Flow,
             "myFlow",
