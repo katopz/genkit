@@ -471,11 +471,10 @@ where
     let prompt_action = {
         let config_clone = config_arc.clone();
         let registry_clone = registry_clone.clone();
-        let name = key_name.clone();
 
         ActionBuilder::new(
             ActionType::Prompt,
-            name,
+            key_name.clone(),
             move |input: I, _ctx: genkit_core::action::ActionFnArg<()>| {
                 let config = config_clone.clone();
                 let registry = registry_clone.clone();

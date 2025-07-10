@@ -178,9 +178,9 @@ pub fn model_garden_openai_compatible_model(
                 })
             }
         };
-    let mut registry = Registry::default();
+    let registry = Registry::default();
     define_model(
-        &mut registry,
+        &registry,
         genkit_ai::model::DefineModelOptions {
             name: model_ref.name.clone(),
             label: Some(model_ref.info.label.clone()),

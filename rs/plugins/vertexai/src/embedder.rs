@@ -54,9 +54,9 @@ pub fn define_vertex_ai_embedder(
 ) -> genkit_ai::embedder::EmbedderAction<VertexEmbeddingConfig> {
     let model_id = model_name.to_string();
     let opts = options.clone();
-    let mut regitry = Registry::new();
+    let regitry = Registry::new();
     define_embedder(
-        &mut regitry,
+        &regitry,
         &format!("vertexai/{}", model_name),
         move |req: EmbedRequest<VertexEmbeddingConfig>, _| {
             let model_id = model_id.clone();

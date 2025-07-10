@@ -591,9 +591,8 @@ async fn test_includes_metadata_expected_by_dev_ui(#[future] genkit_instance: Ar
         description: Some("a prompt variant in a file".to_string()),
         ..Default::default()
     };
-    genkit
-        .define_prompt::<EmptyInput, Value, Value>(variant_prompt_config)
-        .await;
+
+    let _ = genkit.define_prompt::<EmptyInput, Value, Value>(variant_prompt_config);
 
     let test_prompt_action = genkit
         .registry()
@@ -630,6 +629,15 @@ async fn test_includes_metadata_expected_by_dev_ui(#[future] genkit_instance: Ar
       },
       "type": "prompt",
     });
+
+    println!(
+        "DEBUGINFO - Actual Metadata: {}",
+        serde_json::to_string_pretty(&custom_metadata_value).unwrap()
+    );
+    println!(
+        "DEBUGINFO - Expected Metadata: {}",
+        serde_json::to_string_pretty(&expected_metadata).unwrap()
+    );
 
     assert_eq!(custom_metadata_value, expected_metadata);
 }

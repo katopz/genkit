@@ -54,7 +54,7 @@ impl Plugin for ErrorModelPlugin {
     fn name(&self) -> &'static str {
         "errorModelPlugin"
     }
-    async fn initialize(&self, registry: &mut Registry) -> Result<()> {
+    async fn initialize(&self, registry: &Registry) -> Result<()> {
         define_model(
             registry,
             DefineModelOptions {
@@ -197,7 +197,7 @@ async fn test_generate_stream_rethrows_initialization_errors() {
 async fn test_flow_passes_streaming_callback_to_generate() {
     // 1. Setup the environment with a programmable model
     let (genkit, pm_handle) = helpers::genkit_with_programmable_model().await;
-    let mut registry = genkit.registry().clone();
+    let registry = genkit.registry().clone();
 
     // 2. Create a flag to track if the model received the streaming signal
     let streaming_was_received = Arc::new(Mutex::new(false));
@@ -218,7 +218,7 @@ async fn test_flow_passes_streaming_callback_to_generate() {
 
     // 4. Define the flow that calls `generate`
     let wrapper_flow = define_flow(
-        &mut registry,
+        &registry,
         "wrapper",
         // The flow's chunk type is `()`, defined by `ActionFnArg<()>`
         move |_: (), _args: ActionFnArg<()>| {
@@ -260,7 +260,7 @@ async fn test_flow_passes_streaming_callback_to_generate() {
 async fn test_flow_propagates_streaming_to_generate() {
     // 1. Setup the test environment with the correct fixture
     let (genkit, pm_handle) = helpers::genkit_with_programmable_model().await;
-    let mut registry = genkit.registry().clone();
+    let registry = genkit.registry().clone();
 
     // 2. Create a flag to track if the model received the streaming signal
     let streaming_was_requested = Arc::new(Mutex::new(false));
@@ -285,7 +285,7 @@ async fn test_flow_propagates_streaming_to_generate() {
 
     // 4. Define the flow
     let wrapper_flow = define_flow(
-        &mut registry,
+        &registry,
         "wrapper",
         move |_: (), _args: ActionFnArg<()>| {
             let genkit_clone = genkit.clone();

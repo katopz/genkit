@@ -108,7 +108,7 @@ impl Plugin for DevLocalVectorStorePlugin {
         DEV_LOCAL_VECTORSTORE_PREFIX
     }
 
-    async fn initialize(&self, registry: &mut Registry) -> Result<()> {
+    async fn initialize(&self, registry: &Registry) -> Result<()> {
         for config in &self.configs {
             let data_path = config.data_path.clone().unwrap_or_else(|| {
                 let mut path = std::env::temp_dir();

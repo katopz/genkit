@@ -90,7 +90,7 @@ impl Plugin for ProgrammableModelPlugin {
         "programmableModelPlugin"
     }
 
-    async fn initialize(&self, registry: &mut Registry) -> Result<()> {
+    async fn initialize(&self, registry: &Registry) -> Result<()> {
         let initial_handler: ProgrammableModelHandler = Arc::new(Box::new(|_req, _cb| {
             Box::pin(async { Ok(Default::default()) })
         }));
@@ -141,7 +141,7 @@ impl Plugin for EchoModelPlugin {
         "echoModelPlugin"
     }
 
-    async fn initialize(&self, registry: &mut Registry) -> Result<()> {
+    async fn initialize(&self, registry: &Registry) -> Result<()> {
         let last_request_clone = self.last_request.clone();
         define_model(
             registry,
@@ -233,7 +233,7 @@ pub async fn registry_with_echo_model() -> (Arc<Registry>, Arc<Mutex<Option<Gene
     let mut registry = Registry::new();
     genkit_ai::configure_ai(&mut registry);
     registry.set_default_model("echoModel".to_string());
-    echo_plugin.initialize(&mut registry).await.unwrap();
+    echo_plugin.initialize(&registry).await.unwrap();
 
     (Arc::new(registry), last_request)
 }
@@ -250,7 +250,7 @@ pub async fn registry_with_programmable_model_options(
     genkit_ai::configure_ai(&mut registry);
     let model_name = pm_plugin.options.name.clone();
     registry.set_default_model(model_name);
-    pm_plugin.initialize(&mut registry).await.unwrap();
+    pm_plugin.initialize(&registry).await.unwrap();
 
     let handle = pm_plugin.get_handle();
     (Arc::new(registry), handle)

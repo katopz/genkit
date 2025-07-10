@@ -14,9 +14,9 @@ use std::sync::Arc;
 
 // A simple mock embedder that returns predefined vectors for specific texts.
 fn mock_embedder() -> genkit_ai::embedder::EmbedderAction {
-    let mut registry = Registry::new();
+    let registry = Registry::new();
     define_embedder(
-        &mut registry,
+        &registry,
         "mock-embedder",
         |req: EmbedRequest, _| async move {
             let embeddings = req
@@ -45,9 +45,9 @@ fn mock_embedder() -> genkit_ai::embedder::EmbedderAction {
 
 // A simple mock model that just returns the content of the first document it receives.
 fn mock_model() -> genkit_ai::model::ModelAction {
-    let mut registry = Registry::new();
+    let registry = Registry::new();
     define_model(
-        &mut registry,
+        &registry,
         genkit_ai::model::DefineModelOptions {
             name: "mock-model".to_string(),
             label: Some("Mock Context Model".to_string()),
@@ -89,7 +89,7 @@ fn mock_model() -> genkit_ai::model::ModelAction {
 #[tokio::test]
 async fn test_dev_local_vectorstore_e2e() {
     // 1. Set up registry and register mock components.
-    let mut registry = Registry::new();
+    let registry = Registry::new();
 
     let embedder_action = mock_embedder();
     registry
@@ -109,7 +109,7 @@ async fn test_dev_local_vectorstore_e2e() {
         data_path: None,
     }]);
 
-    vectorstore_plugin.initialize(&mut registry).await.unwrap();
+    vectorstore_plugin.initialize(&registry).await.unwrap();
 
     let arc_registry = Arc::new(registry);
 

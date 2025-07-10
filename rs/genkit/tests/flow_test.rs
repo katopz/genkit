@@ -27,10 +27,10 @@ async fn genkit_instance() -> Arc<Genkit> {
 #[tokio::test]
 async fn test_simple_flow(#[future] genkit_instance: Arc<Genkit>) -> Result<()> {
     let genkit = genkit_instance.await;
-    let mut registry = genkit.registry().clone();
+    let registry = genkit.registry().clone();
 
     let banana_flow: Flow<(), &str, ()> =
-        define_flow(&mut registry, "banana", |_: (), _| async { Ok("banana") });
+        define_flow(&registry, "banana", |_: (), _| async { Ok("banana") });
 
     let result = banana_flow.run((), None).await?;
     assert_eq!(result.result, "banana");
@@ -41,10 +41,10 @@ async fn test_simple_flow(#[future] genkit_instance: Arc<Genkit>) -> Result<()> 
 #[tokio::test]
 async fn test_streaming_flow(#[future] genkit_instance: Arc<Genkit>) -> Result<()> {
     let genkit = genkit_instance.await;
-    let mut registry = genkit.registry().clone();
+    let registry = genkit.registry().clone();
 
     let streaming_banana_flow: Flow<String, String, char> =
-        define_flow(&mut registry, "banana", |input: String, args| async move {
+        define_flow(&registry, "banana", |input: String, args| async move {
             for char in input.chars() {
                 if args.chunk_sender.send(char).is_err() {
                     // Receiver is gone, probably the client disconnected.
@@ -87,10 +87,10 @@ async fn test_streaming_flow(#[future] genkit_instance: Arc<Genkit>) -> Result<(
 #[tokio::test]
 async fn test_context_passing(#[future] genkit_instance: Arc<Genkit>) -> Result<()> {
     let genkit = genkit_instance.await;
-    let mut registry = genkit.registry().clone();
+    let registry = genkit.registry().clone();
 
     let context_flow: Flow<(), String, ()> =
-        define_flow(&mut registry, "contextFlow", |_, args| async {
+        define_flow(&registry, "contextFlow", |_, args| async {
             let context = args.context.unwrap_or_default();
             serde_json::to_string(&context.additional_context)
                 .map_err(|e| genkit::Error::new_internal(e.to_string()))

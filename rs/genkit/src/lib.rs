@@ -135,12 +135,12 @@ pub struct CreateSessionOptions<S> {
 impl Genkit {
     /// Initializes the Genkit framework with a list of plugins.
     pub async fn init(options: GenkitOptions) -> Result<Arc<Self>> {
-        let mut registry = Registry::new();
+        let registry = Registry::new();
         if let Some(model_name) = options.default_model.clone() {
             registry.set_default_model(model_name);
         }
         for plugin in &options.plugins {
-            plugin.initialize(&mut registry).await?;
+            plugin.initialize(&registry).await?;
         }
         let context = options.context.clone();
         let instance = Arc::new(Self {

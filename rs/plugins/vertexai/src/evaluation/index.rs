@@ -44,7 +44,7 @@ impl Plugin for VertexAIEvaluationPlugin {
         "vertexai_evaluation"
     }
 
-    async fn initialize(&self, registry: &mut Registry) -> Result<()> {
+    async fn initialize(&self, registry: &Registry) -> Result<()> {
         let params = Arc::new(get_derived_params(&self.options.common).await?);
         let factory = EvaluatorFactory::new(params);
         let evaluators = vertex_evaluators(&factory, &self.options.evaluation.metrics);

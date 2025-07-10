@@ -99,7 +99,7 @@ pub trait Plugin: Send + Sync {
     /// Returns the unique name of the plugin.
     fn name(&self) -> &'static str;
     /// Initializes the plugin, registering any actions or other components with the registry.
-    async fn initialize(&self, registry: &mut Registry) -> Result<()>;
+    async fn initialize(&self, registry: &Registry) -> Result<()>;
 }
 
 // A concrete implementation of `ErasedAction` is needed to store our test
@@ -311,7 +311,7 @@ impl Registry {
         Self { state }
     }
 
-    pub fn set_default_model(&mut self, name: String) {
+    pub fn set_default_model(&self, name: String) {
         let mut state = self.state.lock().unwrap();
         state.default_model = Some(name);
     }
@@ -338,7 +338,7 @@ impl Registry {
     /// The action must be wrapped in an `Arc` to allow for shared ownership.
     pub fn register_action<A: ErasedAction + Send + Sync + 'static>(
         &self,
-        name: &str,
+        _name: &str,
         action: A,
     ) -> Result<()> {
         let action_arc: Arc<dyn ErasedAction> = Arc::new(action);
@@ -347,9 +347,8 @@ impl Registry {
         let key = format!(
             "/{}/{}",
             format!("{:?}", meta.action_type).to_lowercase(),
-            name
+            meta.name
         );
-
         if state.actions.contains_key(&key) {
             // In a production framework, you might want to log a warning here.
         }

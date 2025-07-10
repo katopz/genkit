@@ -170,7 +170,7 @@ impl Plugin for ProgrammableModelPlugin {
         "programmableModelPlugin"
     }
 
-    async fn initialize(&self, registry: &mut Registry) -> Result<()> {
+    async fn initialize(&self, registry: &Registry) -> Result<()> {
         let initial_handler: ProgrammableModelHandler = Arc::new(Box::new(|_req, _cb| {
             Box::pin(async { Ok(Default::default()) })
         }));
@@ -219,7 +219,7 @@ impl Plugin for EchoModelPlugin {
         "echoModelPlugin"
     }
 
-    async fn initialize(&self, registry: &mut Registry) -> Result<()> {
+    async fn initialize(&self, registry: &Registry) -> Result<()> {
         define_model(
             registry,
             DefineModelOptions {
@@ -319,7 +319,7 @@ impl Plugin for TsEchoModelPlugin {
         "tsEchoModelPlugin"
     }
 
-    async fn initialize(&self, registry: &mut Registry) -> Result<()> {
+    async fn initialize(&self, registry: &Registry) -> Result<()> {
         let last_request_clone = self.last_request.clone();
         define_model(
             registry,

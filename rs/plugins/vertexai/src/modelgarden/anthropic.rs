@@ -247,8 +247,8 @@ pub fn define_anthropic_model(
         config_schema: Some(serde_json::to_value(schemars::schema_for!(AnthropicConfig)).unwrap()),
     };
 
-    let mut registry = Registry::default();
-    define_model(&mut registry, model_options, move |req, _| {
+    let registry = Registry::default();
+    define_model(&registry, model_options, move |req, _| {
         let model_id = model_id.clone();
         let opts = opts.clone();
         async move {

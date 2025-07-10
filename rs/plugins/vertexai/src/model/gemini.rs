@@ -475,8 +475,8 @@ pub fn define_gemini_model(model_name: &str, options: &VertexAIPluginOptions) ->
         ..Default::default()
     };
 
-    let mut registry = Registry::new();
-    define_model(&mut registry, model_options, move |req, _| {
+    let registry = Registry::new();
+    define_model(&registry, model_options, move |req, _| {
         let model_id_clone = model_id.clone();
         let opts_clone = opts.clone();
         Box::pin(async move {

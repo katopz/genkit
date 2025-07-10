@@ -207,8 +207,8 @@ pub fn define_mistral_model(
         config_schema: Some(serde_json::from_str("{}").unwrap()),
     };
 
-    let mut registry = Registry::default();
-    define_model(&mut registry, model_options, move |req, _| {
+    let registry = Registry::default();
+    define_model(&registry, model_options, move |req, _| {
         let model_name = model_name.clone();
         let opts = opts.clone();
         let base_url_template = base_url_template.clone();

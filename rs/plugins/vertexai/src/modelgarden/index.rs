@@ -53,7 +53,7 @@ impl Plugin for VertexAIModelGardenPlugin {
         "vertexai_model_garden"
     }
 
-    async fn initialize(&self, registry: &mut Registry) -> Result<()> {
+    async fn initialize(&self, registry: &Registry) -> Result<()> {
         let base_options = &self.options.common;
         let model_garden_options = &self.options.model_garden;
 

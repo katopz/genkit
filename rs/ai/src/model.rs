@@ -495,7 +495,7 @@ where
     .build();
     let model_action = ModelAction(action);
     registry
-        .register_action(options.name.clone().as_str(), model_action.clone())
+        .register_action(&options.name, model_action.clone())
         .unwrap();
     model_action
 }

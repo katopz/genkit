@@ -42,35 +42,7 @@ pub trait Plugin: Send + Sync {
     /// This method is called by the framework when loading the plugin. The implementation
     /// should define and register all of its `Action`s and other components with the
     /// provided `registry`.
-    ///
-    /// # Example
-    /// ```
-    /// # use genkit_core::plugin::Plugin;
-    /// # use genkit_core::registry::{Registry, ActionType};
-    /// # use genkit_core::error::Result;
-    /// # use genkit_core::action::{ActionBuilder, ActionFnArg};
-    /// # use async_trait::async_trait;
-    /// # #[derive(serde::Serialize, serde::Deserialize, schemars::JsonSchema)]
-    /// # struct MyOutput {}
-    /// #
-    /// struct MyPlugin;
-    ///
-    /// #[async_trait]
-    /// impl Plugin for MyPlugin {
-    ///     fn name(&self) -> &'static str { "myPlugin" }
-    ///
-    ///     async fn initialize(&self, registry: &mut Registry) -> Result<()> {
-    //          let my_action = ActionBuilder::<(), MyOutput, (), _>::new(
-    //              ActionType::Model,
-    //              "myModel",
-    //              |_, _: ActionFnArg<()>| async { Ok(MyOutput {}) }
-    //          ).build();
-    //          // registry.register_action(my_action)?;
-    ///         Ok(())
-    ///     }
-    /// }
-    /// ```
-    async fn initialize(&self, registry: &mut Registry) -> Result<()>;
+    async fn initialize(&self, registry: &Registry) -> Result<()>;
 
     /// Provides a list of actions that can be dynamically resolved by this plugin.
     ///

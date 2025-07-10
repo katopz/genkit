@@ -150,8 +150,8 @@ pub fn define_imagen_model(model_name: &str, options: &VertexAIPluginOptions) ->
         versions: info.versions,
     };
 
-    let mut registry = Registry::default();
-    define_model(&mut registry, model_options, move |req, _| {
+    let registry = Registry::default();
+    define_model(&registry, model_options, move |req, _| {
         let model_id_clone = model_id.clone();
         let opts_clone = opts.clone();
         Box::pin(async move { imagen_runner(req, model_id_clone, opts_clone).await })

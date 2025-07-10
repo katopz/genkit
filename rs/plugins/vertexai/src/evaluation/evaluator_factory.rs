@@ -58,10 +58,10 @@ impl EvaluatorFactory {
         let to_request = Arc::new(to_request);
         let response_handler = Arc::new(response_handler);
         let metric_name = metric.to_string();
-        let mut registry = Registry::new();
+        let registry = Registry::new();
 
         define_evaluator(
-            &mut registry,
+            &registry,
             &format!("vertexai/{}", metric_name.to_lowercase()),
             move |datapoint: BaseEvalDataPoint| {
                 let factory_clone = factory.clone();

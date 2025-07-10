@@ -79,7 +79,7 @@ impl VertexAIPlugin {
         Self { options }
     }
 
-    async fn register_models(&self, registry: &mut Registry) -> Result<()> {
+    async fn register_models(&self, registry: &Registry) -> Result<()> {
         const KNOWN_DECOMISSIONED_MODELS: &[&str] = &[
             "gemini-pro-vision",
             "gemini-pro",
@@ -117,7 +117,7 @@ impl Plugin for VertexAIPlugin {
         "vertexai"
     }
 
-    async fn initialize(&self, registry: &mut Registry) -> genkit_core::error::Result<()> {
+    async fn initialize(&self, registry: &Registry) -> genkit_core::error::Result<()> {
         self.register_models(registry).await.map_err(|e| e.into())
     }
 }
