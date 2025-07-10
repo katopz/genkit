@@ -1,5 +1,5 @@
 [workspace]
-members  = ["core", "ai", "genkit", "plugins/*"]
+members  = ["core", "ai", "genkit", "plugins/*", "testapps/*"]
 resolver = "2"
 
 [workspace.package]
@@ -15,7 +15,7 @@ async-trait  = "0.1"
 futures      = "0.3"
 futures-util = "0.3.31"
 hyper        = { version = "1", features = ["full"] }
-hyper-util   = { version = "0.1.14", features = ["full"] }
+hyper-util   = { version = "0.1.15", features = ["full"] }
 tokio        = { version = "1.46", features = ["full"] }
 tokio-stream = "0.1.17"
 tokio-util   = { version = "0.7" }

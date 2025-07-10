@@ -11,6 +11,7 @@ version.workspace    = true
 async-trait.workspace  = true
 base64.workspace       = true
 gcp_auth               = "0.12"
+genkit                 = { path = "../../genkit", version = "0.1.0" }
 genkit-ai              = { path = "../../ai", version = "0.1.0" }
 genkit-core            = { path = "../../core", version = "0.1.0" }
 log.workspace          = true

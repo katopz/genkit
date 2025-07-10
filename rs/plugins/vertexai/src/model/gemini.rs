@@ -294,8 +294,77 @@ fn to_vertex_request(req: &GenerateRequest) -> Result<VertexGeminiRequest> {
     })
 }
 
+/// Calculates basic usage statistics like character and media counts.
+fn get_genkit_usage_stats(
+    request_messages: &[genkit_ai::message::MessageData],
+    candidate_messages: &[genkit_ai::message::MessageData],
+) -> GenerationUsage {
+    let mut input_characters = 0;
+    let mut input_images = 0;
+    let mut input_videos = 0;
+    let mut input_audio_files = 0;
+
+    for m in request_messages {
+        for p in &m.content {
+            if let Some(text) = &p.text {
+                input_characters += text.len() as u32;
+            }
+            if let Some(media) = &p.media {
+                if let Some(content_type) = &media.content_type {
+                    if content_type.starts_with("image/") {
+                        input_images += 1;
+                    } else if content_type.starts_with("video/") {
+                        input_videos += 1;
+                    } else if content_type.starts_with("audio/") {
+                        input_audio_files += 1;
+                    }
+                }
+            }
+        }
+    }
+
+    let mut output_characters = 0;
+    let mut output_images = 0;
+    let mut output_videos = 0;
+    let mut output_audio_files = 0;
+
+    for c in candidate_messages {
+        for p in &c.content {
+            if let Some(text) = &p.text {
+                output_characters += text.len() as u32;
+            }
+            if let Some(media) = &p.media {
+                if let Some(content_type) = &media.content_type {
+                    if content_type.starts_with("image/") {
+                        output_images += 1;
+                    } else if content_type.starts_with("video/") {
+                        output_videos += 1;
+                    } else if content_type.starts_with("audio/") {
+                        output_audio_files += 1;
+                    }
+                }
+            }
+        }
+    }
+
+    GenerationUsage {
+        input_characters: Some(input_characters),
+        input_images: Some(input_images),
+        input_videos: Some(input_videos),
+        input_audio_files: Some(input_audio_files),
+        output_characters: Some(output_characters),
+        output_images: Some(output_images),
+        output_videos: Some(output_videos),
+        output_audio_files: Some(output_audio_files),
+        ..Default::default()
+    }
+}
+
 /// Converts a `VertexGeminiResponse` into a Genkit `GenerateResponseData`.
-fn to_genkit_response(resp: VertexGeminiResponse) -> Result<GenerateResponseData> {
+fn to_genkit_response(
+    req: &GenerateRequest,
+    resp: VertexGeminiResponse,
+) -> Result<GenerateResponseData> {
     let candidates = resp
         .candidates
         .into_iter()
@@ -345,18 +414,14 @@ fn to_genkit_response(resp: VertexGeminiResponse) -> Result<GenerateResponseData
         })
         .collect::<Result<Vec<CandidateData>>>()?;
 
-    let usage = resp.usage_metadata.map(|u| GenerationUsage {
-        input_tokens: Some(u.prompt_token_count),
-        output_tokens: Some(u.candidates_token_count),
-        total_tokens: Some(u.total_token_count),
-        input_characters: todo!(),
-        input_images: todo!(),
-        input_videos: todo!(),
-        input_audio_files: todo!(),
-        output_characters: todo!(),
-        output_images: todo!(),
-        output_videos: todo!(),
-        output_audio_files: todo!(),
+    let usage = resp.usage_metadata.map(|u| {
+        let candidate_messages: Vec<genkit_ai::message::MessageData> =
+            candidates.iter().map(|c| c.message.clone()).collect();
+        let mut usage_stats = get_genkit_usage_stats(&req.messages, &candidate_messages);
+        usage_stats.input_tokens = Some(u.prompt_token_count);
+        usage_stats.output_tokens = Some(u.candidates_token_count);
+        usage_stats.total_tokens = Some(u.total_token_count);
+        usage_stats
     });
 
     Ok(GenerateResponseData {
@@ -462,7 +527,7 @@ async fn gemini_runner(
         }),
     };
 
-    to_genkit_response(final_resp)
+    to_genkit_response(&req, final_resp)
 }
 
 /// Defines a Gemini model action.
