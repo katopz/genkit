@@ -74,7 +74,7 @@ async fn test_should_apply_middleware_to_a_prompt_call(
         .await
         .unwrap();
 
-    assert_eq!(response.text().unwrap(), "[Echo: (hi Genkit),; config: {}]");
+    assert_eq!(response.text().unwrap(), "[Echo: (hi Genkit); config: {}]");
 }
 
 #[rstest]
@@ -113,7 +113,7 @@ async fn test_should_apply_middleware_configured_on_prompt(
         .await
         .unwrap();
 
-    assert_eq!(response.text().unwrap(), "[Echo: (hi Genkit),; config: {}]");
+    assert_eq!(response.text().unwrap(), "[Echo: (hi Genkit); config: {}]");
 }
 
 #[rstest]
@@ -157,7 +157,7 @@ async fn test_should_apply_middleware_to_a_looked_up_prompt(
         .await
         .unwrap();
 
-    assert_eq!(response.text().unwrap(), "[Echo: (hi Genkit),; config: {}]");
+    assert_eq!(response.text().unwrap(), "[Echo: (hi Genkit); config: {}]");
 }
 
 #[rstest]
@@ -208,5 +208,5 @@ async fn test_should_apply_middleware_to_a_prompt_call_on_a_looked_up_prompt(
         .await
         .unwrap();
 
-    assert_eq!(response.text().unwrap(), "[Echo: (hi Genkit),; config: {}]");
+    assert_eq!(response.text().unwrap(), "[Echo: (hi Genkit); config: {}]");
 }

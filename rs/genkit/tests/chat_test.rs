@@ -350,7 +350,6 @@ async fn test_start_chat_from_prompt_file_with_input(#[future] genkit_instance: 
 
 #[rstest]
 #[tokio::test]
-#[ignore]
 /// 'can send a rendered prompt to chat'
 async fn test_can_send_rendered_prompt_to_chat(#[future] genkit_instance: Arc<Genkit>) {
     let genkit = genkit_instance.await;

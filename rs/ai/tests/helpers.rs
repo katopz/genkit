@@ -181,7 +181,7 @@ impl Plugin for EchoModelPlugin {
                             let content = m
                                 .content
                                 .iter()
-                                .map(|p| p.text.as_deref().unwrap_or(""))
+                                .filter_map(|p| p.text.as_deref())
                                 .collect::<Vec<_>>()
                                 .join(",");
                             format!("{}{}", prefix, content)
@@ -191,8 +191,12 @@ impl Plugin for EchoModelPlugin {
                     // 2. Join all parts with a comma, exactly like the TS version.
                     let concatenated_text = all_text_parts.join(",");
 
-                    let config_str = serde_json::to_string(&req.config.unwrap_or_default())
-                        .unwrap_or_else(|_| "null".to_string());
+                    let config_str = match &req.config {
+                        Some(c) if !c.is_null() => {
+                            serde_json::to_string(c).unwrap_or_else(|_| "{}".to_string())
+                        }
+                        _ => "{}".to_string(),
+                    };
 
                     // 3. Construct the final response string.
                     let response_text = format!("Echo: {}", concatenated_text);

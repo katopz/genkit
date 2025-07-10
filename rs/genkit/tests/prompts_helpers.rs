@@ -80,7 +80,7 @@ pub fn wrap_response() -> ModelMiddleware {
                         .iter()
                         .filter_map(|p| p.text.as_deref())
                         .collect::<Vec<_>>()
-                        .join(",");
+                        .join("");
                     candidate.message.content = vec![Part::text(format!("[{}]", all_text))];
                 }
 
