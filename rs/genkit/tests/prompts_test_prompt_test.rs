@@ -520,7 +520,7 @@ async fn test_lazily_resolved_schema_refs(#[future] genkit_instance: Arc<Genkit>
 
 use genkit_ai::prompt::PromptLookupOptions;
 
-use crate::prompts_helpers::HiInput;
+use crate::prompts_helpers::{HiInput, HiOutput};
 
 #[rstest]
 #[tokio::test]
@@ -724,4 +724,70 @@ async fn test_includes_metadata_for_functional_prompts(#[future] genkit_instance
     });
 
     assert_eq!(custom_metadata_value, expected_metadata);
+}
+
+#[rstest]
+#[tokio::test]
+/// 'passes in output options to the model'
+async fn test_passes_in_output_options_to_model() {
+    let (genkit, programmable_model) = helpers::genkit_with_programmable_model().await;
+
+    let hi_prompt_config = PromptConfig {
+        name: "hi".to_string(),
+        model: Some(Model::Name("programmableModel".to_string())),
+        output: Some(OutputOptions {
+            format: Some("json".to_string()),
+            json_schema: Some(serde_json::to_value(schemars::schema_for!(HiOutput)).unwrap()),
+            ..Default::default()
+        }),
+        config: Some(json!({ "temperature": 11 })),
+        messages_fn: Some(Arc::new(|input: HiInput, _, _| {
+            Box::pin(async move {
+                Ok(vec![MessageData {
+                    role: Role::User,
+                    content: vec![Part::text(format!("hi {}", input.name))],
+                    ..Default::default()
+                }])
+            })
+        })),
+        ..Default::default()
+    };
+
+    let hi_prompt = genkit.define_prompt::<HiInput, HiOutput, Value>(hi_prompt_config);
+
+    // Set the model's handler to return a specific JSON response.
+    let handler: helpers::ProgrammableModelHandler = Arc::new(Box::new(|_req, _cb| {
+        Box::pin(async {
+            Ok(genkit_ai::GenerateResponseData {
+                candidates: vec![genkit_ai::model::CandidateData {
+                    message: MessageData {
+                        role: Role::Model,
+                        content: vec![Part::text("```json\n{\"message\": \"hello\"}\n```")],
+                        ..Default::default()
+                    },
+                    ..Default::default()
+                }],
+                ..Default::default()
+            })
+        })
+    }));
+    *programmable_model.handler.lock().unwrap() = handler;
+
+    let response = hi_prompt
+        .generate(
+            HiInput {
+                name: "Pavel".to_string(),
+            },
+            None,
+        )
+        .await
+        .unwrap();
+
+    let output = response.output().unwrap();
+    assert_eq!(
+        output,
+        HiOutput {
+            message: "hello".to_string()
+        }
+    );
 }

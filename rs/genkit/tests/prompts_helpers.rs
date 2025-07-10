@@ -27,9 +27,14 @@ use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
 
-#[derive(Serialize, Deserialize, JsonSchema, Clone, Default)]
+#[derive(Serialize, Deserialize, JsonSchema, Clone, Default, Debug, PartialEq)]
 pub struct HiInput {
     pub name: String,
+}
+
+#[derive(Serialize, Deserialize, JsonSchema, Clone, Default, Debug, PartialEq)]
+pub struct HiOutput {
+    pub message: String,
 }
 
 // Middleware that wraps the request message text in parentheses.
