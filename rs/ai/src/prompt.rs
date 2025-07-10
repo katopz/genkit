@@ -36,6 +36,7 @@ use schemars::{self, JsonSchema};
 use serde::{de::DeserializeOwned, Deserialize, Serialize};
 use serde_json::{json, Value};
 use std::any::Any;
+use std::collections::HashMap;
 use std::fmt;
 use std::future::Future;
 use std::pin::Pin;
@@ -443,6 +444,7 @@ where
 }
 
 /// Defines a prompt which can be used to generate content or render a request.
+/// Defines a prompt which can be used to generate content or render a request.
 pub fn define_prompt<I, O, C>(
     registry: &Registry,
     config: PromptConfig<I, O, C>,
@@ -468,6 +470,42 @@ where
         config_arc.name.clone()
     };
 
+    let model_name = match &config_arc.model {
+        Some(Model::Name(n)) => Some(n.clone()),
+        Some(Model::Reference(r)) => Some(r.name.clone()),
+        None => None,
+    };
+    let raw_config = json!({
+        "config": config_arc.config,
+        "description": config_arc.description,
+    });
+    let mut prompt_meta_map = serde_json::Map::new();
+    if let Some(config_val) = &config_arc.config {
+        prompt_meta_map.insert(
+            "config".to_string(),
+            serde_json::to_value(config_val).unwrap_or(Value::Null),
+        );
+    }
+    if let Some(desc) = &config_arc.description {
+        prompt_meta_map.insert("description".to_string(), json!(desc));
+    }
+    let input_schema_json = serde_json::to_value(schemars::schema_for!(I)).unwrap_or(Value::Null);
+    prompt_meta_map.insert("input".to_string(), json!({ "schema": input_schema_json }));
+    prompt_meta_map.insert("metadata".to_string(), json!({}));
+    prompt_meta_map.insert("model".to_string(), json!(model_name));
+    prompt_meta_map.insert("name".to_string(), json!(&config_arc.name));
+    if let Some(variant) = &config_arc.variant {
+        prompt_meta_map.insert("variant".to_string(), json!(variant));
+    }
+    if let Some(prompt_str) = &config_arc.prompt {
+        prompt_meta_map.insert("template".to_string(), json!(prompt_str));
+    }
+    prompt_meta_map.insert("raw".to_string(), raw_config);
+
+    let mut action_metadata = HashMap::new();
+    action_metadata.insert("prompt".to_string(), Value::Object(prompt_meta_map));
+    action_metadata.insert("type".to_string(), json!("prompt"));
+
     let prompt_action = {
         let config_clone = config_arc.clone();
         let registry_clone = registry_clone.clone();
@@ -485,6 +523,7 @@ where
                 }
             },
         )
+        .with_metadata(action_metadata)
         .build()
     };
 

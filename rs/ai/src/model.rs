@@ -434,9 +434,6 @@ where
     if let Some(config_schema) = &options.config_schema {
         metadata.insert("configSchema".to_string(), config_schema.clone());
     }
-    let metadata_value = json!(metadata);
-    let metadata_map: std::collections::HashMap<String, serde_json::Value> =
-        serde_json::from_value(metadata_value).unwrap();
 
     let action_f =
         move |req: GenerateRequest,
@@ -491,7 +488,7 @@ where
         options.name.clone(),
         action_f,
     )
-    .with_metadata(metadata_map)
+    .with_metadata(metadata)
     .build();
     let model_action = ModelAction(action);
     registry
