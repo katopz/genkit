@@ -361,15 +361,6 @@ async fn test_can_send_rendered_prompt_to_chat(#[future] genkit_instance: Arc<Ge
         ..Default::default()
     });
 
-    let session =
-        genkit_ai::Session::<()>::new(Arc::new(genkit.registry().clone()), None, None, None)
-            .await
-            .unwrap();
-    let chat = Arc::new(session)
-        .chat::<()>(Some(ChatOptions::default()))
-        .await
-        .unwrap();
-
     let rendered = prompt
         .render(
             NameInput {
@@ -383,10 +374,20 @@ async fn test_can_send_rendered_prompt_to_chat(#[future] genkit_instance: Arc<Ge
         .await
         .unwrap();
 
-    let response = chat.send(rendered).await.unwrap();
+    let response = genkit.generate_with_options(rendered).await.unwrap();
 
-    assert_eq!(
-        response.text().unwrap(),
-        "Echo: hi Genkit; config: {\"version\":\"abc\",\"temperature\":11}"
-    );
+    // To address the non-deterministic key order in JSON serialization,
+    // we parse the strings into `serde_json::Value` and compare them.
+    let left_str = response.text().unwrap();
+    let right_str = "Echo: hi Genkit; config: {\"version\":\"abc\",\"temperature\":11}";
+    let prefix = "Echo: hi Genkit; config: ";
+
+    let left_json_str = left_str.strip_prefix(prefix).expect("Prefix not found");
+    let right_json_str = right_str.strip_prefix(prefix).expect("Prefix not found");
+
+    let left_value: Value = serde_json::from_str(left_json_str).expect("Failed to parse left JSON");
+    let right_value: Value =
+        serde_json::from_str(right_json_str).expect("Failed to parse right JSON");
+
+    assert_eq!(left_value, right_value);
 }

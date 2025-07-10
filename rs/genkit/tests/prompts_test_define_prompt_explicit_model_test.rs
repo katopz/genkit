@@ -118,7 +118,10 @@ async fn test_calls_prompt_with_history(#[future] genkit_instance: Arc<Genkit>) 
             },
             {
                 "role": "model",
-                "content": [{"text": "Echo: hibyehi Genkit; config: {}"}]
+                "content": [
+                    {"text": "Echo: hi,bye,hi Genkit"},
+                    {"text": "; config: {}"}
+                ]
             }
         ])
     );
@@ -190,7 +193,10 @@ async fn test_streams_prompt_with_history(#[future] genkit_instance: Arc<Genkit>
             },
             {
                 "role": "model",
-                "content": [{"text": "Echo: hibyehi Genkit; config: {}"}]
+                "content": [
+                    {"text": "Echo: hi,bye,hi Genkit"},
+                    {"text": "; config: {}"}
+                ]
             }
         ])
     );
