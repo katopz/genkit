@@ -495,3 +495,33 @@ async fn test_resolved_schema_refs(#[future] genkit_instance: Arc<Genkit>) {
 
     assert_eq!(generate_request.messages, expected_messages);
 }
+
+#[rstest]
+#[tokio::test]
+/// 'lazily resolved schema refs'
+async fn test_lazily_resolved_schema_refs(#[future] genkit_instance: Arc<Genkit>) {
+    let genkit = genkit_instance.await;
+
+    // This prompt references a schema that does not exist in the registry.
+    let prompt_config = PromptConfig {
+        name: "badSchemaRef".to_string(),
+        prompt: Some("Write a poem about {{foo}}.".to_string()),
+        output: Some(OutputOptions {
+            json_schema: Some(json!({ "$ref": "schema/badSchemaRef1" })),
+            ..Default::default()
+        }),
+        ..Default::default()
+    };
+
+    let prompt = genkit
+        .define_prompt::<serde_json::Value, serde_json::Value, serde_json::Value>(prompt_config)
+        .await;
+
+    let result = prompt.render(json!({ "foo": "bar" }), None).await;
+
+    assert!(result.is_err());
+    let error = result.unwrap_err();
+    assert!(error
+        .to_string()
+        .contains("NOT_FOUND: Schema 'badSchemaRef1' not found"));
+}

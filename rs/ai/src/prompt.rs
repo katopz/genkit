@@ -210,7 +210,7 @@ impl<O> fmt::Debug for PromptGenerateOptions<O> {
 #[derive(Clone)]
 pub struct ExecutablePrompt<I = Value, O = Value, C = Value> {
     config: Arc<PromptConfig<I, O, C>>,
-    registry: Arc<Registry>,
+    registry: Registry,
 }
 
 impl<I, O, C> ExecutablePrompt<I, O, C>
@@ -391,7 +391,7 @@ where
         };
 
         // 5. Construct final GenerateOptions
-        let gen_opts = GenerateOptions {
+        let mut gen_opts = GenerateOptions {
             model: self.config.model.clone(),
             messages: Some(messages),
             tools: self.config.tools.clone(),
@@ -415,6 +415,29 @@ where
             ..Default::default()
         };
 
+        if let Some(output_opts) = &mut gen_opts.output {
+            if let Some(json_schema) = &output_opts.json_schema {
+                if let Some(obj) = json_schema.as_object() {
+                    if let Some(Value::String(ref_path)) = obj.get("$ref") {
+                        let schema_name = ref_path.strip_prefix("schema/").unwrap_or(ref_path);
+                        let looked_up_schema =
+                            self.registry.lookup_any("schema", schema_name).await;
+                        if let Some(schema_any) = looked_up_schema {
+                            if let Ok(schema_arc) = schema_any.downcast::<schemars::Schema>() {
+                                let schema_value = serde_json::to_value(&*schema_arc)?;
+                                output_opts.json_schema = Some(schema_value);
+                            }
+                        } else {
+                            return Err(Error::new_internal(format!(
+                                "NOT_FOUND: Schema '{}' not found",
+                                schema_name
+                            )));
+                        }
+                    }
+                }
+            }
+        }
+
         Ok(gen_opts)
     }
 }
@@ -437,11 +460,11 @@ where
     C: Serialize + DeserializeOwned + JsonSchema + Send + Sync + 'static,
 {
     let config_arc = Arc::new(config);
-    let registry_arc = Arc::new(registry.clone());
+    let registry_clone = registry.clone();
 
     let prompt_action = {
         let config_clone = config_arc.clone();
-        let registry_clone = registry_arc.clone();
+        let registry_clone = registry_clone.clone();
         let name = config_clone.name.clone();
 
         ActionBuilder::new(
@@ -470,7 +493,7 @@ where
 
     ExecutablePrompt {
         config: config_arc,
-        registry: registry_arc,
+        registry: registry.clone(),
     }
 }
 
@@ -509,6 +532,6 @@ where
 
     Ok(ExecutablePrompt {
         config,
-        registry: Arc::new(registry.clone()),
+        registry: registry.clone(),
     })
 }

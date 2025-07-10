@@ -137,6 +137,29 @@ pub struct GenerateOptions<O = Value> {
     pub _marker: PhantomData<O>,
 }
 
+impl<O> fmt::Debug for GenerateOptions<O> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("GenerateOptions")
+            .field("model", &self.model)
+            .field("system", &self.system)
+            .field("prompt", &self.prompt)
+            .field("docs", &self.docs)
+            .field("messages", &self.messages)
+            .field("tools", &self.tools)
+            .field("tool_choice", &self.tool_choice)
+            .field("config", &self.config)
+            .field("output", &self.output)
+            .field("resume", &self.resume)
+            .field("max_turns", &self.max_turns)
+            .field("return_tool_requests", &self.return_tool_requests)
+            .field("use", &self.r#use.as_ref().map(|v| v.len()))
+            .field("context", &self.context)
+            .field("on_chunk", &self.on_chunk.as_ref().map(|_| "Some(<fn>)"))
+            .field("_marker", &self._marker)
+            .finish()
+    }
+}
+
 /// Base generate options used by `Chat`.
 #[derive(Debug, Clone, Default)]
 pub struct BaseGenerateOptions {
