@@ -26,12 +26,11 @@ pub fn joke_subject_generator(genkit: &Genkit) {
 
 #[tokio::main]
 async fn main() -> genkit::Result<()> {
+    env_logger::init();
     let vertexai_plugin = vertex_ai(VertexAIPluginOptions {
-        project_id: Some("talent-finder-437508".to_string()),
-        location: Some("asia-northeast1".to_string()),
-        service_account: Some(
-            "firebase-adminsdk-nl3gl@talent-finder-437508.iam.gserviceaccount.com".to_string(),
-        ),
+        project_id: None, //Some("talent-finder-437508".to_string()),
+        location: None,   //Some("asia-northeast1".to_string()),
+        service_account: None,
     });
     let genkit = Genkit::init(GenkitOptions {
         plugins: vec![vertexai_plugin],
