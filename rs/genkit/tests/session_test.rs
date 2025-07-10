@@ -174,21 +174,23 @@ async fn test_maintains_multithreaded_history_in_the_session(
     let response = main_chat.send("hi main").await.unwrap();
     assert_eq!(response.text().unwrap(), "Echo: hi main; config: {}");
 
-    let mut lawyer_chat_opts: ChatOptions<Value, Value> = ChatOptions::default();
-    lawyer_chat_opts.thread_name = Some("lawyerChat".to_string());
-    lawyer_chat_opts.base_options = Some(BaseGenerateOptions {
-        messages: vec![MessageData {
-            role: Role::System,
-            content: vec![Part::text("talk like a lawyer")],
-            metadata: Some(
-                [("preamble".to_string(), json!(true))]
-                    .iter()
-                    .cloned()
-                    .collect(),
-            ),
-        }],
+    let lawyer_chat_opts = ChatOptions {
+        thread_name: Some("lawyerChat".to_string()),
+        base_options: Some(BaseGenerateOptions {
+            messages: vec![MessageData {
+                role: Role::System,
+                content: vec![Part::text("talk like a lawyer")],
+                metadata: Some(
+                    [("preamble".to_string(), json!(true))]
+                        .iter()
+                        .cloned()
+                        .collect(),
+                ),
+            }],
+            ..Default::default()
+        }),
         ..Default::default()
-    });
+    };
     let lawyer_chat = session.chat::<Value>(Some(lawyer_chat_opts)).await.unwrap();
     let response = lawyer_chat.send("hi lawyerChat").await.unwrap();
     assert_eq!(
@@ -196,21 +198,23 @@ async fn test_maintains_multithreaded_history_in_the_session(
         "Echo: system: talk like a lawyer,hi lawyerChat; config: {}"
     );
 
-    let mut pirate_chat_opts: ChatOptions<Value, Value> = ChatOptions::default();
-    pirate_chat_opts.thread_name = Some("pirateChat".to_string());
-    pirate_chat_opts.base_options = Some(BaseGenerateOptions {
-        messages: vec![MessageData {
-            role: Role::System,
-            content: vec![Part::text("talk like a pirate")],
-            metadata: Some(
-                [("preamble".to_string(), json!(true))]
-                    .iter()
-                    .cloned()
-                    .collect(),
-            ),
-        }],
+    let pirate_chat_opts = ChatOptions {
+        thread_name: Some("pirateChat".to_string()),
+        base_options: Some(BaseGenerateOptions {
+            messages: vec![MessageData {
+                role: Role::System,
+                content: vec![Part::text("talk like a pirate")],
+                metadata: Some(
+                    [("preamble".to_string(), json!(true))]
+                        .iter()
+                        .cloned()
+                        .collect(),
+                ),
+            }],
+            ..Default::default()
+        }),
         ..Default::default()
-    });
+    };
     let pirate_chat = session.chat::<Value>(Some(pirate_chat_opts)).await.unwrap();
     let response = pirate_chat.send("hi pirateChat").await.unwrap();
     assert_eq!(
