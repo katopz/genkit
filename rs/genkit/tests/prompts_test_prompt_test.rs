@@ -438,3 +438,60 @@ async fn test_renders_loaded_prompt_via_executable_prompt(#[future] genkit_insta
 
     assert_eq!(generate_request, expected_request);
 }
+
+#[rstest]
+#[tokio::test]
+/// 'resolved schema refs'
+async fn test_resolved_schema_refs(#[future] genkit_instance: Arc<Genkit>) {
+    let genkit = genkit_instance.await;
+
+    #[derive(Serialize, Deserialize, JsonSchema, Debug, PartialEq, Clone)]
+    struct SchemaRefOutput {
+        output: String,
+    }
+
+    let output_schema = schemars::schema_for!(SchemaRefOutput);
+
+    let prompt_config = PromptConfig {
+        name: "schemaRef".to_string(),
+        prompt: Some("Write a poem about {{foo}}.".to_string()),
+        output: Some(OutputOptions {
+            json_schema: Some(serde_json::to_value(output_schema.clone()).unwrap()),
+            ..Default::default()
+        }),
+        ..Default::default()
+    };
+
+    let prompt = genkit
+        .define_prompt::<serde_json::Value, serde_json::Value, serde_json::Value>(prompt_config)
+        .await;
+
+    let rendered = prompt.render(json!({ "foo": "bar" }), None).await.unwrap();
+
+    assert_eq!(
+        rendered.output.unwrap().json_schema.unwrap(),
+        serde_json::to_value(output_schema).unwrap()
+    );
+
+    let action = genkit
+        .registry()
+        .lookup_action("/prompt/schemaRef")
+        .await
+        .unwrap();
+
+    let response_value = action
+        .run_http_json(json!({ "foo": "bar" }), None)
+        .await
+        .unwrap();
+
+    let generate_request: genkit_ai::model::GenerateRequest =
+        serde_json::from_value(response_value["result"].clone()).unwrap();
+
+    let expected_messages = vec![MessageData {
+        role: Role::User,
+        content: vec![Part::text("Write a poem about bar.")],
+        ..Default::default()
+    }];
+
+    assert_eq!(generate_request.messages, expected_messages);
+}
