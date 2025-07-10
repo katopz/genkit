@@ -16,10 +16,13 @@ mod helpers;
 
 use genkit::{
     model::{Part, Role},
-    Genkit,
+    Genkit, PromptConfig, PromptGenerateOptions,
 };
 use genkit_ai::{session::ChatOptions, MessageData};
 use rstest::{fixture, rstest};
+use schemars::JsonSchema;
+use serde::{Deserialize, Serialize};
+use serde_json::{json, Value};
 
 use std::sync::Arc;
 use tokio_stream::StreamExt;
@@ -160,4 +163,101 @@ async fn test_maintains_history_in_session_with_streaming(#[future] genkit_insta
         },
     ];
     assert_eq!(final_response.messages().unwrap(), expected_messages);
+}
+
+#[derive(Serialize, Deserialize, JsonSchema, Debug, PartialEq, Clone, Default)]
+struct NameInput {
+    name: String,
+}
+
+#[rstest]
+#[tokio::test]
+/// 'can init a session with a prompt'
+async fn test_init_session_with_prompt(#[future] genkit_instance: Arc<Genkit>) {
+    let genkit = genkit_instance.await;
+
+    let prompt = genkit.define_prompt::<NameInput, Value, Value>(PromptConfig {
+        name: "hi".to_string(),
+        prompt: Some("hi {{name}}".to_string()),
+        ..Default::default()
+    });
+
+    let rendered = prompt
+        .render(
+            NameInput {
+                name: "Genkit".to_string(),
+            },
+            Some(PromptGenerateOptions {
+                config: Some(json!({ "temperature": 11 })),
+                ..Default::default()
+            }),
+        )
+        .await
+        .unwrap();
+
+    let session =
+        genkit_ai::Session::<()>::new(Arc::new(genkit.registry().clone()), None, None, None)
+            .await
+            .unwrap();
+
+    let chat = Arc::new(session)
+        .chat::<()>(Some(ChatOptions {
+            base_options: Some(genkit_ai::generate::BaseGenerateOptions {
+                model: rendered.model,
+                docs: rendered.docs,
+                messages: rendered.messages.unwrap_or_default(),
+                tools: rendered.tools,
+                tool_choice: rendered.tool_choice,
+                config: rendered.config,
+                output: rendered.output,
+            }),
+            ..Default::default()
+        }))
+        .await
+        .unwrap();
+
+    let response = chat.send("hi").await.unwrap();
+
+    assert_eq!(
+        response.text().unwrap(),
+        "Echo: hi Genkithi; config: {\"temperature\":11}"
+    );
+}
+
+#[rstest]
+#[tokio::test]
+/// 'can start chat from a prompt'
+async fn test_start_chat_from_prompt(#[future] genkit_instance: Arc<Genkit>) {
+    let genkit = genkit_instance.await;
+
+    let preamble = genkit.define_prompt::<(), Value, Value>(PromptConfig {
+        name: "hi".to_string(),
+        config: Some(json!({ "version": "abc" })),
+        messages: Some(vec![MessageData {
+            role: Role::User,
+            content: vec![Part::text("hi from template")],
+            ..Default::default()
+        }]),
+        ..Default::default()
+    });
+
+    let session =
+        genkit_ai::Session::<()>::new(Arc::new(genkit.registry().clone()), None, None, None)
+            .await
+            .unwrap();
+
+    let chat = Arc::new(session)
+        .chat::<()>(Some(ChatOptions {
+            preamble: Some(&preamble),
+            ..Default::default()
+        }))
+        .await
+        .unwrap();
+
+    let response = chat.send("send it").await.unwrap();
+
+    assert_eq!(
+        response.text().unwrap(),
+        "Echo: hi from templatesend it; config: {\"version\":\"abc\"}"
+    );
 }
