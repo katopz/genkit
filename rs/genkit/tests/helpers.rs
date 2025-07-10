@@ -255,12 +255,24 @@ impl Plugin for EchoModelPlugin {
                 let all_text = req
                     .messages
                     .iter()
-                    .flat_map(|m| &m.content)
-                    .filter_map(|p| p.text.as_deref())
+                    .map(|m| {
+                        let prefix = match m.role {
+                            Role::User | Role::Model => "".to_string(),
+                            _ => format!("{}: ", m.role.to_string().to_lowercase()),
+                        };
+                        let content = m
+                            .content
+                            .iter()
+                            .filter_map(|p| p.text.as_deref())
+                            .collect::<Vec<_>>()
+                            .join(",");
+                        format!("{}{}", prefix, content)
+                    })
                     .collect::<Vec<_>>()
-                    .join("");
+                    .join(",");
 
-                let text = format!("Echo: {}; config: {}", all_text, config_str);
+                let response_text_part = Part::text(format!("Echo: {}", all_text));
+                let config_part = Part::text(format!("; config: {}", config_str));
 
                 Ok(GenerateResponseData {
                     candidates: vec![CandidateData {
@@ -268,7 +280,7 @@ impl Plugin for EchoModelPlugin {
                         finish_reason: Some(FinishReason::Stop),
                         message: MessageData {
                             role: Role::Model,
-                            content: vec![Part::text(text)],
+                            content: vec![response_text_part, config_part],
                             ..Default::default()
                         },
                         ..Default::default()

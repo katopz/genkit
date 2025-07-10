@@ -61,7 +61,7 @@ async fn test_maintains_history_in_session(#[future] genkit_instance: Arc<Genkit
 
     assert_eq!(
         response.text().unwrap(),
-        "Echo: hi,Echo: hi; config: {},bye; config: {}"
+        "Echo: hi,Echo: hi,; config: {},bye; config: {}"
     );
 
     let expected_messages = vec![
@@ -72,7 +72,7 @@ async fn test_maintains_history_in_session(#[future] genkit_instance: Arc<Genkit
         },
         MessageData {
             role: Role::Model,
-            content: vec![Part::text("Echo: hi; config: {}")],
+            content: vec![Part::text("Echo: hi"), Part::text("; config: {}")],
             ..Default::default()
         },
         MessageData {
@@ -82,7 +82,10 @@ async fn test_maintains_history_in_session(#[future] genkit_instance: Arc<Genkit
         },
         MessageData {
             role: Role::Model,
-            content: vec![Part::text("Echo: hi,Echo: hi,; config: {},bye; config: {}")],
+            content: vec![
+                Part::text("Echo: hi,Echo: hi,; config: {},bye"),
+                Part::text("; config: {}"),
+            ],
             ..Default::default()
         },
     ];
@@ -148,7 +151,7 @@ async fn test_maintains_history_in_session_with_streaming(#[future] genkit_insta
         },
         MessageData {
             role: Role::Model,
-            content: vec![Part::text("Echo: hi; config: {}")],
+            content: vec![Part::text("Echo: hi"), Part::text("; config: {}")],
             ..Default::default()
         },
         MessageData {
@@ -160,7 +163,7 @@ async fn test_maintains_history_in_session_with_streaming(#[future] genkit_insta
             role: Role::Model,
             content: vec![
                 Part::text("Echo: hi,Echo: hi,; config: {},bye"),
-                Part::text("e; config: {}"),
+                Part::text("; config: {}"),
             ],
             ..Default::default()
         },
@@ -223,7 +226,7 @@ async fn test_init_session_with_prompt(#[future] genkit_instance: Arc<Genkit>) {
 
     assert_eq!(
         response.text().unwrap(),
-        "Echo: hi Genkithi; config: {\"temperature\":11}"
+        "Echo: hi Genkit,hi; config: {\"temperature\":11}"
     );
 }
 
@@ -261,7 +264,7 @@ async fn test_start_chat_from_prompt(#[future] genkit_instance: Arc<Genkit>) {
 
     assert_eq!(
         response.text().unwrap(),
-        "Echo: hi from templatesend it; config: {\"version\":\"abc\"}"
+        "Echo: hi from template,send it; config: {\"version\":\"abc\"}"
     );
 }
 
@@ -298,7 +301,7 @@ async fn test_start_chat_from_prompt_with_input(#[future] genkit_instance: Arc<G
 
     assert_eq!(
         response.text().unwrap(),
-        "Echo: hi Genkit from templatesend it; config: {\"version\":\"abc\"}"
+        "Echo: hi Genkit from template,send it; config: {\"version\":\"abc\"}"
     );
 }
 
@@ -341,7 +344,7 @@ async fn test_start_chat_from_prompt_file_with_input(#[future] genkit_instance: 
 
     assert_eq!(
         response.text().unwrap(),
-        "Echo: hi Genkit from templatesend it; config: {\"version\":\"abc\"}"
+        "Echo: hi Genkit from template,send it; config: {\"version\":\"abc\"}"
     );
 }
 
@@ -385,6 +388,6 @@ async fn test_can_send_rendered_prompt_to_chat(#[future] genkit_instance: Arc<Ge
 
     assert_eq!(
         response.text().unwrap(),
-        "Echo: hi Genkit; config: {\"temperature\":11,\"version\":\"abc\"}"
+        "Echo: hi Genkit; config: {\"version\":\"abc\",\"temperature\":11}"
     );
 }
