@@ -24,7 +24,7 @@ use serde_json::Value;
 use std::collections::{HashMap, HashSet};
 
 /// Represents a media item, typically an image, video, or audio file.
-#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, PartialEq)]
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, PartialEq, Default)]
 #[serde(rename_all = "camelCase")]
 pub struct Media {
     /// The IANA media type of the content (e.g., `image/png`).
@@ -98,6 +98,19 @@ impl Part {
     pub fn text(text: impl Into<String>) -> Self {
         Part {
             text: Some(text.into()),
+            ..Default::default()
+        }
+    }
+}
+
+impl Part {
+    /// Creates a new `Part` from a media.
+    pub fn media(url: impl Into<String>, content_type: impl Into<String>) -> Self {
+        Part {
+            media: Some(Media {
+                url: url.into(),
+                content_type: Some(content_type.into()),
+            }),
             ..Default::default()
         }
     }
