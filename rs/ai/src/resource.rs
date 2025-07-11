@@ -81,7 +81,8 @@ where
     F: Fn(ResourceInput, ActionContext) -> Fut + Send + Sync + 'static,
     Fut: Future<Output = Result<ResourceOutput>> + Send + 'static,
 {
-    let mut action = dynamic_resource(opts, runner)?;
+    let dynamic_res = dynamic_resource(opts, runner)?;
+    let mut action = dynamic_res.into_action();
     let name = action.name().to_string();
     action.metadata_mut().remove("dynamic");
     registry.register_action(&name, action.clone())?;
@@ -164,12 +165,15 @@ impl DynamicResource {
         F: Fn(ResourceInput, ActionContext) -> Fut + Send + Sync + 'static,
         Fut: Future<Output = Result<ResourceOutput>> + Send + 'static,
     {
-        let action = dynamic_resource(opts, runner)?;
-        Ok(Self { action })
+        dynamic_resource(opts, runner)
     }
 
     pub fn action(&self) -> &ResourceAction {
         &self.action
+    }
+
+    pub fn into_action(self) -> ResourceAction {
+        self.action
     }
 }
 
@@ -278,7 +282,7 @@ fn create_matcher(
 }
 
 /// Defines a dynamic resource.
-pub fn dynamic_resource<F, Fut>(opts: ResourceOptions, runner: F) -> Result<ResourceAction>
+pub fn dynamic_resource<F, Fut>(opts: ResourceOptions, runner: F) -> Result<DynamicResource>
 where
     F: Fn(ResourceInput, ActionContext) -> Fut + Send + Sync + 'static,
     Fut: Future<Output = Result<ResourceOutput>> + Send + 'static,
@@ -358,5 +362,6 @@ where
         builder = builder.with_description(desc);
     }
 
-    Ok(builder.build())
+    let action = builder.build();
+    Ok(DynamicResource { action })
 }
