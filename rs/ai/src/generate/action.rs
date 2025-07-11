@@ -266,6 +266,7 @@ async fn run_model_via_middleware(
     model_action: Arc<dyn ErasedAction>,
     request: GenerateRequest,
     middleware: Vec<ModelMiddleware>,
+    message_index: u32,
 ) -> Result<GenerateResponseData> {
     let mut chain: ModelMiddlewareNext<'static> = Box::new(move |req: GenerateRequest| {
         let model_action = model_action.clone();
@@ -276,7 +277,15 @@ async fn run_model_via_middleware(
                 let mut streaming_response = model_action.stream_http_json(req_value, None)?;
                 tokio::spawn(async move {
                     while let Some(chunk_result) = streaming_response.stream.next().await {
-                        chunk_callback(chunk_result);
+                        let final_chunk = chunk_result.map(|mut v| {
+                            if let Some(obj) = v.as_object_mut() {
+                                // The model-level chunk index is relative to its own response (usually 0).
+                                // We override it with the global message index for this turn.
+                                obj.insert("index".to_string(), serde_json::json!(message_index));
+                            }
+                            v
+                        });
+                        chunk_callback(final_chunk);
                     }
                 });
                 streaming_response.output.await?
@@ -475,9 +484,13 @@ where
         let generate_request = to_generate_request(&registry, &request).await?;
 
         // 7. Call the model action.
-        let response_data =
-            run_model_via_middleware(model_action, generate_request.clone(), middleware.clone())
-                .await?;
+        let response_data = run_model_via_middleware(
+            model_action,
+            generate_request.clone(),
+            middleware.clone(),
+            message_index,
+        )
+        .await?;
 
         let generated_message = match response_data.candidates.first() {
             Some(c) => c.message.clone(),
@@ -535,22 +548,43 @@ where
             messages.push(generated_message);
         }
 
-        if let Some(tool_msg) = tool_results.tool_message {
-            messages.push(tool_msg);
+        let mut next_message_index = message_index + 1;
+        if let Some(tool_msg) = &tool_results.tool_message {
+            if let Some(cb) = get_streaming_callback() {
+                let chunk_data = GenerateResponseChunkData {
+                    index: next_message_index,
+                    content: tool_msg.content.clone(),
+                    role: Some(tool_msg.role.clone()),
+                    ..Default::default()
+                };
+                let chunk_value = serde_json::to_value(chunk_data)
+                    .map_err(|e| Error::new_internal(e.to_string()))?;
+                cb(Ok(chunk_value));
+            }
+
+            messages.push(tool_msg.clone());
+            next_message_index += 1;
         }
+
         request.messages = Some(messages);
 
-        // 11. Recursive call for the next turn.
-        generate_internal(
-            registry,
-            GenerateHelperOptions {
-                raw_request: request,
-                middleware,
-                current_turn: current_turn + 1,
-                message_index: message_index + 1,
-            },
-        )
-        .await
+        if tool_results.tool_message.is_some() {
+            // 11. Recursive call for the next turn.
+            generate_internal(
+                registry,
+                GenerateHelperOptions {
+                    raw_request: request,
+                    middleware,
+                    current_turn: current_turn + 1,
+                    message_index: next_message_index,
+                },
+            )
+            .await
+        } else {
+            // The tool loop has ended because no tool message was generated.
+            // Return the response we got from the model, which will contain the tool requests.
+            Ok((response_data, generate_request))
+        }
     })
 }
 

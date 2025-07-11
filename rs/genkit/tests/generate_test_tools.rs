@@ -24,7 +24,7 @@ use genkit_ai::{
     model::{CandidateData, GenerateResponseData},
     tool::{InterruptConfig, Resumable, ToolFnOptions},
     GenerateOptions, GenerateResponseChunk, GenerateResponseChunkData, MessageData, OutputOptions,
-    ResourceOptions, ResourceOutput, ToolRequest, ToolResponse,
+    ToolRequest, ToolResponse,
 };
 use genkit_core::context::ActionContext;
 use rstest::{fixture, rstest};
@@ -837,7 +837,7 @@ async fn test_streams_the_tool_responses() {
                         (
                             vec![Part::tool_request(
                                 "testTool",
-                                None,
+                                Some(json!({})),
                                 Some("ref123".to_string()),
                             )],
                             Role::Model,
