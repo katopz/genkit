@@ -18,6 +18,7 @@
 
 pub mod gemini;
 pub mod imagen;
+pub mod types;
 
 // Lists of supported models, similar to the TS implementation.
 pub const SUPPORTED_GEMINI_MODELS: &[&str] = &[
