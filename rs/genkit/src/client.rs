@@ -30,6 +30,7 @@ use std::str::FromStr;
 use tokio::sync::mpsc;
 use tokio_stream::wrappers::ReceiverStream;
 use tokio_stream::StreamExt;
+use tokio_util::sync::CancellationToken;
 
 const FLOW_STREAM_DELIMITER: &[u8] = b"\n\n";
 
@@ -75,6 +76,8 @@ pub struct RunFlowParams<I> {
     pub input: Option<I>,
     /// A map of HTTP headers to be added to the HTTP call.
     pub headers: Option<HashMap<String, String>>,
+    /// An optional token to cancel the flow execution.
+    pub cancellation_token: Option<CancellationToken>,
 }
 
 /// Parameters for `stream_flow`.
@@ -85,6 +88,8 @@ pub struct StreamFlowParams<I> {
     pub input: Option<I>,
     /// A map of HTTP headers to be added to the HTTP call.
     pub headers: Option<HashMap<String, String>>,
+    /// An optional token to cancel the flow execution. aka abortSignal in ts
+    pub cancellation_token: Option<CancellationToken>,
 }
 
 /// The response from a `stream_flow` call.
@@ -119,6 +124,7 @@ pub struct StreamFlowResponse<O, S> {
 ///         url: "https://my-flow-deployed-url".to_string(),
 ///         input: Some(MyInput { name: "Genkit".to_string() }),
 ///         headers: None,
+///         cancellation_token: None,
 ///     }).await?;
 ///     println!("Response: {:?}", response);
 ///     Ok(())
@@ -149,13 +155,19 @@ where
     let body_bytes = serde_json::to_vec(&request_body)
         .map_err(|e| Error::new_internal(format!("Failed to serialize request body: {}", e)))?;
 
-    let response = client
-        .post(params.url)
-        .headers(headers)
-        .body(body_bytes)
-        .send()
-        .await
-        .map_err(|e| Error::new_internal(format!("HTTP request failed: {}", e)))?;
+    let request_builder = client.post(params.url).headers(headers).body(body_bytes);
+
+    let response = if let Some(token) = params.cancellation_token {
+        tokio::select! {
+            res = request_builder.send() => res,
+            _ = token.cancelled() => {
+                return Err(Error::new_internal("Flow run was cancelled.".to_string()));
+            }
+        }
+    } else {
+        request_builder.send().await
+    }
+    .map_err(|e| Error::new_internal(format!("HTTP request failed: {}", e)))?;
 
     if response.status().as_u16() != 200 {
         return Err(Error::new_internal(format!(
@@ -213,13 +225,19 @@ where
         let body_bytes = serde_json::to_vec(&request_body)
             .map_err(|e| Error::new_internal(format!("Failed to serialize request body: {}", e)))?;
 
-        let response = client
-            .post(params.url)
-            .headers(headers)
-            .body(body_bytes)
-            .send()
-            .await
-            .map_err(|e| Error::new_internal(format!("HTTP request failed: {}", e)))?;
+        let request_builder = client.post(params.url).headers(headers).body(body_bytes);
+
+        let response = if let Some(token) = &params.cancellation_token {
+            tokio::select! {
+                res = request_builder.send() => res,
+                _ = token.cancelled() => {
+                    return Err(Error::new_internal("Flow stream was cancelled.".to_string()));
+                }
+            }
+        } else {
+            request_builder.send().await
+        }
+        .map_err(|e| Error::new_internal(format!("HTTP request failed: {}", e)))?;
 
         if response.status() != 200 {
             return Err(Error::new_internal(format!(
@@ -232,49 +250,72 @@ where
         let mut stream = response.bytes_stream();
         let mut buffer = Vec::new();
 
-        while let Some(item) = stream.next().await {
-            let chunk: Bytes =
-                item.map_err(|e| Error::new_internal(format!("chunk error: {}", e)))?;
-            buffer.extend_from_slice(&chunk);
-
-            while let Some(delimiter_pos) = buffer
-                .windows(FLOW_STREAM_DELIMITER.len())
-                .position(|window| window == FLOW_STREAM_DELIMITER)
-            {
-                let message_bytes = buffer.drain(..delimiter_pos).collect::<Vec<u8>>();
-                // Also remove the delimiter itself
-                buffer.drain(..FLOW_STREAM_DELIMITER.len());
-
-                let message_str = String::from_utf8(message_bytes)
-                    .map_err(|e| Error::new_internal(format!("message_bytes error: {}", e)))?;
-                if let Some(data_str) = message_str.strip_prefix("data: ") {
-                    let stream_chunk: StreamChunk<S> = serde_json::from_str(data_str)
-                        .map_err(|e| Error::new_internal(format!("stream_chunk error: {}", e)))?;
-
-                    if let Some(msg) = stream_chunk.message {
-                        if tx.send(Ok(msg)).await.is_err() {
-                            // Receiver dropped, stop processing.
-                            return Err(Error::new_internal("Stream receiver closed."));
-                        }
-                    } else if let Some(result_value) = stream_chunk.result {
-                        let final_output: O =
-                            serde_json::from_value(result_value).map_err(|e| {
-                                Error::new_internal(format!("final_output error: {}", e))
-                            })?;
-                        return Ok(final_output);
-                    } else if let Some(err_detail) = stream_chunk.error {
-                        return Err(Error::new_internal(format!(
-                            "{}: {}\n{}",
-                            err_detail.status,
-                            err_detail.message,
-                            err_detail.details.unwrap_or_default()
-                        )));
-                    } else {
-                        return Err(Error::new_internal(format!(
-                            "Unknown chunk format: {}",
-                            data_str
-                        )));
+        loop {
+            let item = if let Some(token) = &params.cancellation_token {
+                tokio::select! {
+                    biased;
+                    _ = token.cancelled() => {
+                        return Err(Error::new_internal("Flow stream was cancelled.".to_string()));
                     }
+                    item = stream.next() => item,
+                }
+            } else {
+                stream.next().await
+            };
+
+            match item {
+                Some(item) => {
+                    let chunk: Bytes =
+                        item.map_err(|e| Error::new_internal(format!("chunk error: {}", e)))?;
+                    buffer.extend_from_slice(&chunk);
+
+                    while let Some(delimiter_pos) = buffer
+                        .windows(FLOW_STREAM_DELIMITER.len())
+                        .position(|window| window == FLOW_STREAM_DELIMITER)
+                    {
+                        let message_bytes = buffer.drain(..delimiter_pos).collect::<Vec<u8>>();
+                        // Also remove the delimiter itself
+                        buffer.drain(..FLOW_STREAM_DELIMITER.len());
+
+                        let message_str = String::from_utf8(message_bytes).map_err(|e| {
+                            Error::new_internal(format!("message_bytes error: {}", e))
+                        })?;
+                        if let Some(data_str) = message_str.strip_prefix("data: ") {
+                            let stream_chunk: StreamChunk<S> = serde_json::from_str(data_str)
+                                .map_err(|e| {
+                                    Error::new_internal(format!("stream_chunk error: {}", e))
+                                })?;
+
+                            if let Some(msg) = stream_chunk.message {
+                                if tx.send(Ok(msg)).await.is_err() {
+                                    // Receiver dropped, stop processing.
+                                    return Err(Error::new_internal("Stream receiver closed."));
+                                }
+                            } else if let Some(result_value) = stream_chunk.result {
+                                let final_output: O = serde_json::from_value(result_value)
+                                    .map_err(|e| {
+                                        Error::new_internal(format!("final_output error: {}", e))
+                                    })?;
+                                return Ok(final_output);
+                            } else if let Some(err_detail) = stream_chunk.error {
+                                return Err(Error::new_internal(format!(
+                                    "{}: {}\n{}",
+                                    err_detail.status,
+                                    err_detail.message,
+                                    err_detail.details.unwrap_or_default()
+                                )));
+                            } else {
+                                return Err(Error::new_internal(format!(
+                                    "Unknown chunk format: {}",
+                                    data_str
+                                )));
+                            }
+                        }
+                    }
+                }
+                None => {
+                    // Stream ended
+                    break;
                 }
             }
         }
