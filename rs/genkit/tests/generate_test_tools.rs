@@ -16,7 +16,7 @@ mod helpers;
 
 use genkit::{
     model::{FinishReason, Part, Role},
-    GenerateResponse, Genkit, Model, ToolAction, ToolArgument, ToolConfig,
+    GenerateRequest, GenerateResponse, Genkit, Model, ToolAction, ToolArgument, ToolConfig,
 };
 use genkit_ai::{
     dynamic_tool,
@@ -24,7 +24,7 @@ use genkit_ai::{
     model::{CandidateData, GenerateResponseData},
     tool::{InterruptConfig, Resumable, ToolFnOptions},
     GenerateOptions, GenerateResponseChunk, GenerateResponseChunkData, MessageData, OutputOptions,
-    ToolRequest, ToolResponse,
+    ResourceOptions, ResourceOutput, ToolRequest, ToolResponse,
 };
 use genkit_core::context::ActionContext;
 use rstest::{fixture, rstest};
@@ -54,6 +54,7 @@ async fn genkit_with_programmable_model() -> (Arc<Genkit>, helpers::Programmable
 
 #[rstest]
 #[tokio::test]
+/// 'call the tool'
 async fn test_tools_call_the_tool() {
     let (genkit, pm_handle) = genkit_with_programmable_model().await;
     let req_counter = Arc::new(Mutex::new(0));
@@ -145,6 +146,7 @@ async fn test_tools_call_the_tool() {
 
 #[rstest]
 #[tokio::test]
+/// 'call the tool with context'
 async fn test_tools_call_the_tool_with_context() {
     let (genkit, pm_handle) = genkit_with_programmable_model().await;
     let req_counter = Arc::new(Mutex::new(0));
@@ -252,16 +254,17 @@ async fn test_tools_call_the_tool_with_context() {
     assert_eq!(tool_response_message, &expected_tool_message);
 }
 
-#[derive(Debug, serde::Serialize, serde::Deserialize, JsonSchema, Clone)]
-struct DynamicToolInput {
-    foo: String,
-}
-
 #[rstest]
 #[tokio::test]
+/// 'calls the dynamic tool'
 async fn test_calls_the_dynamic_tool() {
     let (genkit, pm_handle) = genkit_with_programmable_model().await;
     let req_counter = Arc::new(Mutex::new(0));
+
+    #[derive(Debug, serde::Serialize, serde::Deserialize, JsonSchema, Clone)]
+    struct DynamicToolInput {
+        foo: String,
+    }
 
     let dynamic_test_tool_1 = dynamic_tool(
         ToolConfig {
@@ -396,8 +399,95 @@ async fn test_calls_the_dynamic_tool() {
     assert_eq!(resp2.output, Some(json!("tool called 2")));
 }
 
+// #[rstest]
+// #[tokio::test]
+/// 'calls the dynamic resource'
+// async fn test_calls_the_dynamic_resource() {
+//     let (genkit, last_request) = helpers::genkit_instance_for_test().await;
+
+//     let dynamic_test_resource = genkit
+//         .define_resource(
+//             ResourceOptions {
+//                 name: Some("dynamicTestTool".to_string()),
+//                 uri: Some("foo://foo".to_string()),
+//                 description: Some("description".to_string()),
+//                 ..Default::default()
+//             },
+//             |_, _| async {
+//                 Ok(ResourceOutput {
+//                     content: vec![Part::text("dynamic text")],
+//                 })
+//             },
+//         )
+//         .unwrap();
+
+//     genkit
+//         .define_resource(
+//             ResourceOptions {
+//                 name: Some("regularResource".to_string()),
+//                 template: Some("bar://{value}".to_string()),
+//                 description: Some("description 2".to_string()),
+//                 ..Default::default()
+//             },
+//             |_, _| async {
+//                 Ok(ResourceOutput {
+//                     content: vec![Part::text("regular text")],
+//                 })
+//             },
+//         )
+//         .unwrap();
+
+//     let response = genkit
+//         .generate_with_options::<serde_json::Value>(GenerateOptions {
+//             model: Some(Model::Name("echoModel".to_string())),
+//             messages: vec![MessageData {
+//                 role: Role::User,
+//                 content: Some(vec![
+//                     Part::text("some text"),
+//                     // These would be special Part variants that the framework resolves.
+//                     // Assuming a `Part::resource` constructor exists.
+//                     Part::resource("foo://foo"),
+//                     Part::resource("bar://bar"),
+//                 ]),
+//                 metadata: None,
+//             }],
+//             resources: vec![dynamic_test_resource],
+//             ..Default::default()
+//         })
+//         .await
+//         .unwrap();
+
+//     assert_eq!(
+//         response.text().unwrap(),
+//         "Echo: some text,dynamic text,regular text; config: {}"
+//     );
+
+//     let last_req = last_request.lock().unwrap();
+//     let message = &last_req.as_ref().unwrap().messages[0];
+//     assert_eq!(message.role, Role::User);
+
+//     // Assuming the framework replaces resource parts with text parts with metadata.
+//     // The following assertions depend on Part having a `metadata` field.
+//     let content = &message.content;
+//     assert_eq!(content.len(), 3);
+//     assert_eq!(content[0].text.as_deref(), Some("some text"));
+
+//     assert_eq!(content[1].text.as_deref(), Some("dynamic text"));
+//     assert_eq!(
+//         content[1].metadata.as_ref().unwrap(),
+//         &serde_json::json!({ "resource": { "uri": "foo://foo" } })
+//     );
+
+//     assert_eq!(content[2].text.as_deref(), Some("regular text"));
+//     assert_eq!(
+//         content[2].metadata.as_ref().unwrap(),
+//         &serde_json::json!({ "resource": { "template": "bar://{value}", "uri": "bar://bar" } })
+//     );
+// }
+
 #[rstest]
 #[tokio::test]
+/// 'interrupts the dynamic tool with no impl'
 async fn test_interrupts_the_dynamic_tool_with_no_impl() {
     let (genkit, pm_handle) = genkit_with_programmable_model().await;
     let req_counter = Arc::new(Mutex::new(0));
@@ -491,6 +581,7 @@ async fn test_interrupts_the_dynamic_tool_with_no_impl() {
 
 #[rstest]
 #[tokio::test]
+/// 'call the tool with output schema'
 async fn test_call_the_tool_with_output_schema() {
     let (genkit, pm_handle) = genkit_with_programmable_model().await;
     let req_counter = Arc::new(Mutex::new(0));
@@ -589,6 +680,7 @@ async fn test_call_the_tool_with_output_schema() {
 
 #[rstest]
 #[tokio::test]
+/// 'should propagate context to the tool'
 async fn test_should_propagate_context_to_the_tool() {
     let (genkit, pm_handle) = genkit_with_programmable_model().await;
     let req_counter = Arc::new(Mutex::new(0));
@@ -712,7 +804,151 @@ async fn test_should_propagate_context_to_the_tool() {
 
 #[rstest]
 #[tokio::test]
+/// 'streams the tool responses'
+async fn test_streams_the_tool_responses() {
+    use tokio_stream::StreamExt;
+
+    let (genkit, pm_handle) = genkit_with_programmable_model().await;
+
+    // Define a simple tool.
+    genkit.define_tool(
+        ToolConfig {
+            name: "testTool".to_string(),
+            input_schema: Some(json!({})),
+            output_schema: Some(String::new()),
+            description: "description".to_string(),
+            ..Default::default()
+        },
+        |_, _| async { Ok("tool called".to_string()) },
+    );
+
+    let req_counter = Arc::new(Mutex::new(0));
+    let handler: helpers::ProgrammableModelHandler = {
+        let req_counter = req_counter.clone();
+        Arc::new(Box::new(
+            move |_req: GenerateRequest,
+                  streaming_callback: Option<
+                Box<dyn Fn(GenerateResponseChunkData) + Send + Sync>,
+            >| {
+                let req_counter = req_counter.clone();
+                Box::pin(async move {
+                    let mut counter = req_counter.lock().unwrap();
+                    let (content, role) = if *counter == 0 {
+                        (
+                            vec![Part::tool_request(
+                                "testTool",
+                                None,
+                                Some("ref123".to_string()),
+                            )],
+                            Role::Model,
+                        )
+                    } else {
+                        (vec![Part::text("done")], Role::Model)
+                    };
+
+                    if let Some(cb) = &streaming_callback {
+                        cb(GenerateResponseChunkData {
+                            index: 0, // Candidate index
+                            content: content.clone(),
+                            role: Some(role.clone()),
+                            ..Default::default()
+                        });
+                    }
+
+                    let response = GenerateResponseData {
+                        candidates: vec![CandidateData {
+                            message: MessageData {
+                                role,
+                                content,
+                                ..Default::default()
+                            },
+                            ..Default::default()
+                        }],
+                        ..Default::default()
+                    };
+                    *counter += 1;
+                    Ok(response)
+                })
+            },
+        ))
+    };
+    *pm_handle.handler.lock().unwrap() = handler;
+
+    let generate_result = genkit
+        .generate_stream::<serde_json::Value>(GenerateOptions {
+            prompt: Some(vec![Part::text("call the tool")]),
+            tools: Some(vec!["testTool".into()]),
+            ..Default::default()
+        })
+        .await
+        .unwrap();
+
+    let mut stream = generate_result.stream;
+
+    let mut chunks = Vec::new();
+    while let Some(chunk_result) = stream.next().await {
+        chunks.push(chunk_result.unwrap().to_json());
+    }
+
+    let response = generate_result.response.await.unwrap().unwrap();
+    assert_eq!(response.text().unwrap(), "done");
+
+    let actual_chunks: Vec<serde_json::Value> = chunks
+        .into_iter()
+        .map(|c| {
+            let mut v = serde_json::to_value(c).unwrap();
+            if let Some(obj) = v.as_object_mut() {
+                obj.remove("usage");
+                obj.remove("custom");
+            }
+            v
+        })
+        .collect();
+
+    let expected_chunks = serde_json::from_str::<Vec<serde_json::Value>>(
+        r#"[
+        {
+          "content": [
+            {
+              "toolRequest": {
+                "input": {},
+                "name": "testTool",
+                "refId": "ref123"
+              }
+            }
+          ],
+          "index": 0,
+          "role": "model"
+        },
+        {
+          "content": [
+            {
+              "toolResponse": {
+                "name": "testTool",
+                "output": "tool called",
+                "refId": "ref123"
+              }
+            }
+          ],
+          "index": 1,
+          "role": "tool"
+        },
+        {
+          "content": [{ "text": "done" }],
+          "index": 2,
+          "role": "model"
+        }
+      ]"#,
+    )
+    .unwrap();
+
+    assert_eq!(actual_chunks, expected_chunks);
+}
+
+#[rstest]
+#[tokio::test]
 #[should_panic(expected = "Exceeded maximum tool call iterations (17)")]
+/// 'throws when exceeding max tool call iterations'
 async fn test_throws_when_exceeding_max_tool_call_iterations() {
     let (genkit, pm_handle) = genkit_with_programmable_model().await;
 
@@ -771,6 +1007,7 @@ async fn test_throws_when_exceeding_max_tool_call_iterations() {
 
 #[rstest]
 #[tokio::test]
+/// interrupts tool execution
 async fn test_interrupts_tool_execution() {
     let (genkit, pm_handle) = genkit_with_programmable_model().await;
     let req_counter = Arc::new(Mutex::new(0));
@@ -913,6 +1150,7 @@ async fn test_interrupts_tool_execution() {
 
 #[rstest]
 #[tokio::test]
+/// 'can resume generation'
 async fn test_can_resume_generation() {
     let (genkit, pm_handle) = genkit_with_programmable_model().await;
 
@@ -1159,6 +1397,7 @@ async fn test_can_resume_generation() {
 
 #[rstest]
 #[tokio::test]
+/// 'streams a generated tool message when resumed'
 async fn test_streams_a_generated_tool_message_when_resumed() {
     // 1. Setup
     let (genkit, pm_handle) = genkit_with_programmable_model().await;
