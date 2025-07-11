@@ -341,7 +341,7 @@ where
             raw_request,
             middleware,
             current_turn,
-            mut message_index,
+            message_index,
         } = options;
         let mut request = raw_request.clone();
 
