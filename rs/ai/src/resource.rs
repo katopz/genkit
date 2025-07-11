@@ -167,6 +167,50 @@ impl DynamicResource {
     }
 }
 
+impl Serialize for DynamicResource {
+    fn serialize<S>(&self, serializer: S) -> std::result::Result<S::Ok, S::Error>
+    where
+        S: serde::Serializer,
+    {
+        let resource_info = self
+            .action
+            .metadata()
+            .metadata
+            .get("resource")
+            .ok_or_else(|| {
+                serde::ser::Error::custom("DynamicResource missing 'resource' metadata")
+            })?;
+        resource_info.serialize(serializer)
+    }
+}
+
+impl<'de> Deserialize<'de> for DynamicResource {
+    fn deserialize<D>(deserializer: D) -> std::result::Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        #[derive(Deserialize)]
+        struct ResourceInfo {
+            uri: Option<String>,
+            template: Option<String>,
+        }
+        let value = Value::deserialize(deserializer)?;
+        let info: ResourceInfo = serde_json::from_value(value).map_err(serde::de::Error::custom)?;
+
+        let opts = ResourceOptions {
+            uri: info.uri,
+            template: info.template,
+            ..Default::default()
+        };
+        DynamicResource::new(opts, |_input, _ctx| async {
+            Err(Error::new_internal(
+                "deserialized dynamic resource is not runnable",
+            ))
+        })
+        .map_err(serde::de::Error::custom)
+    }
+}
+
 impl JsonSchema for DynamicResource {
     fn schema_name() -> std::borrow::Cow<'static, str> {
         "DynamicResource".into()
