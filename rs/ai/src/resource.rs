@@ -255,10 +255,12 @@ pub fn is_dynamic_resource_action(action: &ResourceAction) -> bool {
         .unwrap_or(false)
 }
 
+type ResourceMatcher = Arc<dyn Fn(&ResourceInput) -> bool + Send + Sync>;
+
 fn create_matcher(
     uri_opt: Option<String>,
     template_opt: Option<String>,
-) -> Result<Arc<dyn Fn(&ResourceInput) -> bool + Send + Sync>> {
+) -> Result<ResourceMatcher> {
     if let Some(uri) = uri_opt {
         return Ok(Arc::new(move |input: &ResourceInput| input.uri == uri));
     }
