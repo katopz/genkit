@@ -116,6 +116,8 @@ pub struct PromptConfig<I = Value, O = Value, C = Value> {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub output: Option<OutputOptions>,
     #[serde(skip_serializing_if = "Option::is_none")]
+    pub metadata: Option<Value>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub tools: Option<Vec<ToolArgument>>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub max_turns: Option<u32>,
@@ -155,6 +157,7 @@ where
             .field("docs", &self.docs)
             .field("docs_fn", &self.docs_fn.as_ref().map(|_| "Some(<fn>)"))
             .field("output", &self.output)
+            .field("metadata", &self.metadata)
             .field("tools", &self.tools)
             .field("max_turns", &self.max_turns)
             .field("return_tool_requests", &self.return_tool_requests)
@@ -444,7 +447,6 @@ where
 }
 
 /// Defines a prompt which can be used to generate content or render a request.
-/// Defines a prompt which can be used to generate content or render a request.
 pub fn define_prompt<I, O, C>(
     registry: &Registry,
     config: PromptConfig<I, O, C>,
@@ -470,41 +472,70 @@ where
         config_arc.name.clone()
     };
 
-    let model_name = match &config_arc.model {
-        Some(Model::Name(n)) => Some(n.clone()),
-        Some(Model::Reference(r)) => Some(r.name.clone()),
-        None => None,
-    };
-    let raw_config = json!({
-        "config": config_arc.config,
-        "description": config_arc.description,
-    });
-    let mut prompt_meta_map = serde_json::Map::new();
+    let mut action_metadata = config_arc
+        .metadata
+        .clone()
+        .unwrap_or(Value::Object(Default::default()));
+
+    let mut prompt_metadata_map =
+        if let Some(Value::Object(map)) = action_metadata.get("prompt").cloned() {
+            map
+        } else {
+            serde_json::Map::new()
+        };
+
     if let Some(config_val) = &config_arc.config {
-        prompt_meta_map.insert(
+        prompt_metadata_map.insert(
             "config".to_string(),
             serde_json::to_value(config_val).unwrap_or(Value::Null),
         );
     }
     if let Some(desc) = &config_arc.description {
-        prompt_meta_map.insert("description".to_string(), json!(desc));
+        prompt_metadata_map.insert("description".to_string(), json!(desc));
     }
-    let input_schema_json = serde_json::to_value(schemars::schema_for!(I)).unwrap_or(Value::Null);
-    prompt_meta_map.insert("input".to_string(), json!({ "schema": input_schema_json }));
-    prompt_meta_map.insert("metadata".to_string(), json!({}));
-    prompt_meta_map.insert("model".to_string(), json!(model_name));
-    prompt_meta_map.insert("name".to_string(), json!(&config_arc.name));
-    if let Some(variant) = &config_arc.variant {
-        prompt_meta_map.insert("variant".to_string(), json!(variant));
-    }
-    if let Some(prompt_str) = &config_arc.prompt {
-        prompt_meta_map.insert("template".to_string(), json!(prompt_str));
-    }
-    prompt_meta_map.insert("raw".to_string(), raw_config);
 
-    let mut action_metadata = HashMap::new();
-    action_metadata.insert("prompt".to_string(), Value::Object(prompt_meta_map));
-    action_metadata.insert("type".to_string(), json!("prompt"));
+    let input_schema = schemars::schema_for!(I);
+    prompt_metadata_map.insert("input".to_string(), json!({ "schema": input_schema }));
+
+    prompt_metadata_map
+        .entry("metadata".to_string())
+        .or_insert_with(|| json!({}));
+
+    let model_name = match &config_arc.model {
+        Some(Model::Name(n)) => Some(n.clone()),
+        Some(Model::Reference(r)) => Some(r.name.clone()),
+        None => None,
+    };
+    prompt_metadata_map.insert("model".to_string(), json!(model_name));
+
+    let base_name = if let Some(idx) = config_arc.name.find('.') {
+        &config_arc.name[..idx]
+    } else {
+        &config_arc.name
+    };
+    prompt_metadata_map.insert("name".to_string(), json!(base_name));
+
+    let raw_config = json!({
+        "config": config_arc.config,
+        "description": config_arc.description,
+    });
+    prompt_metadata_map.insert("raw".to_string(), raw_config);
+
+    if let Some(prompt_str) = &config_arc.prompt {
+        prompt_metadata_map.insert("template".to_string(), json!(prompt_str));
+    }
+
+    if let Some(variant) = &config_arc.variant {
+        prompt_metadata_map.insert("variant".to_string(), json!(variant));
+    }
+
+    if let Some(map) = action_metadata.as_object_mut() {
+        map.insert("prompt".to_string(), Value::Object(prompt_metadata_map));
+        map.insert("type".to_string(), json!("prompt"));
+    }
+
+    let final_metadata_map: HashMap<String, Value> =
+        serde_json::from_value(action_metadata).unwrap_or_default();
 
     let prompt_action = {
         let config_clone = config_arc.clone();
@@ -523,7 +554,7 @@ where
                 }
             },
         )
-        .with_metadata(action_metadata)
+        .with_metadata(final_metadata_map)
         .build()
     };
 
