@@ -471,16 +471,16 @@ async fn test_calls_the_dynamic_resource() {
     assert_eq!(content[0].text.as_deref(), Some("some text"));
 
     assert_eq!(content[1].text.as_deref(), Some("dynamic text"));
-    // assert_eq!(
-    //     content[1].metadata.as_ref().unwrap(),
-    //     &serde_json::json!({ "resource": { "uri": "foo://foo" } })
-    // );
+    assert_eq!(
+        serde_json::to_value(content[1].metadata.as_ref().unwrap()).unwrap(),
+        serde_json::json!({ "resource": { "uri": "foo://foo" } })
+    );
 
-    // assert_eq!(content[2].text.as_deref(), Some("regular text"));
-    // assert_eq!(
-    //     content[2].metadata.as_ref().unwrap(),
-    //     &serde_json::json!({ "resource": { "template": "bar://{value}", "uri": "bar://bar" } })
-    // );
+    assert_eq!(content[2].text.as_deref(), Some("regular text"));
+    assert_eq!(
+        serde_json::to_value(content[2].metadata.as_ref().unwrap()).unwrap(),
+        serde_json::json!({ "resource": { "template": "bar://{value}", "uri": "bar://bar" } })
+    );
 }
 
 #[rstest]

@@ -89,9 +89,8 @@ async fn test_defines_and_matches_static_resource_uri(registry: Registry) {
     let resource_meta = part.metadata.as_ref().unwrap()["resource"]
         .as_object()
         .unwrap();
-    let parent_meta = resource_meta["parent"].as_object().unwrap();
-    assert_eq!(parent_meta["uri"], "foo://bar");
-    assert!(parent_meta.get("template").is_none());
+    assert_eq!(resource_meta["uri"], "foo://bar");
+    assert!(resource_meta.get("template").is_none());
 
     assert!(registry
         .lookup_action("/resource/testResource")
@@ -157,9 +156,8 @@ async fn test_defines_and_matches_template_resource_uri(registry: Registry) {
     let resource_meta = part.metadata.as_ref().unwrap()["resource"]
         .as_object()
         .unwrap();
-    let parent_meta = resource_meta["parent"].as_object().unwrap();
-    assert_eq!(parent_meta["template"], "foo://bar/{baz}");
-    assert_eq!(parent_meta["uri"], "foo://bar/something");
+    assert_eq!(resource_meta["template"], "foo://bar/{baz}");
+    assert_eq!(resource_meta["uri"], "foo://bar/something");
 
     assert!(registry
         .lookup_action("/resource/foo://bar/{baz}")

@@ -328,12 +328,12 @@ where
 
             let mut output = runner_clone(input_clone, context).await?;
 
-            let mut parent_info = serde_json::Map::new();
-            parent_info.insert("uri".to_string(), input.uri.into());
+            let mut resource_info = serde_json::Map::new();
+            resource_info.insert("uri".to_string(), input.uri.into());
             if let Some(template) = &template_clone {
-                parent_info.insert("template".to_string(), template.clone().into());
+                resource_info.insert("template".to_string(), template.clone().into());
             }
-            let parent_value = Value::Object(parent_info);
+            let resource_info_value = Value::Object(resource_info);
 
             for part in &mut output.content {
                 let metadata_map = part.metadata.get_or_insert_with(HashMap::new);
@@ -341,14 +341,11 @@ where
                 if let Some(resource_value) = metadata_map.get_mut("resource") {
                     if let Some(resource_obj) = resource_value.as_object_mut() {
                         if !resource_obj.contains_key("parent") {
-                            resource_obj.insert("parent".to_string(), parent_value.clone());
+                            resource_obj.insert("parent".to_string(), resource_info_value.clone());
                         }
                     }
                 } else {
-                    metadata_map.insert(
-                        "resource".to_string(),
-                        json!({ "parent": parent_value.clone() }),
-                    );
+                    metadata_map.insert("resource".to_string(), resource_info_value.clone());
                 }
             }
             Ok(output)
