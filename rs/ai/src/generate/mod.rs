@@ -144,6 +144,8 @@ pub struct GenerateOptions<O = Value> {
     pub on_chunk: Option<OnChunkCallback<O>>,
     #[serde(skip)]
     pub _marker: PhantomData<O>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub telemetry_labels: Option<std::collections::HashMap<String, String>>,
 }
 
 impl<O> fmt::Debug for GenerateOptions<O> {
@@ -269,7 +271,6 @@ where
     let mut registry_clone = registry.clone();
     maybe_register_dynamic_resources(&mut registry_clone, &options);
 
-    // FIX #1: Add explicit type annotation for the trait object.
     let core_streaming_callback: Option<
         genkit_core::action::StreamingCallback<GenerateResponseChunk<O>>,
     > = on_chunk_callback.map(|user_callback| {
@@ -283,13 +284,13 @@ where
         new_cb
     });
 
-    // FIX #3: Wrap the async block in a no-argument closure `||`.
     let mut response = run_with_streaming_callback(core_streaming_callback, || async move {
         let helper_options = action::GenerateHelperOptions {
             middleware: options.r#use.take().unwrap_or_default(),
             raw_request: options,
             current_turn: 0,
             message_index: 0,
+            ..Default::default()
         };
         action::generate_helper(Arc::new(registry_clone), helper_options).await
     })

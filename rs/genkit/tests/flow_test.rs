@@ -13,6 +13,7 @@ async fn genkit_instance() -> Arc<Genkit> {
             .iter()
             .cloned()
             .collect(),
+        ..Default::default()
     };
 
     Genkit::init(GenkitOptions {

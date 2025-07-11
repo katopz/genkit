@@ -62,18 +62,20 @@ pub struct GenerateActionOptions {
     pub output: Option<OutputOptions>,
     pub max_turns: Option<u32>,
     pub return_tool_requests: Option<bool>,
+    pub telemetry_labels: Option<std::collections::HashMap<String, String>>,
 }
 
 /// A type alias for a `generate` action.
 pub type GenerateAction = Action<GenerateOptions, GenerateResponse, GenerateResponseChunkData>;
 
 /// Options for the `generate_helper` function.
-#[derive(Clone)]
+#[derive(Clone, Default)]
 pub struct GenerateHelperOptions<O: 'static> {
     pub raw_request: GenerateOptions<O>,
     pub middleware: Vec<ModelMiddleware>,
     pub current_turn: u32,
     pub message_index: u32,
+    pub telemetry_labels: Option<std::collections::HashMap<String, String>>,
 }
 
 /// Reconstructs the `GenerateRequest` to reflect user-facing options.
@@ -124,6 +126,11 @@ pub fn define_generate_action(registry: &mut Registry) -> Arc<GenerateAction> {
                     "genkit:spanType".to_string(),
                     Value::String("util".to_string()),
                 );
+                if let Some(labels) = &req.telemetry_labels {
+                    for (key, value) in labels {
+                        attrs.insert(key.clone(), Value::String(value.clone()));
+                    }
+                }
 
                 let raw_request_for_response = req.clone();
                 let registry_for_response = registry.clone();
@@ -133,10 +140,11 @@ pub fn define_generate_action(registry: &mut Registry) -> Arc<GenerateAction> {
                     Some(attrs),
                     move |_trace_context| async move {
                         let helper_options = GenerateHelperOptions {
-                            raw_request: req,
+                            raw_request: req.clone(),
                             middleware: Vec::new(), // Middleware not supported in this path yet.
                             current_turn: 0,
                             message_index: 0,
+                            telemetry_labels: req.telemetry_labels.clone(),
                         };
                         generate_internal(registry, helper_options).await
                     },
@@ -342,6 +350,7 @@ where
             middleware,
             current_turn,
             message_index,
+            telemetry_labels,
         } = options;
         let mut request = raw_request.clone();
 
@@ -579,6 +588,7 @@ where
                     middleware,
                     current_turn: current_turn + 1,
                     message_index: next_message_index,
+                    telemetry_labels,
                 },
             )
             .await

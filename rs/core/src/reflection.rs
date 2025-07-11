@@ -51,6 +51,7 @@ static FLOW_STATE_STORE: Lazy<Mutex<HashMap<String, serde_json::Value>>> =
 struct RunActionRequest {
     key: String,
     input: Option<serde_json::Value>,
+    telemetry_labels: Option<HashMap<String, String>>,
 }
 
 #[allow(unused)]
@@ -281,9 +282,15 @@ async fn handle_run_action(req: Request<Incoming>, registry: Arc<Registry>) -> R
         }
     };
     let input = run_req.input.unwrap_or(serde_json::Value::Null);
+    let options = run_req
+        .telemetry_labels
+        .map(|labels| crate::context::ActionContext {
+            telemetry_labels: Some(labels),
+            ..Default::default()
+        });
 
     if is_streaming {
-        let stream_resp = match action.stream_http_json(input, None) {
+        let stream_resp = match action.stream_http_json(input, options) {
             Ok(resp) => resp,
             Err(e) => return error_response(e.as_status().code, e.to_string()),
         };
@@ -300,7 +307,7 @@ async fn handle_run_action(req: Request<Incoming>, registry: Arc<Registry>) -> R
             .body(body)
             .unwrap()
     } else {
-        match action.run_http_json(input, None).await {
+        match action.run_http_json(input, options).await {
             Ok(result_value) => {
                 if let Some(trace_id) = result_value
                     .get("telemetry")

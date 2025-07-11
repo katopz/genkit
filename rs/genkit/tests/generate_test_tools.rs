@@ -225,6 +225,7 @@ async fn test_tools_call_the_tool_with_context() {
             context: Some(ActionContext {
                 auth: None,
                 additional_context: context_map,
+                ..Default::default()
             }),
             ..Default::default()
         })

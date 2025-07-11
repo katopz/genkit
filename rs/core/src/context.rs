@@ -46,6 +46,8 @@ pub struct ActionContext {
     /// Additional context data.
     #[serde(flatten)]
     pub additional_context: HashMap<String, Value>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub telemetry_labels: Option<HashMap<String, String>>,
 }
 
 impl ActionContext {
@@ -79,6 +81,7 @@ impl From<HashMap<String, Value>> for ActionContext {
         ActionContext {
             auth,
             additional_context: map,
+            ..Default::default()
         }
     }
 }
