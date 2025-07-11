@@ -710,7 +710,7 @@ describe('definePrompt', () => {
       assert.strictEqual(response.text, 'Echo: hi Genkit; config: {}');
     });
 
-    it('calls legacy prompt with default model', async () => {
+    it('calls legacy prompt with default model via function', async () => {
       const hi = ai.definePrompt(
         {
           name: 'hi',
