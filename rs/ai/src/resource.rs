@@ -94,9 +94,15 @@ where
 
 /// Converts a URI template string to a Regex for matching.
 fn template_to_regex(template_str: &str) -> Result<Regex> {
-    let re = Regex::new(r"\{[^}]+\}")
+    let re = Regex::new(r"\{([^}]+)\}")
         .map_err(|e| Error::new_internal(format!("Failed to create regex parser: {}", e)))?;
-    let pattern = re.replace_all(template_str, "[^/]+");
+    let pattern = re.replace_all(template_str, |caps: &regex::Captures| {
+        if caps[1].ends_with('*') {
+            ".*"
+        } else {
+            "[^/]+"
+        }
+    });
     let full_pattern = format!("^{}$", pattern);
     Regex::new(&full_pattern)
         .map_err(|e| Error::new_internal(format!("Invalid regex from template: {}", e)))

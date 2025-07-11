@@ -171,7 +171,7 @@ async fn test_defines_and_matches_template_resource_uri(registry: Registry) {
 async fn test_handles_parent_resources(registry: Registry) {
     let options: ResourceOptions = from_value(json!({
         "name": "testResource",
-        "template": "file://{id*}"
+        "template": "file://{/id*}"
     }))
     .unwrap();
 
@@ -208,13 +208,13 @@ async fn test_handles_parent_resources(registry: Registry) {
     // Check first part for parent injection
     let part1_meta = &output.result.content[0].metadata.as_ref().unwrap()["resource"];
     assert_eq!(part1_meta["uri"], "file:///some/directory/sub1.txt");
-    assert_eq!(part1_meta["parent"]["template"], "file://{id*}");
+    assert_eq!(part1_meta["parent"]["template"], "file://{/id*}");
     assert_eq!(part1_meta["parent"]["uri"], "file:///some/directory");
 
     // Check second part for parent injection
     let part2_meta = &output.result.content[1].metadata.as_ref().unwrap()["resource"];
     assert_eq!(part2_meta["uri"], "file:///some/directory/sub2.txt");
-    assert_eq!(part2_meta["parent"]["template"], "file://{id*}");
+    assert_eq!(part2_meta["parent"]["template"], "file://{/id*}");
     assert_eq!(part2_meta["parent"]["uri"], "file:///some/directory");
 }
 
