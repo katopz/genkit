@@ -75,8 +75,8 @@ pub use self::reranker::{
     RerankerInfo, RerankerParams, RerankerRef,
 };
 pub use self::resource::{
-    define_resource, find_matching_resource, ResourceAction, ResourceInput, ResourceOptions,
-    ResourceOutput,
+    define_resource, dynamic_resource, find_matching_resource, is_dynamic_resource_action,
+    DynamicResource, ResourceAction, ResourceInput, ResourceOptions, ResourceOutput,
 };
 pub use self::retriever::{
     define_indexer, define_retriever, index, indexer_ref, retrieve, retriever_ref, IndexerAction,
