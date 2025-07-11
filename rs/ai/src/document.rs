@@ -116,6 +116,40 @@ impl Part {
     }
 }
 
+impl Part {
+    /// Creates a new `Part` containing a `tool_request`.
+    pub fn tool_request(
+        name: impl Into<String>,
+        input: Option<Value>,
+        ref_id: Option<String>,
+    ) -> Self {
+        Part {
+            tool_request: Some(ToolRequest {
+                name: name.into(),
+                input,
+                ref_id,
+            }),
+            ..Default::default()
+        }
+    }
+
+    /// Creates a new `Part` containing a `tool_response`.
+    pub fn tool_response(
+        name: impl Into<String>,
+        output: Option<Value>,
+        ref_id: Option<String>,
+    ) -> Self {
+        Part {
+            tool_response: Some(ToolResponse {
+                name: name.into(),
+                output,
+                ref_id,
+            }),
+            ..Default::default()
+        }
+    }
+}
+
 /// A type alias for a `Part` that is known to contain a `tool_request`.
 pub type ToolRequestPart = Part;
 pub type ToolResponsePart = Part;
