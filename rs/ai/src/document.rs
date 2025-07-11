@@ -17,7 +17,7 @@
 //! This module defines the core data structures for representing content, such
 //! as `Document` and `Part`. It is the Rust equivalent of `document.ts`.
 
-use crate::embedder::Embedding;
+use crate::{embedder::Embedding, ResourceInput};
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
@@ -91,6 +91,9 @@ pub struct Part {
     /// Additional metadata associated with this part.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub metadata: Option<HashMap<String, Value>>,
+    /// Resources
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub resource: Option<ResourceInput>,
 }
 
 impl Part {
@@ -101,9 +104,7 @@ impl Part {
             ..Default::default()
         }
     }
-}
 
-impl Part {
     /// Creates a new `Part` from a media.
     pub fn media(url: impl Into<String>, content_type: impl Into<String>) -> Self {
         Part {
@@ -111,6 +112,14 @@ impl Part {
                 url: url.into(),
                 content_type: Some(content_type.into()),
             }),
+            ..Default::default()
+        }
+    }
+
+    /// Creates a new `Part` from a resource.
+    pub fn resource(uri: impl Into<String>) -> Self {
+        Part {
+            resource: Some(ResourceInput { uri: uri.into() }),
             ..Default::default()
         }
     }

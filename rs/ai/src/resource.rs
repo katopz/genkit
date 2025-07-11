@@ -51,7 +51,7 @@ pub struct ResourceOptions {
     pub metadata: Option<Value>,
 }
 
-#[derive(Debug, Serialize, Deserialize, JsonSchema, Clone)]
+#[derive(Debug, Serialize, Deserialize, JsonSchema, Clone, PartialEq)]
 pub struct ResourceInput {
     pub uri: String,
 }
