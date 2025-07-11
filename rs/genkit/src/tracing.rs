@@ -13,9 +13,11 @@
 // limitations under the License.
 
 // Re-export key tracing components from `genkit-core` and OpenTelemetry.
-pub use genkit_core::tracing::exporter::TraceServerExporter;
-pub use genkit_core::tracing::types::PathMetadata;
-pub use genkit_core::tracing::{enable_telemetry, flush_tracing, in_new_span as run_in_new_span};
+pub use genkit_core::telemetry::TelemetryConfig;
+pub use genkit_core::tracing::{
+    enable_telemetry, exporter::TraceServerExporter, flush_tracing, in_new_span as run_in_new_span,
+    types::PathMetadata,
+};
 pub use opentelemetry_sdk::trace::SpanData;
 
 // Note: The following items from the TypeScript version have different names,

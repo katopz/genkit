@@ -1,6 +1,9 @@
 use genkit::{
-    Flow, GenerateOptions, GenerateResponse, Genkit, GenkitOptions, Part, ToolArgument, ToolConfig,
+    tracing::{self, enable_telemetry, TelemetryConfig},
+    Error, Flow, GenerateOptions, GenerateResponse, Genkit, GenkitOptions, Part, ToolArgument,
+    ToolConfig,
 };
+
 use genkit_vertexai::{common::VertexAIPluginOptions, vertex_ai};
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
@@ -21,6 +24,9 @@ pub fn joke_subject_generator(genkit: &Genkit) {
 
 #[tokio::main]
 async fn main() -> genkit::Result<()> {
+    enable_telemetry(TelemetryConfig::default()).map_err(|e| Error::new_internal(e.to_string()))?;
+    tracing::enable_telemetry(TelemetryConfig::default())
+        .map_err(|e| Error::new_internal(e.to_string()))?;
     env_logger::init();
     let vertexai_plugin = vertex_ai(VertexAIPluginOptions {
         project_id: None,

@@ -27,8 +27,8 @@ RUST_LOG=debug GOOGLE_APPLICATION_CREDENTIALS="./service-account.json" cargo run
 Flow action_result: ActionResult {
     result: "A banana.\n",
     telemetry: TelemetryInfo {
-        trace_id: "00000000000000000000000000000000",
-        span_id: "0000000000000000",
+        trace_id: "0779f01f7d9d6e94c1bea6c720548c0e",
+        span_id: "2d2f3760acfe9d93",
     },
 }
 ```
