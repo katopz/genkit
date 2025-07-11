@@ -18,10 +18,10 @@
 //! that can be passed to models. It is the Rust equivalent of `resource.ts`.
 
 use crate::document::Part;
-use genkit_core::action::{Action, ActionBuilder};
+use genkit_core::action::Action;
 use genkit_core::context::ActionContext;
 use genkit_core::error::{Error, Result};
-use genkit_core::registry::{ActionType, Registry};
+use genkit_core::registry::{ActionType, ErasedAction, Registry};
 use regex::Regex;
 use schemars::{self, JsonSchema};
 use serde::{Deserialize, Serialize};
@@ -30,6 +30,8 @@ use std::collections::HashMap;
 use std::future::Future;
 use std::sync::Arc;
 
+use genkit_core::{impl_register, ActionBuilder};
+use std::ops::Deref;
 //
 // Core Types & Structs
 //
@@ -79,76 +81,11 @@ where
     F: Fn(ResourceInput, ActionContext) -> Fut + Send + Sync + 'static,
     Fut: Future<Output = Result<ResourceOutput>> + Send + 'static,
 {
-    let uri = opts
-        .uri
-        .clone()
-        .or_else(|| opts.template.clone())
-        .ok_or_else(|| Error::new_internal("must specify either uri or template options"))?;
-
-    let name = opts.name.clone().unwrap_or_else(|| uri.clone());
-
-    let mut metadata = HashMap::new();
-    if let Some(opts_meta) = opts.metadata.as_ref().and_then(|m| m.as_object()) {
-        for (key, value) in opts_meta {
-            metadata.insert(key.clone(), value.clone());
-        }
-    }
-    let resource_info = json!({
-        "uri": opts.uri,
-        "template": opts.template,
-    });
-    metadata.insert("resource".to_string(), resource_info);
-
-    let runner_arc = Arc::new(runner);
-    let opts_template = opts.template.clone();
-    let runner_closure = move |input: ResourceInput, args: genkit_core::action::ActionFnArg<()>| {
-        let runner_clone = runner_arc.clone();
-        let input_clone = input.clone();
-        let template_clone = opts_template.clone();
-        let context = args.context.unwrap_or_default();
-
-        async move {
-            let mut output = runner_clone(input_clone, context).await?;
-
-            let mut parent_info = serde_json::Map::new();
-            parent_info.insert("uri".to_string(), input.uri.into());
-            if let Some(template) = &template_clone {
-                parent_info.insert("template".to_string(), template.clone().into());
-            }
-            let parent_value = Value::Object(parent_info);
-
-            for part in &mut output.content {
-                let metadata_map = part.metadata.get_or_insert_with(HashMap::new);
-
-                if let Some(resource_value) = metadata_map.get_mut("resource") {
-                    if let Some(resource_obj) = resource_value.as_object_mut() {
-                        if !resource_obj.contains_key("parent") {
-                            resource_obj.insert("parent".to_string(), parent_value.clone());
-                        }
-                    }
-                } else {
-                    metadata_map.insert(
-                        "resource".to_string(),
-                        json!({ "parent": parent_value.clone() }),
-                    );
-                }
-            }
-            Ok(output)
-        }
-    };
-
-    let mut builder = ActionBuilder::new(ActionType::Resource, name.clone(), runner_closure)
-        .with_metadata(metadata);
-
-    if let Some(desc) = opts.description {
-        builder = builder.with_description(desc);
-    }
-
-    let action = builder.build();
-
-    let resource_action = Arc::new(action);
-    registry.register_action(name.as_str(), (*resource_action).clone())?;
-    Ok(resource_action)
+    let mut action = dynamic_resource(opts, runner)?;
+    let name = action.name().to_string();
+    action.metadata_mut().remove("dynamic");
+    registry.register_action(&name, action.clone())?;
+    Ok(Arc::new(action))
 }
 
 //
@@ -207,4 +144,167 @@ pub async fn find_matching_resource(
         }
     }
     Ok(None)
+}
+
+/// A dynamically defined resource.
+#[derive(Clone, Debug)]
+pub struct DynamicResource {
+    action: ResourceAction,
+}
+
+impl DynamicResource {
+    pub fn new<F, Fut>(opts: ResourceOptions, runner: F) -> Result<Self>
+    where
+        F: Fn(ResourceInput, ActionContext) -> Fut + Send + Sync + 'static,
+        Fut: Future<Output = Result<ResourceOutput>> + Send + 'static,
+    {
+        let action = dynamic_resource(opts, runner)?;
+        Ok(Self { action })
+    }
+
+    pub fn action(&self) -> &ResourceAction {
+        &self.action
+    }
+}
+
+impl JsonSchema for DynamicResource {
+    fn schema_name() -> std::borrow::Cow<'static, str> {
+        "DynamicResource".into()
+    }
+
+    fn json_schema(_gen: &mut schemars::SchemaGenerator) -> schemars::Schema {
+        schemars::json_schema!({
+            "type": "object",
+            "properties": {
+                "type": {
+                    "const": "resource"
+                }
+            },
+            "required": ["type"]
+        })
+    }
+}
+
+impl Deref for DynamicResource {
+    type Target = ResourceAction;
+
+    fn deref(&self) -> &Self::Target {
+        &self.action
+    }
+}
+
+impl_register!(DynamicResource, "resource");
+
+/// Checks whether provided object is a dynamic resource.
+pub fn is_dynamic_resource_action(action: &ResourceAction) -> bool {
+    action
+        .metadata()
+        .metadata
+        .get("dynamic")
+        .and_then(|v| v.as_bool())
+        .unwrap_or(false)
+}
+
+fn create_matcher(
+    uri_opt: Option<String>,
+    template_opt: Option<String>,
+) -> Result<Arc<dyn Fn(&ResourceInput) -> bool + Send + Sync>> {
+    if let Some(uri) = uri_opt {
+        return Ok(Arc::new(move |input: &ResourceInput| input.uri == uri));
+    }
+
+    if let Some(template_str) = template_opt {
+        let re = template_to_regex(&template_str)?;
+        return Ok(Arc::new(move |input: &ResourceInput| {
+            re.is_match(&input.uri)
+        }));
+    }
+
+    Err(Error::new_internal(
+        "must specify either url or template options",
+    ))
+}
+
+/// Defines a dynamic resource.
+pub fn dynamic_resource<F, Fut>(opts: ResourceOptions, runner: F) -> Result<ResourceAction>
+where
+    F: Fn(ResourceInput, ActionContext) -> Fut + Send + Sync + 'static,
+    Fut: Future<Output = Result<ResourceOutput>> + Send + 'static,
+{
+    let uri = opts
+        .uri
+        .clone()
+        .or_else(|| opts.template.clone())
+        .ok_or_else(|| Error::new_internal("must specify either uri or template options"))?;
+    let name = opts.name.clone().unwrap_or_else(|| uri.clone());
+
+    let matcher = create_matcher(opts.uri.clone(), opts.template.clone())?;
+
+    let mut metadata = HashMap::new();
+    if let Some(opts_meta) = opts.metadata.as_ref().and_then(|m| m.as_object()) {
+        for (key, value) in opts_meta {
+            metadata.insert(key.clone(), value.clone());
+        }
+    }
+    let resource_info = json!({
+        "uri": opts.uri,
+        "template": opts.template,
+    });
+    metadata.insert("resource".to_string(), resource_info);
+    metadata.insert("dynamic".to_string(), Value::Bool(true));
+
+    let runner_arc = Arc::new(runner);
+    let opts_template = opts.template.clone();
+    let runner_closure = move |input: ResourceInput, args: genkit_core::action::ActionFnArg<()>| {
+        let runner_clone = runner_arc.clone();
+        let input_clone = input.clone();
+        let template_clone = opts_template.clone();
+        let context = args.context.unwrap_or_default();
+        let matcher_clone = matcher.clone();
+
+        async move {
+            if !matcher_clone(&input_clone) {
+                return Err(Error::new_internal(format!(
+                    "input uri '{}' did not match resource uri/template",
+                    input_clone.uri
+                )));
+            }
+
+            let mut output = runner_clone(input_clone, context).await?;
+
+            let mut parent_info = serde_json::Map::new();
+            parent_info.insert("uri".to_string(), input.uri.into());
+            if let Some(template) = &template_clone {
+                parent_info.insert("template".to_string(), template.clone().into());
+            }
+            let parent_value = Value::Object(parent_info);
+
+            for part in &mut output.content {
+                let metadata_map = part.metadata.get_or_insert_with(HashMap::new);
+
+                if let Some(resource_value) = metadata_map.get_mut("resource") {
+                    if let Some(resource_obj) = resource_value.as_object_mut() {
+                        if !resource_obj.contains_key("parent") {
+                            resource_obj.insert("parent".to_string(), parent_value.clone());
+                        }
+                    }
+                } else {
+                    metadata_map.insert(
+                        "resource".to_string(),
+                        json!({ "parent": parent_value.clone() }),
+                    );
+                }
+            }
+            Ok(output)
+        }
+    };
+
+    let mut builder =
+        ActionBuilder::new(ActionType::Resource, name, runner_closure).with_metadata(metadata);
+
+    if let Some(desc) = opts.description {
+        builder = builder.with_description(desc);
+    }
+
+    Ok(builder.build())
 }

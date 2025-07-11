@@ -51,6 +51,13 @@ pub struct ActionMetadata {
     pub metadata: HashMap<String, Value>,
 }
 
+impl ActionMetadata {
+    /// Removes a key from the metadata map.
+    pub fn remove(&mut self, key: &str) -> Option<Value> {
+        self.metadata.remove(key)
+    }
+}
+
 /// The result of a non-streaming action execution, including telemetry data.
 #[derive(Debug, Serialize)]
 pub struct ActionResult<O> {
@@ -156,12 +163,35 @@ impl<I, O, S> Clone for Action<I, O, S> {
     }
 }
 
+impl<I, O, S> Debug for Action<I, O, S> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("Action")
+            .field("meta", &self.meta)
+            // Note: We can't print the function itself, so we just indicate its presence.
+            .field("func", &"Arc<dyn ActionFn>")
+            .finish()
+    }
+}
+
 impl<I, O, S> Action<I, O, S>
 where
     I: DeserializeOwned + JsonSchema + Send + Sync + Clone + 'static,
     O: Serialize + JsonSchema + Send + Sync + 'static,
     S: Serialize + JsonSchema + Send + Sync + Clone + 'static,
 {
+    /// Provides mutable access to the action's metadata.
+    ///
+    /// This will clone the metadata if it's shared across multiple references.
+    pub fn metadata_mut(&mut self) -> &mut ActionMetadata {
+        Arc::make_mut(&mut self.meta)
+    }
+
+    /// Attaches an action to a registry. In this Rust implementation, this is a
+    /// conceptual operation that currently does nothing.
+    pub fn attach(self, _registry: &Registry) -> Self {
+        self
+    }
+
     /// Executes the action with the given input and returns the final result.
     ///
     /// This method can handle streaming via the `on_chunk` callback in `ActionRunOptions`.

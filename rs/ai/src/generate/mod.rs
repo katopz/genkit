@@ -33,11 +33,17 @@ use crate::generate::action::run_with_streaming_callback;
 use crate::message::{Message, MessageData, Role};
 use crate::model::middleware::ModelMiddleware;
 use crate::model::GenerateRequest;
+use crate::resource::DynamicResource;
+pub use crate::resource::{
+    define_resource, dynamic_resource, ResourceAction, ResourceFn, ResourceInput, ResourceOptions,
+    ResourceOutput,
+};
 use crate::tool::{self, ToolArgument};
 use crate::GenerateResponseData;
 use futures_util::stream::Stream;
 use genkit_core::context::ActionContext;
 use genkit_core::error::{Error, Result};
+use genkit_core::registry::ErasedAction;
 use genkit_core::registry::Registry;
 use genkit_core::status::StatusCode;
 use schemars::JsonSchema;
@@ -112,6 +118,9 @@ pub struct GenerateOptions<O = Value> {
     pub messages: Option<Vec<MessageData>>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub tools: Option<Vec<ToolArgument>>,
+    /// List of dynamic resources to be made available to this generate request.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub resources: Option<Vec<DynamicResource>>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub tool_choice: Option<ToolChoice>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -146,6 +155,7 @@ impl<O> fmt::Debug for GenerateOptions<O> {
             .field("docs", &self.docs)
             .field("messages", &self.messages)
             .field("tools", &self.tools)
+            .field("resources", &self.resources)
             .field("tool_choice", &self.tool_choice)
             .field("config", &self.config)
             .field("output", &self.output)
@@ -256,7 +266,8 @@ where
     let output_options = options.output.clone();
 
     let on_chunk_callback = options.on_chunk.take();
-    let registry_clone = registry.clone();
+    let mut registry_clone = registry.clone();
+    maybe_register_dynamic_resources(&mut registry_clone, &options);
 
     // FIX #1: Add explicit type annotation for the trait object.
     let core_streaming_callback: Option<
@@ -455,6 +466,20 @@ where
         serde_json::from_value(op_value).map_err(|e| Error::new_internal(e.to_string()))?;
 
     Ok(operation)
+}
+
+fn maybe_register_dynamic_resources<O>(registry: &mut Registry, options: &GenerateOptions<O>) {
+    if let Some(resources) = &options.resources {
+        if !resources.is_empty() {
+            let parent = registry.clone();
+            *registry = Registry::with_parent(&parent);
+            for r in resources {
+                let action = r.action().clone();
+                let name = action.name().to_string();
+                registry.register_action(&name, action).unwrap();
+            }
+        }
+    }
 }
 
 /// Converts `GenerateOptions` to a `GenerateRequest`.

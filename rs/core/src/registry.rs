@@ -23,6 +23,26 @@
 
 //! used across asynchronous tasks.
 
+/// A macro to associate a struct with a string identifier for registration purposes.
+#[macro_export]
+macro_rules! impl_register {
+    ($t:ty, $name:tt) => {
+        impl $t {
+            pub fn type_name() -> &'static str {
+                $name
+            }
+        }
+    };
+    // Handle generic structs like `MyStruct<T>`.
+    ($t:ident < $($p:ident),+ >, $name:tt) => {
+        impl<$($p),+> $t<$($p),+> {
+            pub fn type_name() -> &'static str {
+                $name
+            }
+        }
+    };
+}
+
 use crate::action::{Action, ActionMetadata, ActionRunOptions, StreamingResponse};
 use crate::error::{Error, Result};
 use crate::schema::{self, parse_schema, ProvidedSchema};
