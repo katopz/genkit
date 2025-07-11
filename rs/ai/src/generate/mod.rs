@@ -512,6 +512,45 @@ pub async fn to_generate_request<O>(
         ));
     }
 
+    // Resolve resource parts
+    let mut resolved_messages: Vec<MessageData> = Vec::new();
+    for message in messages.into_iter() {
+        let part_futures: Vec<_> = message
+            .content
+            .into_iter()
+            .map(|part| async {
+                if let Some(resource_data) = &part.resource {
+                    let resource_input = crate::resource::ResourceInput {
+                        uri: resource_data.uri.clone(),
+                    };
+                    if let Some(action) =
+                        crate::resource::find_matching_resource(registry, &resource_input).await?
+                    {
+                        let run_opts = genkit_core::action::ActionRunOptions {
+                            context: options.context.clone(),
+                            ..Default::default()
+                        };
+                        let result = action.run(resource_input, Some(run_opts)).await?;
+                        return Ok::<_, Error>(result.result.content);
+                    }
+                }
+                Ok(vec![part])
+            })
+            .collect();
+        let resolved_parts_results: Vec<Result<Vec<Part>>> =
+            futures_util::future::join_all(part_futures).await;
+        let mut new_content = Vec::new();
+        for parts_result in resolved_parts_results {
+            new_content.extend(parts_result?);
+        }
+        resolved_messages.push(MessageData {
+            content: new_content,
+            role: message.role,
+            metadata: message.metadata,
+        });
+    }
+    messages = resolved_messages;
+
     let mut merged_config = serde_json::Map::new();
 
     if let Some(crate::model::Model::Reference(model_ref)) = &options.model {
