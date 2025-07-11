@@ -211,10 +211,17 @@ impl<O> fmt::Debug for PromptGenerateOptions<O> {
 }
 
 /// A prompt that can be executed as a function.
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct PromptRef {
+    pub name: String,
+}
+
+/// A prompt that can be executed as a function.
 #[derive(Clone)]
 pub struct ExecutablePrompt<I = Value, O = Value, C = Value> {
     config: Arc<PromptConfig<I, O, C>>,
     registry: Registry,
+    pub r#ref: Option<PromptRef>,
 }
 
 impl<I, O, C> ExecutablePrompt<I, O, C>
@@ -548,7 +555,11 @@ where
                 let config = config_clone.clone();
                 let registry = registry_clone.clone();
                 async move {
-                    let prompt = ExecutablePrompt { config, registry };
+                    let prompt = ExecutablePrompt {
+                        config,
+                        registry,
+                        r#ref: None,
+                    };
                     let gen_opts = prompt.render(input, None).await?;
                     to_generate_request(&prompt.registry, &gen_opts).await
                 }
@@ -569,6 +580,7 @@ where
     ExecutablePrompt {
         config: config_arc,
         registry: registry.clone(),
+        r#ref: Some(PromptRef { name: key_name }),
     }
 }
 
@@ -626,5 +638,6 @@ where
     Ok(ExecutablePrompt {
         config,
         registry: registry.clone(),
+        r#ref: Some(PromptRef { name: key_name }),
     })
 }
