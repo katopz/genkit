@@ -6,14 +6,11 @@ use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
 #[derive(JsonSchema, Deserialize, Serialize, Debug, Clone, Default)]
-pub struct JokeSubject {
-    #[serde(rename = "jokeSubject")]
-    pub joke_subject: String,
-}
+pub struct EmptyInput {}
 
 pub fn joke_subject_generator(genkit: &Genkit) {
     genkit.define_tool(
-        ToolConfig::<JokeSubject, String> {
+        ToolConfig::<EmptyInput, String> {
             name: "jokeSubjectGenerator".to_string(),
             description: "Can be called to generate a subject for a joke".to_string(),
             ..Default::default()
@@ -43,6 +40,8 @@ async fn main() -> genkit::Result<()> {
         genkit.clone().define_flow("banana", move |input, _| {
             let genkit_cloned = genkit.clone();
             async move {
+                log::info!("[joke_flow] Calling model with prompt: '{}'", input);
+
                 let response: GenerateResponse = genkit_cloned
                     .generate_with_options(GenerateOptions {
                         prompt: Some(vec![Part::text(input)]),
@@ -50,6 +49,8 @@ async fn main() -> genkit::Result<()> {
                         ..Default::default()
                     })
                     .await?;
+
+                log::info!("[joke_flow] Got response: {:#?}", response);
 
                 response.text()
             }
