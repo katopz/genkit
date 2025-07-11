@@ -13,7 +13,8 @@
 // limitations under the License.
 
 use genkit_ai::resource::{
-    define_resource, find_matching_resource, ResourceInput, ResourceOptions,
+    define_resource, dynamic_resource, find_matching_resource, is_dynamic_resource_action,
+    ResourceInput, ResourceOptions,
 };
 use genkit_core::registry::{ErasedAction, Registry};
 use rstest::{fixture, rstest};
@@ -279,4 +280,31 @@ async fn test_finds_matching_resource(registry: Registry) {
     .await
     .unwrap();
     assert!(got_unmatched.is_none());
+}
+
+#[rstest]
+#[tokio::test]
+async fn test_is_dynamic_resource_action(registry: Registry) {
+    let defined_resource = define_resource(
+        &registry,
+        from_value(json!({"uri": "bar://baz"})).unwrap(),
+        |_, _| async {
+            Ok(from_value(json!({
+                "content": [{ "text": "bar" }]
+            }))?)
+        },
+    )
+    .unwrap();
+    assert!(!is_dynamic_resource_action(&defined_resource));
+
+    let dynamic = dynamic_resource(
+        from_value(json!({"uri": "bar://baz"})).unwrap(),
+        |_, _| async {
+            Ok(from_value(json!({
+                "content": [{ "text": "bar" }]
+            }))?)
+        },
+    )
+    .unwrap();
+    assert!(is_dynamic_resource_action(&dynamic));
 }
