@@ -341,7 +341,7 @@ where
             raw_request,
             middleware,
             current_turn,
-            message_index,
+            mut message_index,
         } = options;
         let mut request = raw_request.clone();
 
@@ -466,10 +466,11 @@ where
         }
         let mut request = resume_result.revised_request.unwrap();
 
+        let mut next_message_index = message_index;
         if let Some(tool_msg) = resume_result.tool_message {
             if let Some(cb) = get_streaming_callback() {
                 let chunk_data = GenerateResponseChunkData {
-                    index: message_index,
+                    index: next_message_index,
                     content: tool_msg.content,
                     role: Some(tool_msg.role.clone()),
                     ..Default::default()
@@ -478,6 +479,7 @@ where
                     .map_err(|e| Error::new_internal(e.to_string()))?;
                 cb(Ok(chunk_value));
             }
+            next_message_index += 1;
         }
 
         // 6. Convert to GenerateRequest (the type the model action expects).
@@ -488,7 +490,7 @@ where
             model_action,
             generate_request.clone(),
             middleware.clone(),
-            message_index,
+            next_message_index,
         )
         .await?;
 
