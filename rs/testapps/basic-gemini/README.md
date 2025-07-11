@@ -20,3 +20,15 @@ gcloud projects add-iam-policy-binding your-project-id \
 ```sh
 RUST_LOG=debug GOOGLE_APPLICATION_CREDENTIALS="./service-account.json" cargo run
 ```
+
+## Expect
+
+```
+Flow action_result: ActionResult {
+    result: "A banana.\n",
+    telemetry: TelemetryInfo {
+        trace_id: "00000000000000000000000000000000",
+        span_id: "0000000000000000",
+    },
+}
+```
