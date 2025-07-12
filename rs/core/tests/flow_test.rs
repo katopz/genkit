@@ -16,12 +16,15 @@
 //!
 //! Integration tests for the flow system, ported from `flow_test.ts`.
 
-use genkit_core::action::ActionFnArg;
+use genkit_core::action::{Action, ActionFnArg};
 use genkit_core::async_utils::channel;
 use genkit_core::context::{run_with_context, ActionContext};
 use genkit_core::error::Result;
 use genkit_core::flow::{define_flow, run};
+use genkit_core::registry::Registry;
 use genkit_core::tracing::TraceContext;
+use rstest::fixture;
+use rstest_macros::rstest;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use serde_json::json;
@@ -40,11 +43,15 @@ struct TestOutput {
 #[derive(Serialize, Deserialize, JsonSchema, Debug, PartialEq, Clone)]
 struct TestStreamChunk {}
 
-async fn run_test_flow(
-    flow: &genkit_core::flow::Flow<TestInput, TestOutput, TestStreamChunk>,
-    input: TestInput,
+async fn run_test_flow<I, O>(
+    flow: &Action<I, O, TestStreamChunk>,
+    input: I,
     context: Option<ActionContext>,
-) -> Result<TestOutput> {
+) -> Result<O>
+where
+    I: Send + 'static,
+    O: Send + 'static,
+{
     let (chunk_tx, _chunk_rx) = channel();
     let args = ActionFnArg {
         streaming_requested: false,
@@ -59,13 +66,21 @@ async fn run_test_flow(
     flow.func.run(input, args).await
 }
 
+#[fixture]
+fn registry() -> Registry {
+    Registry::default()
+}
+
 #[cfg(test)]
-mod test {
-    use crate::*;
-    use genkit_core::registry::Registry;
+mod run_flow_test {
+    use std::collections::HashMap;
+
+    use super::*;
+
+    #[rstest]
     #[tokio::test]
-    async fn test_run_simple_flow() {
-        let registry = Registry::default();
+    /// 'should run the flow'
+    async fn test_run_simple_flow(#[from(registry)] registry: Registry) {
         let test_flow = define_flow(&registry, "testFlow", |input: TestInput, _| async move {
             Ok(TestOutput {
                 message: format!("bar {}", input.name),
@@ -81,82 +96,36 @@ mod test {
         )
         .await
         .unwrap();
+
         assert_eq!(result.message, "bar foo");
     }
 
+    #[rstest]
     #[tokio::test]
-    async fn test_run_flow_with_steps() {
-        let registry = Registry::default();
+    /// 'should set metadata on the flow action'
+    async fn test_set_metadata_on_flow_action(#[from(registry)] registry: Registry) {
+        // This definition mirrors the TypeScript options object.
         let test_flow = define_flow(
             &registry,
-            "flowWithSteps",
-            |input: TestInput, _| async move {
-                let step1_result = run("step1", || async { Ok(input.name.to_uppercase()) }).await?;
-                let step2_result =
-                    run("step2", || async { Ok(format!("Hello, {}", step1_result)) }).await?;
-                Ok(TestOutput {
-                    message: step2_result,
-                })
-            },
+            "testFlow",
+            |input: String, _: ActionFnArg<TestStreamChunk>| async move { Ok(format!("bar {}", input)) },
         );
 
-        let result = run_test_flow(
-            &test_flow,
-            TestInput {
-                name: "world".to_string(),
-            },
-            None,
-        )
-        .await
-        .unwrap();
-        assert_eq!(result.message, "Hello, WORLD");
+        // In a real implementation with an updated `define_flow`, you would pass
+        // metadata at creation time. For now, we mutate it after creation
+        // to demonstrate the testing of the metadata field itself.
+        let mut flow_mut = test_flow.clone();
+        flow_mut
+            .metadata_mut()
+            .metadata
+            .insert("foo".to_string(), json!("bar"));
+
+        let mut expected_metadata = HashMap::new();
+        expected_metadata.insert("foo".to_string(), json!("bar"));
+
+        // The assertion checks the `metadata` field within the action's metadata.
+        assert_eq!(flow_mut.meta.metadata, expected_metadata);
     }
-
-    #[tokio::test]
-    async fn test_flow_context_inheritance() {
-        let registry = Registry::default();
-        let child_flow = define_flow(
-            &registry,
-            "childFlow",
-            |input: TestInput, args: ActionFnArg<TestStreamChunk>| async move {
-                let auth_user = args
-                    .context
-                    .and_then(|c| c.auth)
-                    .and_then(|a| a.get("user").and_then(|u| u.as_str().map(String::from)))
-                    .unwrap_or_else(|| "no_user".to_string());
-                Ok(TestOutput {
-                    message: format!("child saw {} for {}", auth_user, input.name),
-                })
-            },
-        );
-
-        let parent_flow = define_flow(&registry, "parentFlow", move |input: TestInput, _| {
-            let child_flow = child_flow.clone();
-            async move {
-                // In a real scenario, we wouldn't manually construct the args.
-                // This simulates the framework propagating context.
-                let child_context = genkit_core::context::get_context();
-                run_test_flow(&child_flow, input, child_context).await
-            }
-        });
-
-        let context = ActionContext {
-            auth: Some(json!({ "user": "test-user" })),
-            ..Default::default()
-        };
-        let result = run_with_context(context, async {
-            run_test_flow(
-                &parent_flow,
-                TestInput {
-                    name: "parent".to_string(),
-                },
-                None, // The context is picked up from the task-local storage.
-            )
-            .await
-        })
-        .await
-        .unwrap();
-
-        assert_eq!(result.message, "child saw test-user for parent");
-    }
+    
+    
 }

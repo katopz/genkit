@@ -47,6 +47,8 @@ pin-project-lite.workspace = true
 reqwest                    = { workspace = true, features = ["blocking", "json"] }
 strum                      = { workspace = true, features = ["derive"] }
 strum_macros.workspace     = true
+rstest.workspace = true
+rstest_macros.workspace = true
 
 [dev-dependencies]
 tokio-test.workspace = true
