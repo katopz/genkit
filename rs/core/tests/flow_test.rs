@@ -72,6 +72,7 @@ fn registry() -> Registry {
 }
 
 #[cfg(test)]
+/// 'runFlow'
 mod run_flow_test {
     use std::collections::HashMap;
 
@@ -180,4 +181,77 @@ mod run_flow_test {
 
         assert_eq!(result, "traceId=true spanId=true");
     }
+
+    #[rstest]
+    #[tokio::test]
+    /// 'should rethrow the error'
+    async fn test_rethrow_the_error(registry: Registry) {
+        let test_flow = define_flow(&registry, "throwingFlow", |input: String, _| async move {
+            // This flow is designed to fail.
+            Err::<String, _>(genkit_core::Error::new_internal(format!(
+                "bad happened: {}",
+                input
+            )))
+        });
+
+        // Call the flow and expect an error.
+        let result = run_test_flow(&test_flow, "foo".to_string(), None).await;
+
+        // Assert that the result is indeed an error.
+        assert!(result.is_err());
+
+        // Further inspect the error to ensure it's the one we threw.
+        match result.unwrap_err() {
+            genkit_core::Error::Internal { message, .. } => {
+                assert_eq!(message, "bad happened: foo");
+            }
+            _ => panic!("Expected an Internal error variant."),
+        }
+    }
+
+    #[rstest]
+    #[tokio::test]
+    /// 'should validate input'
+    async fn test_validate_input(registry: Registry) {
+        // Define the expected input structure.
+        // `Deserialize` and `JsonSchema` are required for validation to work.
+        // `Clone` is needed for the `ErasedAction` trait bounds.
+        #[derive(JsonSchema, Deserialize, Clone)]
+        struct ValidatingInput {
+            foo: String,
+            bar: i32,
+        }
+
+        let test_flow = define_flow(
+            &registry,
+            "validatingFlow",
+            // The logic here should never be executed because validation will fail first.
+            |_: ValidatingInput, _: ActionFnArg<TestStreamChunk>| async { Ok("ok".to_string()) },
+        );
+
+        // Create a JSON object with an invalid type for the `bar` field.
+        let invalid_input = serde_json::json!({
+            "foo": "foo",
+            "bar": "bar" // This should be a number.
+        });
+
+        // Use `run_http_json` which takes a raw `Value` and performs validation.
+        let result = test_flow.run_http(invalid_input, None).await;
+
+        assert!(result.is_err());
+        let err = result.unwrap_err();
+
+        // Assert that we received the correct type of error.
+        assert!(matches!(err, genkit_core::Error::Validation(_)));
+        // Optionally, check the error message content.
+        assert!(err.to_string().contains("Schema validation failed"));
+    }
 }
+
+// #[cfg(test)]
+// /// 'getContext'
+// mod run_flow_test {
+//     use std::collections::HashMap;
+
+//     use super::*;
+// }
