@@ -16,11 +16,12 @@
 //!
 //! Integration tests for the flow system, ported from `flow_test.ts`.
 
+use futures::stream::TryStreamExt;
 use genkit_core::action::{Action, ActionFnArg};
 use genkit_core::async_utils::channel;
-use genkit_core::context::{run_with_context, ActionContext};
+use genkit_core::context::ActionContext;
 use genkit_core::error::Result;
-use genkit_core::flow::{define_flow, run};
+use genkit_core::flow::define_flow;
 use genkit_core::registry::Registry;
 use genkit_core::tracing::TraceContext;
 use rstest::fixture;
@@ -249,8 +250,135 @@ mod run_flow_test {
     }
 }
 
+#[cfg(test)]
+/// 'getContext'
+mod get_context_test {
+    use std::collections::HashMap;
+
+    use genkit_core::action::{ActionRunOptions, StreamingResponse};
+
+    use super::*;
+
+    #[rstest]
+    #[tokio::test]
+    /// 'should run the flow' (with context)
+    async fn test_run_with_context(registry: Registry) {
+        let test_flow = define_flow(
+            &registry,
+            "contextFlow",
+            // The flow accesses its arguments to stringify the context.
+            |input: String, args: ActionFnArg<_>| async move {
+                // Correctly serialize only the additional_context map, not the whole envelope.
+                let context_str = if let Some(ctx) = args.context {
+                    serde_json::to_string(&ctx.additional_context).unwrap()
+                } else {
+                    "null".to_string()
+                };
+
+                Ok(format!("bar {} {}", input, context_str))
+            },
+        );
+
+        // Create the context that will be passed to the flow.
+        let mut context_map = HashMap::new();
+        context_map.insert("user".to_string(), json!("test-user"));
+
+        let context = ActionContext {
+            additional_context: context_map,
+            ..Default::default()
+        };
+
+        // Run the flow with the specified context.
+        let result = run_test_flow(&test_flow, "foo".to_string(), Some(context))
+            .await
+            .unwrap();
+
+        // Now the assertion will pass because we are only stringifying the user data.
+        assert_eq!(result, r#"bar foo {"user":"test-user"}"#);
+    }
+
+    #[rstest]
+    #[tokio::test]
+    /// 'should stream the flow' (with context)
+    async fn test_streaming_with_context(registry: Registry) {
+        #[derive(Serialize, Deserialize, JsonSchema, Debug, PartialEq, Clone)]
+        struct StreamCount {
+            count: i32,
+        }
+
+        let test_flow = define_flow(
+            &registry,
+            "streamingContextFlow",
+            |input: i32, args: ActionFnArg<StreamCount>| async move {
+                if args.streaming_requested {
+                    for i in 0..input {
+                        // Send stream chunks back to the caller.
+                        let _ = args.chunk_sender.send(StreamCount { count: i });
+                    }
+                }
+
+                let context_json = args
+                    .context
+                    .map(|c| serde_json::to_value(c).unwrap())
+                    .unwrap_or(serde_json::Value::Null);
+                let context_str = serde_json::to_string(&context_json).unwrap();
+
+                Ok(format!(
+                    "bar {} {} {}",
+                    input, args.streaming_requested, context_str
+                ))
+            },
+        );
+
+        // Create the context.
+        let mut context_map = HashMap::new();
+        context_map.insert("user".to_string(), json!("test-user"));
+        let context = ActionContext {
+            additional_context: context_map,
+            ..Default::default()
+        };
+
+        // Use the `.stream()` method to get a streaming response.
+        let streaming_response: StreamingResponse<String, StreamCount> = test_flow.stream(
+            3,
+            Some(ActionRunOptions {
+                context: Some(context),
+                ..Default::default()
+            }),
+        );
+
+        // Collect all chunks from the stream.
+        let received_chunks: Vec<StreamCount> =
+            streaming_response.stream.try_collect().await.unwrap();
+
+        // Await the final output of the flow.
+        let final_output = streaming_response.output.await.unwrap();
+
+        assert_eq!(
+            final_output,
+            r#"bar 3 true {"auth":null,"user":"test-user"}"#
+        );
+        assert_eq!(
+            received_chunks,
+            vec![
+                StreamCount { count: 0 },
+                StreamCount { count: 1 },
+                StreamCount { count: 2 }
+            ]
+        );
+    }
+}
+
 // #[cfg(test)]
-// /// 'getContext'
+// /// 'context'
+// mod run_flow_test {
+//     use std::collections::HashMap;
+
+//     use super::*;
+// }
+
+// #[cfg(test)]
+// /// 'telemetry'
 // mod run_flow_test {
 //     use std::collections::HashMap;
 
