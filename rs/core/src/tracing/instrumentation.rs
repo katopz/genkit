@@ -87,14 +87,18 @@ where
                 .get("genkit:type")
                 .and_then(|v| v.as_str())
                 .unwrap_or("unknown");
-            // In TS, path uses subtype if available, otherwise type.
-            let type_for_path = user_attrs
-                .get("genkit:metadata.subtype")
-                .and_then(|v| v.as_str())
-                .unwrap_or(genkit_type);
+            let subtype = user_attrs
+                .get("genkit:metadata:subtype")
+                .and_then(|v| v.as_str());
+
+            let path_segment = match (genkit_type, subtype, parent_path.is_empty()) {
+                ("action", Some(sub), true) => format!("{{{},t:{}}}", name, sub),
+                ("action", Some(sub), false) => format!("{{{},t:action,s:{}}}", name, sub),
+                (typ, _, _) => format!("{{{},t:{}}}", name, typ),
+            };
 
             let mut new_path_segments = parent_path.clone();
-            new_path_segments.push(format!("{{{},t:{}}}", name, type_for_path));
+            new_path_segments.push(path_segment);
 
             let path_string = format!("/{}", new_path_segments.join("/"));
 
@@ -106,10 +110,10 @@ where
                 .get("genkit:type")
                 .and_then(|v| v.as_str())
                 .unwrap_or("unknown");
-            let type_for_path = user_attrs
-                .get("genkit:metadata.subtype")
-                .and_then(|v| v.as_str())
-                .unwrap_or(genkit_type);
+            let subtype = user_attrs
+                .get("genkit:metadata:subtype")
+                .and_then(|v| v.as_str());
+            let type_for_path = subtype.unwrap_or(genkit_type);
             let segment = format!("{{{},t:{}}}", name, type_for_path);
             (format!("/{}", segment), vec![segment], true)
         });
@@ -121,6 +125,9 @@ where
             user_attrs.insert("genkit:name".to_string(), Value::String(name.clone()));
             if is_root {
                 user_attrs.insert("genkit:isRoot".to_string(), Value::Bool(true));
+            } else {
+                // Per TS behavior, context is only added to the root span's telemetry.
+                user_attrs.remove("genkit:metadata:context");
             }
 
             // Convert serde_json::Value to opentelemetry::Value for the span attributes

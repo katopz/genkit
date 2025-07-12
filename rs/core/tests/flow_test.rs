@@ -745,8 +745,8 @@ mod telemetry_test {
         let expected_attrs = json!({
             "genkit:input": "\"foo\"",
             "genkit:isRoot": true,
-            "genkit:metadata.subtype": "flow",
-            "genkit:metadata.context": "{\"user\":\"pavel\"}",
+            "genkit:metadata:subtype": "flow",
+            "genkit:metadata:context": "{\"user\":\"pavel\"}",
             "genkit:name": "testFlow",
             "genkit:output": "\"bar foo\"",
             "genkit:path": "/{testFlow,t:flow}",
@@ -781,8 +781,8 @@ mod telemetry_test {
         let expected_attrs = json!({
             "genkit:input": "\"foo\"",
             "genkit:isRoot": true,
-            "genkit:metadata.subtype": "flow",
-            "genkit:metadata.context": "{}",
+            "genkit:metadata:subtype": "flow",
+            "genkit:metadata:context": "{}",
             "genkit:name": "testFlow",
             "genkit:output": "\"bar foo\"",
             "genkit:path": "/{testFlow,t:flow}",
@@ -843,11 +843,10 @@ mod telemetry_test {
         // Assertions for testAction span
         let expected_action_attrs = json!({
             "genkit:input": "null",
-            "genkit:metadata.subtype": "tool",
-            "genkit:metadata.context": "{\"user\":\"pavel\"}",
+            "genkit:metadata:subtype": "tool",
             "genkit:name": "testAction",
             "genkit:output": "\"bar\"",
-            "genkit:path": "/{testFlow,t:flow}/{custom,t:flowStep}/{testAction,t:tool}",
+            "genkit:path": "/{testFlow,t:flow}/{custom,t:flowStep}/{testAction,t:action,s:tool}",
             "genkit:state": "success",
             "genkit:type": "action"
         });
@@ -873,8 +872,8 @@ mod telemetry_test {
         let expected_flow_attrs = json!({
             "genkit:input": "\"foo\"",
             "genkit:isRoot": true,
-            "genkit:metadata.subtype": "flow",
-            "genkit:metadata.context": "{\"user\":\"pavel\"}",
+            "genkit:metadata:subtype": "flow",
+            "genkit:metadata:context": "{\"user\":\"pavel\"}",
             "genkit:name": "testFlow",
             "genkit:output": "\"foo bar\"",
             "genkit:path": "/{testFlow,t:flow}",

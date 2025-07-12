@@ -202,6 +202,10 @@ where
         options: Option<ActionRunOptions<S>>,
     ) -> Result<ActionResult<O>> {
         let mut opts = options.unwrap_or_default();
+        // If no context is provided in options, try to get it from the task local.
+        if opts.context.is_none() {
+            opts.context = context::get_context();
+        }
 
         // In TS, all high-level actions are of type 'action', with the real type in the subtype.
         let telemetry_type = "action";
@@ -216,7 +220,7 @@ where
         );
         if let Some(subtype) = &self.meta.subtype {
             telemetry_attrs.insert(
-                "genkit:metadata.subtype".to_string(),
+                "genkit:metadata:subtype".to_string(),
                 Value::String(subtype.clone()),
             );
         }
@@ -235,7 +239,7 @@ where
         let context_for_telemetry = opts.context.clone().unwrap_or_default();
         if let Ok(context_str) = serde_json::to_string(&context_for_telemetry) {
             telemetry_attrs.insert(
-                "genkit:metadata.context".to_string(),
+                "genkit:metadata:context".to_string(),
                 Value::String(context_str),
             );
         }
