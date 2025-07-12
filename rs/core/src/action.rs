@@ -229,6 +229,33 @@ where
             }
         }
 
+        if let Some(context) = &opts.context {
+            if let Ok(context_str) = serde_json::to_string(context) {
+                telemetry_attrs.insert(
+                    "genkit:metadata.context".to_string(),
+                    Value::String(context_str),
+                );
+            }
+        }
+
+        if let Some(context) = &opts.context {
+            if let Ok(context_str) = serde_json::to_string(context) {
+                telemetry_attrs.insert(
+                    "genkit:metadata.context".to_string(),
+                    Value::String(context_str),
+                );
+            }
+        }
+
+        if let Some(context) = &opts.context {
+            if let Ok(context_str) = serde_json::to_string(context) {
+                telemetry_attrs.insert(
+                    "genkit:metadata.context".to_string(),
+                    Value::String(context_str),
+                );
+            }
+        }
+
         let (result, telemetry) = tracing::in_new_span(
             self.meta.name.clone(),
             Some(telemetry_attrs),

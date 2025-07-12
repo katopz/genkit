@@ -41,12 +41,13 @@ tokio::task_local! {
 #[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, JsonSchema)]
 pub struct ActionContext {
     /// Information about the currently authenticated user if provided.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(default)]
     pub auth: Option<Value>,
     /// Additional context data.
     #[serde(flatten)]
     pub additional_context: HashMap<String, Value>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(default)]
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub telemetry_labels: Option<HashMap<String, String>>,
 }
 
