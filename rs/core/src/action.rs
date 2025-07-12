@@ -176,7 +176,7 @@ impl<I, O, S> Debug for Action<I, O, S> {
 
 impl<I, O, S> Action<I, O, S>
 where
-    I: DeserializeOwned + JsonSchema + Send + Sync + Clone + 'static,
+    I: DeserializeOwned + JsonSchema + Serialize + Send + Sync + Clone + 'static,
     O: Serialize + JsonSchema + Send + Sync + 'static,
     S: Serialize + JsonSchema + Send + Sync + Clone + 'static,
 {
@@ -201,22 +201,38 @@ where
         input: I,
         options: Option<ActionRunOptions<S>>,
     ) -> Result<ActionResult<O>> {
-        let mut opts = options.unwrap_or_else(|| ActionRunOptions {
-            on_chunk: None,
-            context: None,
-            telemetry_labels: None,
-            abort_signal: None,
-        });
+        let mut opts = options.unwrap_or_default();
 
-        let telemetry_labels = opts.telemetry_labels.map(|labels| {
-            labels
-                .into_iter()
-                .map(|(k, v)| (k, Value::String(v)))
-                .collect()
-        });
+        let mut telemetry_attrs = HashMap::new();
+        telemetry_attrs.insert(
+            "genkit:type".to_string(),
+            Value::String(self.meta.action_type.to_string()),
+        );
+        telemetry_attrs.insert(
+            "genkit:name".to_string(),
+            Value::String(self.meta.name.clone()),
+        );
+        if let Some(subtype) = &self.meta.subtype {
+            telemetry_attrs.insert(
+                "genkit:metadata.subtype".to_string(),
+                Value::String(subtype.clone()),
+            );
+        }
 
-        let (result, telemetry) =
-            tracing::in_new_span(self.meta.name.clone(), telemetry_labels, |trace_context| {
+        if let Ok(input_str) = serde_json::to_string(&input) {
+            telemetry_attrs.insert("genkit:input".to_string(), Value::String(input_str));
+        }
+
+        if let Some(labels) = opts.telemetry_labels.take() {
+            for (k, v) in labels {
+                telemetry_attrs.insert(k, Value::String(v));
+            }
+        }
+
+        let (result, telemetry) = tracing::in_new_span(
+            self.meta.name.clone(),
+            Some(telemetry_attrs),
+            |trace_context| {
                 TRACE_PATH.scope(Vec::new(), async {
                     let (chunk_tx, mut chunk_rx) = channel();
 
@@ -256,8 +272,9 @@ where
 
                     run_result
                 })
-            })
-            .await?;
+            },
+        )
+        .await?;
 
         // TODO: Add output schema validation.
 
@@ -416,7 +433,7 @@ pub fn define_action<I, O, S, F, Fut>(
     func: F,
 ) -> Action<I, O, S>
 where
-    I: DeserializeOwned + JsonSchema + Send + Sync + Clone + 'static,
+    I: DeserializeOwned + JsonSchema + Serialize + Send + Sync + Clone + 'static,
     O: Serialize + JsonSchema + Send + Sync + 'static,
     S: Serialize + JsonSchema + Send + Sync + Clone + 'static,
     F: Fn(I, ActionFnArg<S>) -> Fut + Send + Sync + 'static,

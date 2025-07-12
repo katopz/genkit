@@ -127,7 +127,7 @@ pub trait Plugin: Send + Sync {
 #[async_trait]
 impl<I, O, S> ErasedAction for Action<I, O, S>
 where
-    I: DeserializeOwned + JsonSchema + Send + Sync + Clone + 'static,
+    I: DeserializeOwned + JsonSchema + Send + Sync + Clone + Serialize + 'static,
     O: Serialize + JsonSchema + Send + Sync + 'static,
     S: Serialize + JsonSchema + Send + Sync + Clone + 'static,
 {

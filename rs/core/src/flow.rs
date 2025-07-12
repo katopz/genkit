@@ -53,7 +53,7 @@ pub fn define_flow<I, O, S, F, Fut>(
     func: F,
 ) -> Flow<I, O, S>
 where
-    I: DeserializeOwned + JsonSchema + Send + Sync + Clone + 'static,
+    I: DeserializeOwned + JsonSchema + Send + Sync + Clone + Serialize + 'static,
     O: Serialize + JsonSchema + Send + Sync + 'static,
     S: Serialize + JsonSchema + Send + Sync + Clone + 'static,
     F: Fn(I, ActionFnArg<S>) -> Fut + Send + Sync + 'static,

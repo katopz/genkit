@@ -169,7 +169,7 @@ where
 #[async_trait]
 impl<I, O, S> ErasedAction for ToolAction<I, O, S>
 where
-    I: DeserializeOwned + JsonSchema + Send + Sync + Clone + 'static,
+    I: DeserializeOwned + JsonSchema + Send + Sync + Clone + Serialize + 'static,
     O: Serialize + JsonSchema + Send + Sync + 'static,
     S: Serialize + JsonSchema + Send + Sync + Clone + 'static,
 {
@@ -213,7 +213,7 @@ pub enum ToolArgument {
 
 impl<I, O, S> From<ToolAction<I, O, S>> for ToolArgument
 where
-    I: DeserializeOwned + JsonSchema + Send + Sync + Clone + 'static,
+    I: DeserializeOwned + JsonSchema + Send + Sync + Clone + Serialize + 'static,
     O: Serialize + JsonSchema + Send + Sync + 'static,
     S: Serialize + JsonSchema + Send + Sync + Clone + 'static,
 {

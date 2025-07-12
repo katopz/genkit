@@ -25,6 +25,7 @@ use opentelemetry::{
     trace::{FutureExt, Status, TraceContextExt, Tracer},
     Context, KeyValue,
 };
+use serde::Serialize;
 use serde_json::Value;
 use std::collections::HashMap;
 use std::future::Future;
@@ -33,6 +34,32 @@ use std::future::Future;
 pub const ATTR_PREFIX: &str = "genkit";
 pub const SPAN_TYPE_ATTR: &str = "genkit:type";
 const TRACER_NAME: &str = "genkit-tracer";
+
+/// Converts a `serde_json::Value` to an `opentelemetry::Value`.
+///
+/// This handles the translation between JSON types and OpenTelemetry's primitive
+/// attribute types, preventing issues like booleans being converted to strings.
+fn convert_otel_value(v: Value) -> opentelemetry::Value {
+    match v {
+        Value::Bool(b) => opentelemetry::Value::from(b),
+        Value::Number(n) => {
+            if let Some(i) = n.as_i64() {
+                opentelemetry::Value::from(i)
+            } else if let Some(f) = n.as_f64() {
+                opentelemetry::Value::from(f)
+            } else {
+                opentelemetry::Value::from(n.to_string())
+            }
+        }
+        Value::String(s) => opentelemetry::Value::from(s),
+        // For complex types (Array, Object), serialize to a JSON string as
+        // OpenTelemetry attributes are primitive.
+        v @ (Value::Array(_) | Value::Object(_)) => {
+            opentelemetry::Value::from(serde_json::to_string(&v).unwrap_or_else(|_| v.to_string()))
+        }
+        Value::Null => opentelemetry::Value::from("null"),
+    }
+}
 
 /// Executes a future within a new OpenTelemetry span.
 ///
@@ -48,7 +75,7 @@ pub async fn in_new_span<F, Fut, T>(
 where
     F: FnOnce(crate::tracing::TraceContext) -> Fut,
     Fut: Future<Output = Result<T>> + Send,
-    T: Send,
+    T: Serialize + Send,
 {
     let tracer = opentelemetry::global::tracer(TRACER_NAME);
     let mut user_attrs = attrs.unwrap_or_default();
@@ -81,7 +108,12 @@ where
                 .get("genkit:type")
                 .and_then(|v| v.as_str())
                 .unwrap_or("unknown");
-            let segment = format!("{{{},t:{}}}", name, genkit_type);
+            let subtype_str = user_attrs
+                .get("genkit:metadata.subtype")
+                .and_then(|v| v.as_str())
+                .map(|s| format!(",s:{}", s))
+                .unwrap_or_default();
+            let segment = format!("{{{},t:{}{}}}", name, genkit_type, subtype_str);
             (format!("/{}", segment), vec![segment], true)
         });
 
@@ -97,7 +129,7 @@ where
             // Convert serde_json::Value to opentelemetry::Value for the span attributes
             let span_attributes: Vec<KeyValue> = user_attrs
                 .into_iter()
-                .map(|(k, v)| KeyValue::new(k, v.to_string()))
+                .map(|(k, v)| KeyValue::new(k, convert_otel_value(v)))
                 .collect();
 
             let mut span = tracer.start_with_context(name, &Context::current());
@@ -125,9 +157,12 @@ where
             // Finalize span based on result
             let span = cx.span();
             match &result {
-                Ok(_) => {
+                Ok(output) => {
                     span.set_status(Status::Ok);
                     span.set_attribute(KeyValue::new("genkit:state", "success"));
+                    if let Ok(output_str) = serde_json::to_string(output) {
+                        span.set_attribute(KeyValue::new("genkit:output", output_str));
+                    }
                 }
                 Err(e) => {
                     span.set_status(Status::Error {

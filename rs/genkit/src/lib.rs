@@ -206,7 +206,7 @@ impl Genkit {
     /// Defines and registers a flow function.
     pub fn define_flow<I, O, S, F, Fut>(&self, name: impl Into<String>, func: F) -> Flow<I, O, S>
     where
-        I: DeserializeOwned + JsonSchema + Send + Sync + Clone + 'static,
+        I: DeserializeOwned + JsonSchema + Send + Sync + Clone + 'static + Serialize,
         O: Serialize + JsonSchema + Send + Sync + 'static,
         S: Serialize + JsonSchema + Send + Sync + Clone + 'static,
         F: Fn(I, ActionFnArg<S>) -> Fut + Send + Sync + 'static,
@@ -259,7 +259,7 @@ impl Genkit {
     /// Creates a retriever action for the provided RetrieverFn implementation.
     pub async fn define_retriever<I, F, Fut>(&self, name: &str, runner: F) -> RetrieverAction<I>
     where
-        I: JsonSchema + DeserializeOwned + Send + Sync + Clone + 'static,
+        I: JsonSchema + DeserializeOwned + Send + Sync + Clone + 'static + Serialize,
         F: Fn(RetrieverRequest<I>, genkit_core::action::ActionFnArg<()>) -> Fut
             + Send
             + Sync
@@ -286,7 +286,7 @@ impl Genkit {
     /// Creates an indexer action for the provided IndexerFn implementation.
     pub fn define_indexer<I, F, Fut>(&self, name: &str, runner: F) -> IndexerAction<I>
     where
-        I: JsonSchema + DeserializeOwned + Send + Sync + Clone + 'static,
+        I: JsonSchema + DeserializeOwned + Send + Sync + Clone + 'static + Serialize,
         F: Fn(IndexerRequest<I>, genkit_core::action::ActionFnArg<()>) -> Fut
             + Send
             + Sync
@@ -299,7 +299,7 @@ impl Genkit {
     /// Creates evaluator action for the provided EvaluatorFn implementation.
     pub fn define_evaluator<I, F, Fut>(&self, name: &str, runner: F) -> EvaluatorAction<I>
     where
-        I: JsonSchema + DeserializeOwned + Send + Sync + Clone + 'static,
+        I: JsonSchema + DeserializeOwned + Send + Sync + Clone + 'static + Serialize,
         F: Fn(BaseEvalDataPoint) -> Fut + Send + Sync + 'static,
         Fut: Future<Output = Result<EvalResponse>> + Send + 'static,
     {
@@ -309,7 +309,7 @@ impl Genkit {
     /// Creates embedder model for the provided EmbedderFn model implementation.
     pub fn define_embedder<I, F, Fut>(&self, name: &str, runner: F) -> EmbedderAction<I>
     where
-        I: JsonSchema + DeserializeOwned + Send + Sync + Clone + 'static,
+        I: JsonSchema + DeserializeOwned + Send + Sync + Clone + 'static + Serialize,
         F: Fn(EmbedRequest<I>, genkit_core::action::ActionFnArg<()>) -> Fut + Send + Sync + 'static,
         Fut: Future<Output = Result<EmbedResponse>> + Send + 'static,
     {
@@ -319,7 +319,7 @@ impl Genkit {
     /// Creates reranker action for the provided RerankerFn implementation.
     pub fn define_reranker<I, F, Fut>(&self, name: &str, runner: F) -> RerankerAction<I>
     where
-        I: JsonSchema + DeserializeOwned + Send + Sync + Clone + 'static,
+        I: JsonSchema + DeserializeOwned + Send + Sync + Clone + 'static + Serialize,
         F: Fn(RerankerRequest<I>, genkit_core::action::ActionFnArg<()>) -> Fut
             + Send
             + Sync

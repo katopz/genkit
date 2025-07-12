@@ -100,7 +100,7 @@ impl<I: 'static> Deref for RetrieverAction<I> {
 #[async_trait]
 impl<I> ErasedAction for RetrieverAction<I>
 where
-    I: JsonSchema + DeserializeOwned + Send + Sync + Clone + 'static,
+    I: JsonSchema + DeserializeOwned + Send + Sync + Clone + Serialize + 'static,
 {
     async fn run_http_json(
         &self,
@@ -145,7 +145,7 @@ impl<I: 'static> Deref for IndexerAction<I> {
 #[async_trait]
 impl<I> ErasedAction for IndexerAction<I>
 where
-    I: JsonSchema + DeserializeOwned + Send + Sync + Clone + 'static,
+    I: JsonSchema + DeserializeOwned + Send + Sync + Clone + Serialize + 'static,
 {
     async fn run_http_json(
         &self,
@@ -184,7 +184,7 @@ where
 /// Defines a new retriever and registers it.
 pub fn define_retriever<I, F, Fut>(registry: &Registry, name: &str, runner: F) -> RetrieverAction<I>
 where
-    I: JsonSchema + DeserializeOwned + Send + Sync + Clone + 'static,
+    I: JsonSchema + DeserializeOwned + Send + Sync + Clone + Serialize + 'static,
     F: Fn(RetrieverRequest<I>, genkit_core::action::ActionFnArg<()>) -> Fut + Send + Sync + 'static,
     Fut: Future<Output = Result<RetrieverResponse>> + Send + 'static,
 {
@@ -199,7 +199,7 @@ where
 /// Defines a new indexer and registers it.
 pub fn define_indexer<I, F, Fut>(registry: &Registry, name: &str, runner: F) -> IndexerAction<I>
 where
-    I: JsonSchema + DeserializeOwned + Send + Sync + Clone + 'static,
+    I: JsonSchema + DeserializeOwned + Send + Sync + Clone + Serialize + 'static,
     F: Fn(IndexerRequest<I>, genkit_core::action::ActionFnArg<()>) -> Fut + Send + Sync + 'static,
     Fut: Future<Output = Result<()>> + Send + 'static,
 {

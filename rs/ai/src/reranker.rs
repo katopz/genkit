@@ -99,7 +99,7 @@ impl<I: 'static> Deref for RerankerAction<I> {
 #[async_trait]
 impl<I> ErasedAction for RerankerAction<I>
 where
-    I: JsonSchema + DeserializeOwned + Send + Sync + Clone + 'static,
+    I: JsonSchema + DeserializeOwned + Send + Sync + Clone + Serialize + 'static,
 {
     async fn run_http_json(
         &self,
@@ -144,7 +144,7 @@ pub struct RerankerInfo {
 /// Defines a new reranker and registers it.
 pub fn define_reranker<I, F, Fut>(registry: &Registry, name: &str, runner: F) -> RerankerAction<I>
 where
-    I: JsonSchema + DeserializeOwned + Send + Sync + Clone + 'static,
+    I: JsonSchema + DeserializeOwned + Send + Sync + Clone + Serialize + 'static,
     F: Fn(RerankerRequest<I>, genkit_core::action::ActionFnArg<()>) -> Fut + Send + Sync + 'static,
     Fut: Future<Output = Result<RerankerResponse>> + Send + 'static,
 {

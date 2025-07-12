@@ -138,7 +138,7 @@ impl<I: 'static> Deref for EvaluatorAction<I> {
 #[async_trait]
 impl<I> ErasedAction for EvaluatorAction<I>
 where
-    I: JsonSchema + DeserializeOwned + Send + Sync + Clone + 'static,
+    I: JsonSchema + DeserializeOwned + Send + Sync + Clone + Serialize + 'static,
 {
     async fn run_http_json(
         &self,
@@ -184,7 +184,7 @@ pub struct EvaluatorInfo {
 /// Defines a new evaluator and registers it.
 pub fn define_evaluator<I, F, Fut>(registry: &Registry, name: &str, runner: F) -> EvaluatorAction<I>
 where
-    I: JsonSchema + DeserializeOwned + Send + Sync + Clone + 'static,
+    I: JsonSchema + DeserializeOwned + Send + Sync + Clone + Serialize + 'static,
     F: Fn(BaseEvalDataPoint) -> Fut + Send + Sync + 'static,
     Fut: Future<Output = Result<EvalResponse>> + Send + 'static,
 {

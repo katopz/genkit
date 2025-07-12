@@ -219,7 +219,7 @@ mod run_flow_test {
     #[tokio::test]
     /// 'should validate input'
     async fn test_validate_input(registry: Registry) {
-        #[derive(JsonSchema, Deserialize, Clone)]
+        #[derive(JsonSchema, Deserialize, Clone, Serialize)]
         #[allow(dead_code)]
         struct ValidatingInput {
             foo: String,

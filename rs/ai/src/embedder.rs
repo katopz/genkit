@@ -88,7 +88,7 @@ impl<I: 'static> Deref for EmbedderAction<I> {
 #[async_trait]
 impl<I> ErasedAction for EmbedderAction<I>
 where
-    I: JsonSchema + DeserializeOwned + Send + Sync + Clone + 'static,
+    I: JsonSchema + Serialize + DeserializeOwned + Send + Sync + Clone + 'static,
 {
     async fn run_http_json(
         &self,
@@ -134,7 +134,7 @@ pub struct EmbedderInfo {
 /// Defines a new embedder and registers it.
 pub fn define_embedder<I, F, Fut>(registry: &Registry, name: &str, runner: F) -> EmbedderAction<I>
 where
-    I: JsonSchema + DeserializeOwned + Send + Sync + Clone + 'static,
+    I: JsonSchema + Serialize + DeserializeOwned + Send + Sync + Clone + 'static,
     F: Fn(EmbedRequest<I>, genkit_core::action::ActionFnArg<()>) -> Fut + Send + Sync + 'static,
     Fut: Future<Output = Result<EmbedResponse>> + Send + 'static,
 {
