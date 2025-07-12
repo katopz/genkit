@@ -214,21 +214,11 @@ where
         + std::fmt::Debug
         + 'static,
 {
-    let mut attrs = HashMap::new();
-    attrs.insert(
-        "genkit:spanType".to_string(),
-        Value::String("util".to_string()),
-    );
     let raw_request_for_response = options.raw_request.clone();
     let registry_for_response = registry.clone();
-    let result = tracing::in_new_span(
-        "generate".to_string(),
-        Some(attrs),
-        move |_trace_context| async move { generate_internal(registry, options).await },
-    )
-    .await;
 
-    let ((response_data, request), _telemetry) = result?;
+    // The span is now created by the caller (e.g., `generate::generate`)
+    let (response_data, request) = generate_internal(registry, options).await?;
 
     let final_request = reconstruct_user_facing_request(
         &request,
@@ -328,7 +318,7 @@ async fn run_model_via_middleware(
 
 /// The core, private implementation of the generation logic.
 #[allow(clippy::type_complexity)]
-fn generate_internal<O>(
+pub(super) fn generate_internal<O>(
     registry: Arc<Registry>,
     options: GenerateHelperOptions<O>,
 ) -> std::pin::Pin<

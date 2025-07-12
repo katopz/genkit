@@ -27,7 +27,7 @@ use crate::schema::{parse_schema, ProvidedSchema};
 use crate::status::StatusCode;
 
 use crate::schema::schema_for;
-use crate::tracing::{self, TraceContext, TRACE_PATH};
+use crate::tracing::{self, TraceContext};
 use async_trait::async_trait;
 use futures::{Future, Stream, StreamExt};
 use schemars::{JsonSchema, Schema};
@@ -176,7 +176,7 @@ impl<I, O, S> Debug for Action<I, O, S> {
 
 impl<I, O, S> Action<I, O, S>
 where
-    I: DeserializeOwned + JsonSchema + Serialize + Send + Sync + Clone + 'static,
+    I: DeserializeOwned + JsonSchema + Send + Sync + Clone + Serialize + 'static,
     O: Serialize + JsonSchema + Send + Sync + 'static,
     S: Serialize + JsonSchema + Send + Sync + Clone + 'static,
 {
@@ -232,46 +232,42 @@ where
         let (result, telemetry) = tracing::in_new_span(
             self.meta.name.clone(),
             Some(telemetry_attrs),
-            |trace_context| {
-                TRACE_PATH.scope(Vec::new(), async {
-                    let (chunk_tx, mut chunk_rx) = channel();
+            |trace_context| async move {
+                let (chunk_tx, mut chunk_rx) = channel();
 
-                    let on_chunk_task = if let Some(on_chunk) = opts.on_chunk {
-                        let task = tokio::spawn(async move {
-                            while let Some(chunk_result) = chunk_rx.next().await {
-                                on_chunk(
-                                    chunk_result.map_err(|e| Error::new_internal(e.to_string())),
-                                );
-                            }
-                        });
-                        Some(task)
-                    } else {
-                        None
-                    };
+                let on_chunk_task = if let Some(on_chunk) = opts.on_chunk {
+                    let task = tokio::spawn(async move {
+                        while let Some(chunk_result) = chunk_rx.next().await {
+                            on_chunk(chunk_result.map_err(|e| Error::new_internal(e.to_string())));
+                        }
+                    });
+                    Some(task)
+                } else {
+                    None
+                };
 
-                    let args = ActionFnArg {
-                        streaming_requested: on_chunk_task.is_some(),
-                        chunk_sender: chunk_tx.clone(),
-                        context: opts.context.clone(),
-                        trace: trace_context,
-                        abort_signal: opts.abort_signal.take().unwrap_or_default(),
-                    };
+                let args = ActionFnArg {
+                    streaming_requested: on_chunk_task.is_some(),
+                    chunk_sender: chunk_tx.clone(),
+                    context: opts.context.clone(),
+                    trace: trace_context,
+                    abort_signal: opts.abort_signal.take().unwrap_or_default(),
+                };
 
-                    let fut = self.func.run(input, args);
+                let fut = self.func.run(input, args);
 
-                    let run_result = if let Some(ctx) = opts.context {
-                        context::run_with_context(ctx, fut).await
-                    } else {
-                        fut.await
-                    };
+                let run_result = if let Some(ctx) = opts.context {
+                    context::run_with_context(ctx, fut).await
+                } else {
+                    fut.await
+                };
 
-                    chunk_tx.close();
-                    if let Some(task) = on_chunk_task {
-                        task.await.unwrap();
-                    }
+                chunk_tx.close();
+                if let Some(task) = on_chunk_task {
+                    task.await.unwrap();
+                }
 
-                    run_result
-                })
+                run_result
             },
         )
         .await?;

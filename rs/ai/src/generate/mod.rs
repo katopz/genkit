@@ -35,8 +35,8 @@ use crate::model::middleware::ModelMiddleware;
 use crate::model::GenerateRequest;
 use crate::resource::DynamicResource;
 pub use crate::resource::{
-    define_resource, dynamic_resource, ResourceAction, ResourceFn, ResourceInput, ResourceOptions,
-    ResourceOutput,
+    define_resource, dynamic_resource, find_matching_resource, is_dynamic_resource_action,
+    ResourceAction, ResourceInput, ResourceOptions, ResourceOutput,
 };
 use crate::tool::{self, ToolArgument};
 use crate::GenerateResponseData;
@@ -46,9 +46,11 @@ use genkit_core::error::{Error, Result};
 use genkit_core::registry::ErasedAction;
 use genkit_core::registry::Registry;
 use genkit_core::status::StatusCode;
+use genkit_core::tracing;
 use schemars::JsonSchema;
 use serde::{de::DeserializeOwned, Deserialize, Serialize};
 use serde_json::{json, Value};
+use std::collections::HashMap;
 use std::fmt;
 use std::marker::PhantomData;
 use std::pin::Pin;
@@ -266,6 +268,18 @@ where
     }
 
     let output_options = options.output.clone();
+    let telemetry_labels = options.telemetry_labels.take();
+
+    let mut attrs = HashMap::new();
+    attrs.insert(
+        "genkit:spanType".to_string(),
+        serde_json::Value::String("util".to_string()),
+    );
+    if let Some(labels) = telemetry_labels {
+        for (key, value) in labels {
+            attrs.insert(key, serde_json::Value::String(value));
+        }
+    }
 
     let on_chunk_callback = options.on_chunk.take();
     let mut registry_clone = registry.clone();
@@ -284,16 +298,23 @@ where
         new_cb
     });
 
-    let mut response = run_with_streaming_callback(core_streaming_callback, || async move {
-        let helper_options = action::GenerateHelperOptions {
-            middleware: options.r#use.take().unwrap_or_default(),
-            raw_request: options,
-            current_turn: 0,
-            message_index: 0,
-            ..Default::default()
-        };
-        action::generate_helper(Arc::new(registry_clone), helper_options).await
-    })
+    let (mut response, _telemetry) = tracing::in_new_span(
+        "generate".to_string(),
+        Some(attrs),
+        move |_trace_context| async move {
+            run_with_streaming_callback(core_streaming_callback, || async move {
+                let helper_options = action::GenerateHelperOptions {
+                    middleware: options.r#use.take().unwrap_or_default(),
+                    raw_request: options,
+                    current_turn: 0,
+                    message_index: 0,
+                    telemetry_labels: None, // handled by the span
+                };
+                action::generate_helper(Arc::new(registry_clone), helper_options).await
+            })
+            .await
+        },
+    )
     .await?;
 
     if let Some(formatter) = formats::resolve_format(registry, output_options.as_ref()).await {
@@ -524,9 +545,7 @@ pub async fn to_generate_request<O>(
                     let resource_input = crate::resource::ResourceInput {
                         uri: resource_data.uri.clone(),
                     };
-                    if let Some(action) =
-                        crate::resource::find_matching_resource(registry, &resource_input).await?
-                    {
+                    if let Some(action) = find_matching_resource(registry, &resource_input).await? {
                         let run_opts = genkit_core::action::ActionRunOptions {
                             context: options.context.clone(),
                             ..Default::default()
