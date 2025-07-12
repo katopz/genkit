@@ -153,4 +153,31 @@ mod run_flow_test {
 
         assert_eq!(result.message, "bar foo");
     }
+
+    #[rstest]
+    #[tokio::test]
+    /// 'should include trace info in the context'
+    async fn test_include_trace_info_in_context(registry: Registry) {
+        // This flow's job is to check its own context and report what it finds.
+        // Input is a String (ignored), Output is a String.
+        let test_flow = define_flow(
+            &registry,
+            "traceContextFlow",
+            // The second argument to the closure is the ActionFnArg, which contains the context.
+            |_: String, args: ActionFnArg<_>| async move {
+                let has_trace_id = !args.trace.trace_id.is_empty();
+                let has_span_id = !args.trace.span_id.is_empty();
+
+                Ok(format!("traceId={} spanId={}", has_trace_id, has_span_id))
+            },
+        );
+
+        // Our test runner provides a dummy TraceContext.
+        // In a real scenario, `enable_telemetry` and `in_new_span` would create this.
+        let result = run_test_flow(&test_flow, "foo".to_string(), None)
+            .await
+            .unwrap();
+
+        assert_eq!(result, "traceId=true spanId=true");
+    }
 }
