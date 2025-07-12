@@ -16,7 +16,7 @@
 //!
 //! This module provides functions for extracting and parsing JSON from text,
 //! often from the output of large language models. It is the Rust equivalent
-// of `extract.ts`.
+//! of `extract.ts`.
 
 use genkit_core::error::{Error, Result};
 use serde::de::DeserializeOwned;

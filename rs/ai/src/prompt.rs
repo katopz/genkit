@@ -16,7 +16,7 @@
 //!
 //! This module provides the `define_prompt` function and related structures for
 //! creating and executing type-safe, templated prompts. It is the Rust
-// equivalent of `prompt.ts`.
+//! equivalent of `prompt.ts`.
 
 use crate::generate::{
     generate, generate_stream, to_generate_request, GenerateOptions, GenerateResponse,

@@ -16,7 +16,7 @@
 //!
 //! This module provides functions for processing tool requests from a model,
 //! executing the corresponding tools, and handling interrupts. It is the Rust
-// equivalent of `generate/resolve-tool-requests.ts`.
+//! equivalent of `generate/resolve-tool-requests.ts`.
 
 use crate::document::{Part, ToolRequestPart, ToolResponse, ToolResponsePart};
 use crate::generate::GenerateOptions;

@@ -1,16 +1,16 @@
-//! Copyright 2024 Google LLC
-//!
-//! Licensed under the Apache License, Version 2.0 (the "License");
-//! you may not use this file except in compliance with the License.
-//! You may obtain a copy of the License at
-//!
-//!     http://www.apache.org/licenses/LICENSE-2.0
-//!
-//! Unless required by applicable law or agreed to in writing, software
-//! distributed under the License is distributed on an "AS IS" BASIS,
-//! WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-//! See the License for the specific language governing permissions and
-//! limitations under the License.
+// Copyright 2024 Google LLC
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+//     http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
 
 mod helpers;
 
@@ -114,7 +114,7 @@ async fn test_checks_operation_status(
     #[future] genkit_with_programmable_model: (Arc<Genkit>, ProgrammableModel),
 ) {
     let (genkit, _pm) = genkit_with_programmable_model.await;
-    let mut registry = genkit.registry().clone();
+    let registry = genkit.registry().clone();
     // This test requires a `genkit.check_operation()` function and a background
     // model implementation that can be polled.
 
@@ -135,7 +135,7 @@ async fn test_checks_operation_status(
 
     let completed_op_result = result_data;
     define_action(
-        &mut registry,
+        &registry,
         ActionType::CheckOperation,
         "bkg-model/check",
         move |op_in: genkit_core::background_action::Operation<serde_json::Value>,
