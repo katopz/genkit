@@ -585,55 +585,106 @@ mod context_test {
 /// 'telemetry'
 mod telemetry_test {
     use super::*;
-    use genkit_core::{action::define_action, registry::ActionType, telemetry::TelemetryConfig};
-    use once_cell::sync::Lazy;
+    use genkit_core::action::define_action;
+    use genkit_core::registry::ActionType;
+    use genkit_core::telemetry::TelemetryConfig;
+    use once_cell::sync::{Lazy, OnceCell};
     use opentelemetry::Value as OTelValue;
     use opentelemetry_sdk::{
         error::{OTelSdkError, OTelSdkResult},
         trace::{self, SpanData, SpanExporter, SpanProcessor},
     };
     use serde_json::Value as JsonValue;
-    use std::sync::{Arc, Mutex};
+    use std::sync::{Arc, Mutex, MutexGuard};
 
-    // Test setup
+    // A single mutex to ensure tests run serially, as they modify global state.
+    static TELEMETRY_TEST_MUTEX: Mutex<()> = Mutex::new(());
+
+    // The global state that our swappable exporter will use. It holds a pointer
+    // to the Vec<SpanData> of the currently running test.
+    static CURRENT_SPANS: Lazy<Arc<Mutex<Arc<Mutex<Vec<SpanData>>>>>> =
+        Lazy::new(|| Arc::new(Mutex::new(Arc::new(Mutex::new(Vec::new())))));
+
+    // A SpanExporter that can have its destination swapped out.
     #[derive(Debug, Clone)]
-    struct TestSpanExporter {
-        spans: Arc<Mutex<Vec<SpanData>>>,
+    struct SwappableSpanExporter {
+        // A pointer to the Arc that holds the current test's span vector.
+        spans_arc: Arc<Mutex<Arc<Mutex<Vec<SpanData>>>>>,
     }
-    impl SpanExporter for TestSpanExporter {
+
+    impl SpanExporter for SwappableSpanExporter {
         fn export(
             &self,
             batch: Vec<SpanData>,
         ) -> impl futures::Future<Output = std::result::Result<(), OTelSdkError>> + std::marker::Send
         {
-            self.spans.lock().unwrap().extend(batch);
-            // The future now correctly resolves to the required Result type.
+            // Get the Arc for the currently active test's spans.
+            let current_spans = self.spans_arc.lock().unwrap().clone();
+            // Lock that Arc's Mutex to write the spans.
+            current_spans.lock().unwrap().extend(batch);
             Box::pin(async { Ok(()) })
         }
-
         fn shutdown(&mut self) -> OTelSdkResult {
             Ok(())
         }
     }
-    static TEST_TELEMETRY: Lazy<Arc<Mutex<Vec<SpanData>>>> = Lazy::new(|| {
-        let exported_spans = Arc::new(Mutex::new(Vec::new()));
-        let exporter = Box::new(TestSpanExporter {
-            spans: exported_spans.clone(),
+
+    // Global flag to ensure telemetry is only initialized once.
+    static TELEMETRY_INIT: OnceCell<()> = OnceCell::new();
+
+    // Initializes the global telemetry with our swappable exporter. Only runs once.
+    fn init_test_telemetry() {
+        TELEMETRY_INIT.get_or_init(|| {
+            let exporter = SwappableSpanExporter {
+                spans_arc: CURRENT_SPANS.clone(),
+            };
+            let processor: Box<dyn SpanProcessor> =
+                Box::new(trace::SimpleSpanProcessor::new(exporter));
+            genkit_core::tracing::enable_telemetry(TelemetryConfig {
+                span_processors: vec![processor],
+                ..Default::default()
+            })
+            .unwrap();
         });
-        let processor: Box<dyn SpanProcessor> =
-            Box::new(trace::SimpleSpanProcessor::new(*exporter));
-        genkit_core::tracing::enable_telemetry(TelemetryConfig {
-            span_processors: vec![processor],
-            ..Default::default()
-        })
-        .unwrap();
-        exported_spans
-    });
-    fn clear_spans() {
-        TEST_TELEMETRY.lock().unwrap().clear();
     }
-    fn get_spans() -> Vec<SpanData> {
-        TEST_TELEMETRY.lock().unwrap().clone()
+
+    // The test harness that each test will use.
+    struct TestHarness {
+        // Locks the test execution to be serial.
+        _guard: MutexGuard<'static, ()>,
+        // Holds the spans collected *only* for this test instance.
+        spans_for_this_test: Arc<Mutex<Vec<SpanData>>>,
+    }
+
+    impl TestHarness {
+        fn new() -> Self {
+            // Ensure serial execution.
+            let guard = TELEMETRY_TEST_MUTEX.lock().unwrap();
+
+            // Make sure the global telemetry is set up.
+            init_test_telemetry();
+
+            // Create a new clean slate for this test's spans.
+            let spans_for_this_test = Arc::new(Mutex::new(Vec::new()));
+
+            // Point the global exporter to this test's span vector.
+            *CURRENT_SPANS.lock().unwrap() = spans_for_this_test.clone();
+
+            TestHarness {
+                _guard: guard,
+                spans_for_this_test,
+            }
+        }
+
+        // Get the spans collected during this test run.
+        fn get_spans(&self) -> Vec<SpanData> {
+            self.spans_for_this_test.lock().unwrap().clone()
+        }
+    }
+
+    #[fixture]
+    fn harness() -> TestHarness {
+        TestHarness::new()
     }
 
     fn attributes_to_json_value(attrs: &[opentelemetry::KeyValue]) -> JsonValue {
@@ -666,13 +717,17 @@ mod telemetry_test {
     #[rstest]
     #[tokio::test]
     /// 'should create a trace'
-    async fn test_create_a_trace(registry: Registry) {
-        clear_spans();
+    async fn test_create_a_trace(registry: Registry, harness: TestHarness) {
         let test_flow = create_test_flow(&registry);
         let mut labels = HashMap::new();
         labels.insert("custom".to_string(), "label".to_string());
+        let mut context = ActionContext::default();
+        context
+            .additional_context
+            .insert("user".to_string(), json!("pavel"));
         let options = ActionRunOptions {
             telemetry_labels: Some(labels),
+            context: Some(context),
             ..Default::default()
         };
 
@@ -682,7 +737,7 @@ mod telemetry_test {
             .unwrap();
         assert_eq!(result.result, "bar foo");
 
-        let spans = get_spans();
+        let spans = harness.get_spans();
         assert_eq!(spans.len(), 1);
         let span = &spans[0];
         assert_eq!(span.name.as_ref(), "testFlow");
@@ -691,11 +746,12 @@ mod telemetry_test {
             "genkit:input": "\"foo\"",
             "genkit:isRoot": true,
             "genkit:metadata.subtype": "flow",
+            "genkit:metadata.context": "{\"user\":\"pavel\"}",
             "genkit:name": "testFlow",
             "genkit:output": "\"bar foo\"",
-            "genkit:path": "/{testFlow,t:flow,s:flow}",
+            "genkit:path": "/{testFlow,t:flow}",
             "genkit:state": "success",
-            "genkit:type": "flow",
+            "genkit:type": "action",
             "custom": "label"
         });
         assert_eq!(attributes_to_json_value(&span.attributes), expected_attrs);
@@ -704,17 +760,12 @@ mod telemetry_test {
     #[rstest]
     #[tokio::test]
     /// 'should create a trace when streaming'
-    async fn test_create_a_trace_when_streaming(registry: Registry) {
-        clear_spans();
+    async fn test_create_a_trace_when_streaming(registry: Registry, harness: TestHarness) {
         let test_flow = create_test_flow(&registry);
         let mut labels = HashMap::new();
         labels.insert("custom".to_string(), "label".to_string());
-        let context = ActionContext {
-            ..Default::default()
-        };
         let options = ActionRunOptions {
             telemetry_labels: Some(labels),
-            context: Some(context),
             ..Default::default()
         };
 
@@ -722,7 +773,7 @@ mod telemetry_test {
         let result = response.output.await.unwrap();
         assert_eq!(result, "bar foo");
 
-        let spans = get_spans();
+        let spans = harness.get_spans();
         assert_eq!(spans.len(), 1);
         let span = &spans[0];
         assert_eq!(span.name.as_ref(), "testFlow");
@@ -731,12 +782,12 @@ mod telemetry_test {
             "genkit:input": "\"foo\"",
             "genkit:isRoot": true,
             "genkit:metadata.subtype": "flow",
-            "genkit:metadata.context": "{\"auth\":null}",
+            "genkit:metadata.context": "{}",
             "genkit:name": "testFlow",
             "genkit:output": "\"bar foo\"",
-            "genkit:path": "/{testFlow,t:flow,s:flow}",
+            "genkit:path": "/{testFlow,t:flow}",
             "genkit:state": "success",
-            "genkit:type": "flow",
+            "genkit:type": "action",
             "custom": "label"
         });
         assert_eq!(attributes_to_json_value(&span.attributes), expected_attrs);
@@ -745,10 +796,9 @@ mod telemetry_test {
     #[rstest]
     #[tokio::test]
     /// 'records traces of nested actions'
-    async fn test_records_traces_of_nested_actions(mut registry: Registry) {
-        clear_spans();
+    async fn test_records_traces_of_nested_actions(registry: Registry, harness: TestHarness) {
         let test_action = define_action(
-            &mut registry,
+            &registry,
             ActionType::Tool,
             "testAction",
             |_: (), _: ActionFnArg<()>| async { Ok("bar".to_string()) },
@@ -782,33 +832,35 @@ mod telemetry_test {
             .unwrap();
         assert_eq!(result.result, "foo bar");
 
-        let mut spans = get_spans();
+        let spans = harness.get_spans();
         assert_eq!(spans.len(), 3);
-        spans.sort_by_key(|s| s.start_time);
 
-        // Span 0: testAction
-        let action_span = &spans[0];
-        assert_eq!(action_span.name.as_ref(), "testAction");
+        // Find spans by name to avoid depending on export order.
+        let action_span = spans.iter().find(|s| s.name == "testAction").unwrap();
+        let custom_span = spans.iter().find(|s| s.name == "custom").unwrap();
+        let flow_span = spans.iter().find(|s| s.name == "testFlow").unwrap();
+
+        // Assertions for testAction span
         let expected_action_attrs = json!({
+            "genkit:input": "null",
             "genkit:metadata.subtype": "tool",
+            "genkit:metadata.context": "{\"user\":\"pavel\"}",
             "genkit:name": "testAction",
             "genkit:output": "\"bar\"",
-            "genkit:path": "/{testFlow,t:flow,s:flow}/{custom,t:flowStep}/{testAction,t:tool,s:tool}",
+            "genkit:path": "/{testFlow,t:flow}/{custom,t:flowStep}/{testAction,t:tool}",
             "genkit:state": "success",
-            "genkit:type": "tool"
+            "genkit:type": "action"
         });
         assert_eq!(
             attributes_to_json_value(&action_span.attributes),
             expected_action_attrs
         );
 
-        // Span 1: custom
-        let custom_span = &spans[1];
-        assert_eq!(custom_span.name.as_ref(), "custom");
+        // Assertions for custom span
         let expected_custom_attrs = json!({
             "genkit:name": "custom",
             "genkit:output": "\"foo bar\"",
-            "genkit:path": "/{testFlow,t:flow,s:flow}/{custom,t:flowStep}",
+            "genkit:path": "/{testFlow,t:flow}/{custom,t:flowStep}",
             "genkit:state": "success",
             "genkit:type": "flowStep"
         });
@@ -817,19 +869,17 @@ mod telemetry_test {
             expected_custom_attrs
         );
 
-        // Span 2: testFlow
-        let flow_span = &spans[2];
-        assert_eq!(flow_span.name.as_ref(), "testFlow");
+        // Assertions for testFlow span
         let expected_flow_attrs = json!({
             "genkit:input": "\"foo\"",
             "genkit:isRoot": true,
             "genkit:metadata.subtype": "flow",
-            "genkit:metadata.context": "{\"auth\":null,\"user\":\"pavel\"}",
+            "genkit:metadata.context": "{\"user\":\"pavel\"}",
             "genkit:name": "testFlow",
             "genkit:output": "\"foo bar\"",
-            "genkit:path": "/{testFlow,t:flow,s:flow}",
+            "genkit:path": "/{testFlow,t:flow}",
             "genkit:state": "success",
-            "genkit:type": "flow"
+            "genkit:type": "action"
         });
         assert_eq!(
             attributes_to_json_value(&flow_span.attributes),

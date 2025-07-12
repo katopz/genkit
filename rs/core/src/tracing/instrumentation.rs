@@ -83,20 +83,18 @@ where
     // Determine path and if this is a root span by checking the TRACE_PATH task-local.
     let (path_for_span, path_for_scope, is_root) = TRACE_PATH
         .try_with(|parent_path| {
-            let mut new_path_segments = parent_path.clone();
-
             let genkit_type = user_attrs
                 .get("genkit:type")
                 .and_then(|v| v.as_str())
                 .unwrap_or("unknown");
-
-            let subtype_str = user_attrs
+            // In TS, path uses subtype if available, otherwise type.
+            let type_for_path = user_attrs
                 .get("genkit:metadata.subtype")
                 .and_then(|v| v.as_str())
-                .map(|s| format!(",s:{}", s))
-                .unwrap_or_default();
+                .unwrap_or(genkit_type);
 
-            new_path_segments.push(format!("{{{},t:{}{}}}", name, genkit_type, subtype_str));
+            let mut new_path_segments = parent_path.clone();
+            new_path_segments.push(format!("{{{},t:{}}}", name, type_for_path));
 
             let path_string = format!("/{}", new_path_segments.join("/"));
 
@@ -108,12 +106,11 @@ where
                 .get("genkit:type")
                 .and_then(|v| v.as_str())
                 .unwrap_or("unknown");
-            let subtype_str = user_attrs
+            let type_for_path = user_attrs
                 .get("genkit:metadata.subtype")
                 .and_then(|v| v.as_str())
-                .map(|s| format!(",s:{}", s))
-                .unwrap_or_default();
-            let segment = format!("{{{},t:{}{}}}", name, genkit_type, subtype_str);
+                .unwrap_or(genkit_type);
+            let segment = format!("{{{},t:{}}}", name, type_for_path);
             (format!("/{}", segment), vec![segment], true)
         });
 

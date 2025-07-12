@@ -203,10 +203,12 @@ where
     ) -> Result<ActionResult<O>> {
         let mut opts = options.unwrap_or_default();
 
+        // In TS, all high-level actions are of type 'action', with the real type in the subtype.
+        let telemetry_type = "action";
         let mut telemetry_attrs = HashMap::new();
         telemetry_attrs.insert(
             "genkit:type".to_string(),
-            Value::String(self.meta.action_type.to_string()),
+            Value::String(telemetry_type.to_string()),
         );
         telemetry_attrs.insert(
             "genkit:name".to_string(),
@@ -229,13 +231,13 @@ where
             }
         }
 
-        if let Some(context) = &opts.context {
-            if let Ok(context_str) = serde_json::to_string(context) {
-                telemetry_attrs.insert(
-                    "genkit:metadata.context".to_string(),
-                    Value::String(context_str),
-                );
-            }
+        // Per TS implementation, always add context, even if empty.
+        let context_for_telemetry = opts.context.clone().unwrap_or_default();
+        if let Ok(context_str) = serde_json::to_string(&context_for_telemetry) {
+            telemetry_attrs.insert(
+                "genkit:metadata.context".to_string(),
+                Value::String(context_str),
+            );
         }
 
         let (result, telemetry) = tracing::in_new_span(
