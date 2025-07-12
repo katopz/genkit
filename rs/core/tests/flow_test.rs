@@ -16,19 +16,18 @@
 //!
 //! Integration tests for the flow system, ported from `flow_test.ts`.
 
-use futures::stream::TryStreamExt;
-use genkit_core::action::{Action, ActionFnArg};
+use genkit_core::action::{Action, ActionFnArg, ActionRunOptions};
 use genkit_core::async_utils::channel;
-use genkit_core::context::ActionContext;
-use genkit_core::error::Result;
-use genkit_core::flow::define_flow;
-use genkit_core::registry::Registry;
+use genkit_core::context::{get_context, run_with_context, ActionContext};
+use genkit_core::error::{Error as GenkitError, Result};
+use genkit_core::flow::{define_flow, run, Flow};
+use genkit_core::registry::{ErasedAction, Registry};
 use genkit_core::tracing::TraceContext;
-use rstest::fixture;
-use rstest_macros::rstest;
+use rstest::*;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use serde_json::json;
+use std::collections::HashMap;
 use tokio_util::sync::CancellationToken;
 
 #[derive(Serialize, Deserialize, JsonSchema, Debug, PartialEq, Clone)]
@@ -41,17 +40,17 @@ struct TestOutput {
     message: String,
 }
 
-#[derive(Serialize, Deserialize, JsonSchema, Debug, PartialEq, Clone)]
-struct TestStreamChunk {}
-
-async fn run_test_flow<I, O>(
-    flow: &Action<I, O, TestStreamChunk>,
+/// Test helper to invoke a flow's function with basic arguments.
+async fn run_test_flow<I, O, S>(
+    flow: &Action<I, O, S>,
     input: I,
     context: Option<ActionContext>,
+    abort_signal: CancellationToken,
 ) -> Result<O>
 where
     I: Send + 'static,
     O: Send + 'static,
+    S: Send + 'static,
 {
     let (chunk_tx, _chunk_rx) = channel();
     let args = ActionFnArg {
@@ -62,7 +61,7 @@ where
             trace_id: "test-trace-id".to_string(),
             span_id: "test-span-id".to_string(),
         },
-        abort_signal: CancellationToken::new(),
+        abort_signal,
     };
     flow.func.run(input, args).await
 }
@@ -75,19 +74,21 @@ fn registry() -> Registry {
 #[cfg(test)]
 /// 'runFlow'
 mod run_flow_test {
-    use std::collections::HashMap;
-
     use super::*;
 
     #[rstest]
     #[tokio::test]
     /// 'should run the flow'
-    async fn test_run_simple_flow(#[from(registry)] registry: Registry) {
-        let test_flow = define_flow(&registry, "testFlow", |input: TestInput, _| async move {
-            Ok(TestOutput {
-                message: format!("bar {}", input.name),
-            })
-        });
+    async fn test_run_simple_flow(registry: Registry) {
+        let test_flow = define_flow(
+            &registry,
+            "testFlow",
+            |input: TestInput, _: ActionFnArg<()>| async move {
+                Ok(TestOutput {
+                    message: format!("bar {}", input.name),
+                })
+            },
+        );
 
         let result = run_test_flow(
             &test_flow,
@@ -95,6 +96,7 @@ mod run_flow_test {
                 name: "foo".to_string(),
             },
             None,
+            CancellationToken::new(),
         )
         .await
         .unwrap();
@@ -105,19 +107,14 @@ mod run_flow_test {
     #[rstest]
     #[tokio::test]
     /// 'should set metadata on the flow action'
-    async fn test_set_metadata_on_flow_action(#[from(registry)] registry: Registry) {
-        // This definition mirrors the TypeScript options object.
-        let test_flow = define_flow(
+    async fn test_set_metadata_on_flow_action(registry: Registry) {
+        let mut test_flow = define_flow(
             &registry,
             "testFlow",
-            |input: String, _: ActionFnArg<TestStreamChunk>| async move { Ok(format!("bar {}", input)) },
+            |input: String, _: ActionFnArg<()>| async move { Ok(format!("bar {}", input)) },
         );
 
-        // In a real implementation with an updated `define_flow`, you would pass
-        // metadata at creation time. For now, we mutate it after creation
-        // to demonstrate the testing of the metadata field itself.
-        let mut flow_mut = test_flow.clone();
-        flow_mut
+        test_flow
             .metadata_mut()
             .metadata
             .insert("foo".to_string(), json!("bar"));
@@ -125,23 +122,22 @@ mod run_flow_test {
         let mut expected_metadata = HashMap::new();
         expected_metadata.insert("foo".to_string(), json!("bar"));
 
-        // The assertion checks the `metadata` field within the action's metadata.
-        assert_eq!(flow_mut.meta.metadata, expected_metadata);
+        assert_eq!(test_flow.meta.metadata, expected_metadata);
     }
 
     #[rstest]
     #[tokio::test]
     /// 'should run simple sync flow'
     async fn test_run_simple_sync_flow(registry: Registry) {
-        // This flow is "sync" in the sense that its logic doesn't use `.await`.
-        // The `async move` block is required to match the expected function signature,
-        // which must return a Future.
-        let test_flow = define_flow(&registry, "testFlow", |input: TestInput, _| async move {
-            // The logic here is executed synchronously.
-            Ok(TestOutput {
-                message: format!("bar {}", input.name),
-            })
-        });
+        let test_flow = define_flow(
+            &registry,
+            "testFlow",
+            |input: TestInput, _: ActionFnArg<()>| async move {
+                Ok(TestOutput {
+                    message: format!("bar {}", input.name),
+                })
+            },
+        );
 
         let result = run_test_flow(
             &test_flow,
@@ -149,6 +145,7 @@ mod run_flow_test {
                 name: "foo".to_string(),
             },
             None,
+            CancellationToken::new(),
         )
         .await
         .unwrap();
@@ -160,13 +157,10 @@ mod run_flow_test {
     #[tokio::test]
     /// 'should include trace info in the context'
     async fn test_include_trace_info_in_context(registry: Registry) {
-        // This flow's job is to check its own context and report what it finds.
-        // Input is a String (ignored), Output is a String.
         let test_flow = define_flow(
             &registry,
             "traceContextFlow",
-            // The second argument to the closure is the ActionFnArg, which contains the context.
-            |_: String, args: ActionFnArg<_>| async move {
+            |_: String, args: ActionFnArg<()>| async move {
                 let has_trace_id = !args.trace.trace_id.is_empty();
                 let has_span_id = !args.trace.span_id.is_empty();
 
@@ -174,11 +168,14 @@ mod run_flow_test {
             },
         );
 
-        // Our test runner provides a dummy TraceContext.
-        // In a real scenario, `enable_telemetry` and `in_new_span` would create this.
-        let result = run_test_flow(&test_flow, "foo".to_string(), None)
-            .await
-            .unwrap();
+        let result = run_test_flow(
+            &test_flow,
+            "foo".to_string(),
+            None,
+            CancellationToken::new(),
+        )
+        .await
+        .unwrap();
 
         assert_eq!(result, "traceId=true spanId=true");
     }
@@ -187,23 +184,31 @@ mod run_flow_test {
     #[tokio::test]
     /// 'should rethrow the error'
     async fn test_rethrow_the_error(registry: Registry) {
-        let test_flow = define_flow(&registry, "throwingFlow", |input: String, _| async move {
-            // This flow is designed to fail.
-            Err::<String, _>(genkit_core::Error::new_internal(format!(
-                "bad happened: {}",
-                input
-            )))
-        });
+        #[derive(Serialize, Deserialize, JsonSchema, Debug, PartialEq, Clone)]
+        struct TestStreamChunk {}
 
-        // Call the flow and expect an error.
-        let result = run_test_flow(&test_flow, "foo".to_string(), None).await;
+        let test_flow = define_flow(
+            &registry,
+            "throwingFlow",
+            |input: String, _: ActionFnArg<TestStreamChunk>| async move {
+                Err(GenkitError::new_internal(format!(
+                    "bad happened: {}",
+                    input
+                )))
+            },
+        );
 
-        // Assert that the result is indeed an error.
+        let result: Result<TestStreamChunk> = run_test_flow(
+            &test_flow,
+            "foo".to_string(),
+            None,
+            CancellationToken::new(),
+        )
+        .await;
+
         assert!(result.is_err());
-
-        // Further inspect the error to ensure it's the one we threw.
         match result.unwrap_err() {
-            genkit_core::Error::Internal { message, .. } => {
+            GenkitError::Internal { message, .. } => {
                 assert_eq!(message, "bad happened: foo");
             }
             _ => panic!("Expected an Internal error variant."),
@@ -214,9 +219,6 @@ mod run_flow_test {
     #[tokio::test]
     /// 'should validate input'
     async fn test_validate_input(registry: Registry) {
-        // Define the expected input structure.
-        // `Deserialize` and `JsonSchema` are required for validation to work.
-        // `Clone` is needed for the `ErasedAction` trait bounds.
         #[derive(JsonSchema, Deserialize, Clone)]
         #[allow(dead_code)]
         struct ValidatingInput {
@@ -227,25 +229,15 @@ mod run_flow_test {
         let test_flow = define_flow(
             &registry,
             "validatingFlow",
-            // The logic here should never be executed because validation will fail first.
-            |_: ValidatingInput, _: ActionFnArg<TestStreamChunk>| async { Ok("ok".to_string()) },
+            |_: ValidatingInput, _: ActionFnArg<()>| async { Ok("ok".to_string()) },
         );
 
-        // Create a JSON object with an invalid type for the `bar` field.
-        let invalid_input = serde_json::json!({
-            "foo": "foo",
-            "bar": "bar" // This should be a number.
-        });
-
-        // Use `run_http_json` which takes a raw `Value` and performs validation.
-        let result = test_flow.run_http(invalid_input, None).await;
+        let invalid_input = json!({ "foo": "foo", "bar": "bar" });
+        let result = test_flow.run_http_json(invalid_input, None).await;
 
         assert!(result.is_err());
         let err = result.unwrap_err();
-
-        // Assert that we received the correct type of error.
-        assert!(matches!(err, genkit_core::Error::Validation(_)));
-        // Optionally, check the error message content.
+        assert!(matches!(err, GenkitError::Validation(_)));
         assert!(err.to_string().contains("Schema validation failed"));
     }
 }
@@ -253,11 +245,9 @@ mod run_flow_test {
 #[cfg(test)]
 /// 'getContext'
 mod get_context_test {
-    use std::collections::HashMap;
-
-    use genkit_core::action::{ActionRunOptions, StreamingResponse};
-
     use super::*;
+    use futures::stream::TryStreamExt;
+    use genkit_core::action::StreamingResponse;
 
     #[rstest]
     #[tokio::test]
@@ -266,46 +256,44 @@ mod get_context_test {
         let test_flow = define_flow(
             &registry,
             "contextFlow",
-            // The flow accesses its arguments to stringify the context.
-            |input: String, args: ActionFnArg<_>| async move {
-                // Correctly serialize only the additional_context map, not the whole envelope.
+            |input: String, args: ActionFnArg<()>| async move {
                 let context_str = if let Some(ctx) = args.context {
                     serde_json::to_string(&ctx.additional_context).unwrap()
                 } else {
                     "null".to_string()
                 };
-
                 Ok(format!("bar {} {}", input, context_str))
             },
         );
 
-        // Create the context that will be passed to the flow.
         let mut context_map = HashMap::new();
         context_map.insert("user".to_string(), json!("test-user"));
-
         let context = ActionContext {
             additional_context: context_map,
             ..Default::default()
         };
 
-        // Run the flow with the specified context.
-        let result = run_test_flow(&test_flow, "foo".to_string(), Some(context))
-            .await
-            .unwrap();
+        let result = run_test_flow(
+            &test_flow,
+            "foo".to_string(),
+            Some(context),
+            CancellationToken::new(),
+        )
+        .await
+        .unwrap();
 
-        // Now the assertion will pass because we are only stringifying the user data.
         assert_eq!(result, r#"bar foo {"user":"test-user"}"#);
+    }
+
+    #[derive(Serialize, Deserialize, JsonSchema, Debug, PartialEq, Clone)]
+    struct StreamCount {
+        count: i32,
     }
 
     #[rstest]
     #[tokio::test]
-    /// 'should stream the flow' (with context)
+    /// 'should streams the flow' (with context)
     async fn test_streaming_with_context(registry: Registry) {
-        #[derive(Serialize, Deserialize, JsonSchema, Debug, PartialEq, Clone)]
-        struct StreamCount {
-            count: i32,
-        }
-
         let test_flow = define_flow(
             &registry,
             "streamingContextFlow",
@@ -315,14 +303,11 @@ mod get_context_test {
                         let _ = args.chunk_sender.send(StreamCount { count: i });
                     }
                 }
-
-                // Correctly serialize only the additional_context
                 let context_str = if let Some(ctx) = args.context {
                     serde_json::to_string(&ctx.additional_context).unwrap()
                 } else {
                     "null".to_string()
                 };
-
                 Ok(format!(
                     "bar {} {} {}",
                     input, args.streaming_requested, context_str
@@ -345,7 +330,6 @@ mod get_context_test {
             }),
         );
 
-        // Use tokio::join! to run both futures concurrently, preventing deadlock.
         let (chunks_result, output_result) = tokio::join!(
             streaming_response.stream.try_collect::<Vec<_>>(),
             streaming_response.output
@@ -354,7 +338,6 @@ mod get_context_test {
         let received_chunks = chunks_result.unwrap();
         let final_output = output_result.unwrap();
 
-        // Assertions
         assert_eq!(final_output, r#"bar 3 true {"user":"test-user"}"#);
         assert_eq!(
             received_chunks,
@@ -367,18 +350,233 @@ mod get_context_test {
     }
 }
 
-// #[cfg(test)]
-// /// 'context'
-// mod run_flow_test {
-//     use std::collections::HashMap;
+#[cfg(test)]
+/// 'context'
+mod context_test {
+    use super::*;
+    use futures::stream::TryStreamExt;
+    use genkit_core::action::ActionRunOptions;
+    use tokio::time::{sleep, Duration};
 
-//     use super::*;
-// }
+    #[rstest]
+    #[tokio::test]
+    /// 'should run the flow with context (old way)'
+    async fn test_run_with_context_old_way(registry: Registry) {
+        let test_flow = define_flow(
+            &registry,
+            "testFlowOldWay",
+            |input: String, _: ActionFnArg<()>| async move {
+                let context = get_context().unwrap();
+                let context_str = serde_json::to_string(&context.additional_context).unwrap();
+                Ok(format!("bar {} {}", input, context_str))
+            },
+        );
 
-// #[cfg(test)]
-// /// 'telemetry'
-// mod run_flow_test {
-//     use std::collections::HashMap;
+        let mut context_map = HashMap::new();
+        context_map.insert("user".to_string(), json!("test-user"));
+        let test_context = ActionContext {
+            additional_context: context_map,
+            ..Default::default()
+        };
 
-//     use super::*;
-// }
+        let result = run_with_context(test_context, async {
+            run_test_flow(
+                &test_flow,
+                "foo".to_string(),
+                None,
+                CancellationToken::new(),
+            )
+            .await
+            .unwrap()
+        })
+        .await;
+
+        assert_eq!(result, r#"bar foo {"user":"test-user"}"#);
+    }
+
+    #[rstest]
+    #[tokio::test]
+    /// 'should run the flow with context (new way)'
+    async fn test_run_with_context_new_way(registry: Registry) {
+        let test_flow = define_flow(
+            &registry,
+            "testFlowNewWay",
+            |input: String, args: ActionFnArg<()>| async move {
+                let context_str = if let Some(ctx) = args.context {
+                    serde_json::to_string(&ctx.additional_context).unwrap()
+                } else {
+                    "null".to_string()
+                };
+                Ok(format!("bar {} {}", input, context_str))
+            },
+        );
+
+        let mut context_map = HashMap::new();
+        context_map.insert("user".to_string(), json!("test-user"));
+        let context = ActionContext {
+            additional_context: context_map,
+            ..Default::default()
+        };
+
+        let result = run_test_flow(
+            &test_flow,
+            "foo".to_string(),
+            Some(context),
+            CancellationToken::new(),
+        )
+        .await
+        .unwrap();
+
+        assert_eq!(result, r#"bar foo {"user":"test-user"}"#);
+    }
+
+    #[rstest]
+    #[tokio::test]
+    /// 'should inherit context from the parent'
+    async fn test_inherit_context_from_parent(registry: Registry) {
+        let child_flow = define_flow(
+            &registry,
+            "childFlow",
+            |input: String, args: ActionFnArg<()>| async move {
+                let context_str = if let Some(ctx) = args.context {
+                    serde_json::to_string(&ctx.additional_context).unwrap()
+                } else {
+                    "null".to_string()
+                };
+                Ok(format!("bar {} {}", input, context_str))
+            },
+        );
+
+        let parent_flow: Flow<String, String, ()> = define_flow(
+            &registry,
+            "parentFlow",
+            move |input: String, _: ActionFnArg<()>| {
+                let child_flow = child_flow.clone();
+                async move {
+                    let inherited_context = get_context();
+                    run_test_flow(
+                        &child_flow,
+                        input,
+                        inherited_context,
+                        CancellationToken::new(),
+                    )
+                    .await
+                }
+            },
+        );
+
+        let mut context_map = HashMap::new();
+        context_map.insert("user".to_string(), json!("test-user"));
+        let test_context = ActionContext {
+            additional_context: context_map,
+            ..Default::default()
+        };
+
+        let result = run_with_context(test_context, async {
+            run_test_flow(
+                &parent_flow,
+                "foo".to_string(),
+                None,
+                CancellationToken::new(),
+            )
+            .await
+            .unwrap()
+        })
+        .await;
+
+        assert_eq!(result, r#"bar foo {"user":"test-user"}"#);
+    }
+
+    #[derive(Serialize, Deserialize, JsonSchema, Debug, PartialEq, Clone)]
+    struct StreamCount {
+        count: i32,
+    }
+
+    #[rstest]
+    #[tokio::test]
+    /// 'should streams the flow with context'
+    async fn test_streaming_the_flow_with_context(registry: Registry) {
+        let test_flow: Flow<i32, String, StreamCount> = define_flow(
+            &registry,
+            "streamingFlowWithContext",
+            |input: i32, args| async move {
+                for i in 0..input {
+                    let _ = args.chunk_sender.send(StreamCount { count: i });
+                }
+                let context_str = if let Some(ctx) = args.context {
+                    serde_json::to_string(&ctx.additional_context).unwrap()
+                } else {
+                    "null".to_string()
+                };
+                Ok(format!(
+                    "bar {} {} {}",
+                    input, args.streaming_requested, context_str
+                ))
+            },
+        );
+
+        let mut context_map = HashMap::new();
+        context_map.insert("user".to_string(), json!("test-user"));
+        let context = ActionContext {
+            additional_context: context_map,
+            ..Default::default()
+        };
+        let options = ActionRunOptions {
+            context: Some(context),
+            ..Default::default()
+        };
+
+        let streaming_response = test_flow.stream(3, Some(options));
+
+        let (chunks_result, output_result) = tokio::join!(
+            streaming_response.stream.try_collect::<Vec<_>>(),
+            streaming_response.output
+        );
+
+        let received_chunks = chunks_result.unwrap();
+        let final_output = output_result.unwrap();
+
+        assert_eq!(final_output, r#"bar 3 true {"user":"test-user"}"#);
+        assert_eq!(
+            received_chunks,
+            vec![
+                StreamCount { count: 0 },
+                StreamCount { count: 1 },
+                StreamCount { count: 2 }
+            ]
+        );
+    }
+
+    #[rstest]
+    #[tokio::test]
+    /// 'aborts flow via signal'
+    async fn test_aborts_flow_via_signal(registry: Registry) {
+        let test_flow = define_flow(
+            &registry,
+            "abortableFlow",
+            |input: String, args: ActionFnArg<()>| async move {
+                loop {
+                    if args.abort_signal.is_cancelled() {
+                        break;
+                    }
+                    sleep(Duration::from_millis(1)).await;
+                }
+                Ok(format!("done {}", input))
+            },
+        );
+
+        let cancellation_token = CancellationToken::new();
+
+        let handle = tokio::spawn({
+            let flow = test_flow.clone();
+            let token = cancellation_token.clone();
+            async move { run_test_flow(&flow, "foo".to_string(), None, token).await }
+        });
+
+        sleep(Duration::from_millis(10)).await;
+        cancellation_token.cancel();
+
+        let result = handle.await.unwrap().unwrap();
+        assert_eq!(result, "done foo");
+    }
+}
