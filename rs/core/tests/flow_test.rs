@@ -600,16 +600,20 @@ mod telemetry_test {
     // A single mutex to ensure tests run serially, as they modify global state.
     static TELEMETRY_TEST_MUTEX: Mutex<()> = Mutex::new(());
 
+    // Type aliases to simplify the complex nested types.
+    type SharedSpans = Arc<Mutex<Vec<SpanData>>>;
+    type SwappableSharedSpans = Arc<Mutex<SharedSpans>>;
+
     // The global state that our swappable exporter will use. It holds a pointer
     // to the Vec<SpanData> of the currently running test.
-    static CURRENT_SPANS: Lazy<Arc<Mutex<Arc<Mutex<Vec<SpanData>>>>>> =
+    static CURRENT_SPANS: Lazy<SwappableSharedSpans> =
         Lazy::new(|| Arc::new(Mutex::new(Arc::new(Mutex::new(Vec::new())))));
 
     // A SpanExporter that can have its destination swapped out.
     #[derive(Debug, Clone)]
     struct SwappableSpanExporter {
         // A pointer to the Arc that holds the current test's span vector.
-        spans_arc: Arc<Mutex<Arc<Mutex<Vec<SpanData>>>>>,
+        spans_arc: SwappableSharedSpans,
     }
 
     impl SpanExporter for SwappableSpanExporter {
@@ -653,7 +657,7 @@ mod telemetry_test {
         // Locks the test execution to be serial.
         _guard: MutexGuard<'static, ()>,
         // Holds the spans collected *only* for this test instance.
-        spans_for_this_test: Arc<Mutex<Vec<SpanData>>>,
+        spans_for_this_test: SharedSpans,
     }
 
     impl TestHarness {
@@ -665,7 +669,7 @@ mod telemetry_test {
             init_test_telemetry();
 
             // Create a new clean slate for this test's spans.
-            let spans_for_this_test = Arc::new(Mutex::new(Vec::new()));
+            let spans_for_this_test: SharedSpans = Arc::new(Mutex::new(Vec::new()));
 
             // Point the global exporter to this test's span vector.
             *CURRENT_SPANS.lock().unwrap() = spans_for_this_test.clone();
