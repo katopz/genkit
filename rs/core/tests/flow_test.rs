@@ -312,16 +312,16 @@ mod get_context_test {
             |input: i32, args: ActionFnArg<StreamCount>| async move {
                 if args.streaming_requested {
                     for i in 0..input {
-                        // Send stream chunks back to the caller.
                         let _ = args.chunk_sender.send(StreamCount { count: i });
                     }
                 }
 
-                let context_json = args
-                    .context
-                    .map(|c| serde_json::to_value(c).unwrap())
-                    .unwrap_or(serde_json::Value::Null);
-                let context_str = serde_json::to_string(&context_json).unwrap();
+                // Correctly serialize only the additional_context
+                let context_str = if let Some(ctx) = args.context {
+                    serde_json::to_string(&ctx.additional_context).unwrap()
+                } else {
+                    "null".to_string()
+                };
 
                 Ok(format!(
                     "bar {} {} {}",
@@ -330,7 +330,6 @@ mod get_context_test {
             },
         );
 
-        // Create the context.
         let mut context_map = HashMap::new();
         context_map.insert("user".to_string(), json!("test-user"));
         let context = ActionContext {
@@ -338,7 +337,6 @@ mod get_context_test {
             ..Default::default()
         };
 
-        // Use the `.stream()` method to get a streaming response.
         let streaming_response: StreamingResponse<String, StreamCount> = test_flow.stream(
             3,
             Some(ActionRunOptions {
@@ -347,17 +345,17 @@ mod get_context_test {
             }),
         );
 
-        // Collect all chunks from the stream.
-        let received_chunks: Vec<StreamCount> =
-            streaming_response.stream.try_collect().await.unwrap();
-
-        // Await the final output of the flow.
-        let final_output = streaming_response.output.await.unwrap();
-
-        assert_eq!(
-            final_output,
-            r#"bar 3 true {"auth":null,"user":"test-user"}"#
+        // Use tokio::join! to run both futures concurrently, preventing deadlock.
+        let (chunks_result, output_result) = tokio::join!(
+            streaming_response.stream.try_collect::<Vec<_>>(),
+            streaming_response.output
         );
+
+        let received_chunks = chunks_result.unwrap();
+        let final_output = output_result.unwrap();
+
+        // Assertions
+        assert_eq!(final_output, r#"bar 3 true {"user":"test-user"}"#);
         assert_eq!(
             received_chunks,
             vec![
