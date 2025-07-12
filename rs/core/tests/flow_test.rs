@@ -217,6 +217,7 @@ mod run_flow_test {
         // `Deserialize` and `JsonSchema` are required for validation to work.
         // `Clone` is needed for the `ErasedAction` trait bounds.
         #[derive(JsonSchema, Deserialize, Clone)]
+        #[allow(dead_code)]
         struct ValidatingInput {
             foo: String,
             bar: i32,
