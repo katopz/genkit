@@ -126,6 +126,31 @@ mod run_flow_test {
         // The assertion checks the `metadata` field within the action's metadata.
         assert_eq!(flow_mut.meta.metadata, expected_metadata);
     }
-    
-    
+
+    #[rstest]
+    #[tokio::test]
+    /// 'should run simple sync flow'
+    async fn test_run_simple_sync_flow(registry: Registry) {
+        // This flow is "sync" in the sense that its logic doesn't use `.await`.
+        // The `async move` block is required to match the expected function signature,
+        // which must return a Future.
+        let test_flow = define_flow(&registry, "testFlow", |input: TestInput, _| async move {
+            // The logic here is executed synchronously.
+            Ok(TestOutput {
+                message: format!("bar {}", input.name),
+            })
+        });
+
+        let result = run_test_flow(
+            &test_flow,
+            TestInput {
+                name: "foo".to_string(),
+            },
+            None,
+        )
+        .await
+        .unwrap();
+
+        assert_eq!(result.message, "bar foo");
+    }
 }
