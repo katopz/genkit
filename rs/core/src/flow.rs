@@ -27,6 +27,8 @@ use crate::tracing as genkit_tracing;
 
 use schemars::JsonSchema;
 use serde::{de::DeserializeOwned, Serialize};
+use serde_json::Value;
+use std::collections::HashMap;
 use std::future::Future;
 use std::sync::Arc;
 
@@ -96,16 +98,17 @@ where
     Fut: Future<Output = Result<T>> + Send,
     T: Serialize + Send + 'static,
 {
+    let mut attrs = HashMap::new();
+    attrs.insert(
+        "genkit:type".to_string(),
+        Value::String("flowStep".to_string()),
+    );
     // This function wraps the core tracing logic to provide a simple API for
     // defining instrumented steps. The `map` at the end unwraps the
     // (T, TelemetryInfo) tuple from `in_new_span`, as `run`'s public API
     // only exposes the business logic result `T`.
-    genkit_tracing::in_new_span(name.to_string(), None, |_trace_context| async {
-        // TODO: Add attributes to the span, e.g., genkit:type = "flowStep".
-        // This would require access to the current OpenTelemetry span.
-        let result = func().await;
-        // TODO: Record the output of the step as a span attribute.
-        result
+    genkit_tracing::in_new_span(name.to_string(), Some(attrs), |_trace_context| async {
+        func().await
     })
     .await
     .map(|(result, _telemetry)| result)
