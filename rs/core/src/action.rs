@@ -27,7 +27,7 @@ use crate::schema::{parse_schema, ProvidedSchema};
 use crate::status::StatusCode;
 
 use crate::schema::schema_for;
-use crate::tracing::{self, TraceContext};
+use crate::tracing::{self, TraceContext, TRACE_PATH};
 use async_trait::async_trait;
 use futures::{Future, Stream, StreamExt};
 use schemars::{JsonSchema, Schema};
@@ -45,6 +45,7 @@ pub struct ActionMetadata {
     pub action_type: ActionType,
     pub name: String,
     pub description: Option<String>,
+    pub subtype: Option<String>,
     pub input_schema: Option<Schema>,
     pub output_schema: Option<Schema>,
     pub stream_schema: Option<Schema>,
@@ -214,48 +215,49 @@ where
                 .collect()
         });
 
-        let (result, telemetry) = tracing::in_new_span(
-            self.meta.name.clone(),
-            telemetry_labels,
-            |trace_context| async {
-                let (chunk_tx, mut chunk_rx) = channel();
+        let (result, telemetry) =
+            tracing::in_new_span(self.meta.name.clone(), telemetry_labels, |trace_context| {
+                TRACE_PATH.scope(Vec::new(), async {
+                    let (chunk_tx, mut chunk_rx) = channel();
 
-                let on_chunk_task = if let Some(on_chunk) = opts.on_chunk {
-                    let task = tokio::spawn(async move {
-                        while let Some(chunk_result) = chunk_rx.next().await {
-                            on_chunk(chunk_result.map_err(|e| Error::new_internal(e.to_string())));
-                        }
-                    });
-                    Some(task)
-                } else {
-                    None
-                };
+                    let on_chunk_task = if let Some(on_chunk) = opts.on_chunk {
+                        let task = tokio::spawn(async move {
+                            while let Some(chunk_result) = chunk_rx.next().await {
+                                on_chunk(
+                                    chunk_result.map_err(|e| Error::new_internal(e.to_string())),
+                                );
+                            }
+                        });
+                        Some(task)
+                    } else {
+                        None
+                    };
 
-                let args = ActionFnArg {
-                    streaming_requested: on_chunk_task.is_some(),
-                    chunk_sender: chunk_tx.clone(),
-                    context: opts.context.clone(),
-                    trace: trace_context,
-                    abort_signal: opts.abort_signal.take().unwrap_or_default(),
-                };
+                    let args = ActionFnArg {
+                        streaming_requested: on_chunk_task.is_some(),
+                        chunk_sender: chunk_tx.clone(),
+                        context: opts.context.clone(),
+                        trace: trace_context,
+                        abort_signal: opts.abort_signal.take().unwrap_or_default(),
+                    };
 
-                let fut = self.func.run(input, args);
+                    let fut = self.func.run(input, args);
 
-                let run_result = if let Some(ctx) = opts.context {
-                    context::run_with_context(ctx, fut).await
-                } else {
-                    fut.await
-                };
+                    let run_result = if let Some(ctx) = opts.context {
+                        context::run_with_context(ctx, fut).await
+                    } else {
+                        fut.await
+                    };
 
-                chunk_tx.close();
-                if let Some(task) = on_chunk_task {
-                    task.await.unwrap();
-                }
+                    chunk_tx.close();
+                    if let Some(task) = on_chunk_task {
+                        task.await.unwrap();
+                    }
 
-                run_result
-            },
-        )
-        .await?;
+                    run_result
+                })
+            })
+            .await?;
 
         // TODO: Add output schema validation.
 
@@ -360,6 +362,11 @@ where
 
     /// Finalizes the build and creates the `Action` struct.
     pub fn build(self) -> Action<I, O, S> {
+        let subtype = match self.action_type {
+            ActionType::Flow => Some("flow".to_string()),
+            ActionType::Tool => Some("tool".to_string()),
+            _ => None,
+        };
         let meta = Arc::new(ActionMetadata {
             action_type: self.action_type,
             name: self.name,
@@ -368,6 +375,7 @@ where
             output_schema: Some(schema_for::<O>()),
             stream_schema: Some(schema_for::<S>()),
             metadata: self.metadata.unwrap_or_default(),
+            subtype,
         });
 
         Action {

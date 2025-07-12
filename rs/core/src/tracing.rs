@@ -25,6 +25,11 @@ pub mod types;
 // Re-export key types and functions for the public API.
 pub use self::instrumentation::in_new_span;
 
+tokio::task_local! {
+    /// Task-local storage for the current trace path.
+    pub static TRACE_PATH: Vec<String>;
+}
+
 use crate::error::Result;
 use crate::telemetry::TelemetryConfig;
 use crate::utils::is_dev_env;

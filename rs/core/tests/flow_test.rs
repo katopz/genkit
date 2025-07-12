@@ -580,3 +580,260 @@ mod context_test {
         assert_eq!(result, "done foo");
     }
 }
+
+#[cfg(test)]
+/// 'telemetry'
+mod telemetry_test {
+    use super::*;
+    use genkit_core::{action::define_action, registry::ActionType, telemetry::TelemetryConfig};
+    use once_cell::sync::Lazy;
+    use opentelemetry::Value as OTelValue;
+    use opentelemetry_sdk::{
+        error::{OTelSdkError, OTelSdkResult},
+        trace::{self, SpanData, SpanExporter, SpanProcessor},
+    };
+    use serde_json::Value as JsonValue;
+    use std::sync::{Arc, Mutex};
+
+    // Test setup
+    #[derive(Debug, Clone)]
+    struct TestSpanExporter {
+        spans: Arc<Mutex<Vec<SpanData>>>,
+    }
+    impl SpanExporter for TestSpanExporter {
+        fn export(
+            &self,
+            batch: Vec<SpanData>,
+        ) -> impl futures::Future<Output = std::result::Result<(), OTelSdkError>> + std::marker::Send
+        {
+            self.spans.lock().unwrap().extend(batch);
+            // The future now correctly resolves to the required Result type.
+            Box::pin(async { Ok(()) })
+        }
+
+        fn shutdown(&mut self) -> OTelSdkResult {
+            Ok(())
+        }
+    }
+    static TEST_TELEMETRY: Lazy<Arc<Mutex<Vec<SpanData>>>> = Lazy::new(|| {
+        let exported_spans = Arc::new(Mutex::new(Vec::new()));
+        let exporter = Box::new(TestSpanExporter {
+            spans: exported_spans.clone(),
+        });
+        let processor: Box<dyn SpanProcessor> =
+            Box::new(trace::SimpleSpanProcessor::new(*exporter));
+        genkit_core::tracing::enable_telemetry(TelemetryConfig {
+            span_processors: vec![processor],
+            ..Default::default()
+        })
+        .unwrap();
+        exported_spans
+    });
+    fn clear_spans() {
+        TEST_TELEMETRY.lock().unwrap().clear();
+    }
+    fn get_spans() -> Vec<SpanData> {
+        TEST_TELEMETRY.lock().unwrap().clone()
+    }
+
+    fn attributes_to_json_value(attrs: &[opentelemetry::KeyValue]) -> JsonValue {
+        let map: serde_json::Map<String, JsonValue> = attrs
+            .iter()
+            .map(|kv| {
+                let value = match &kv.value {
+                    OTelValue::String(s) => JsonValue::String(s.to_string()),
+                    OTelValue::Bool(b) => JsonValue::Bool(*b),
+                    OTelValue::I64(i) => JsonValue::Number(serde_json::Number::from(*i)),
+                    OTelValue::F64(f) => serde_json::Number::from_f64(*f)
+                        .map(JsonValue::Number)
+                        .unwrap_or(JsonValue::Null),
+                    other => JsonValue::String(other.to_string()),
+                };
+                (kv.key.to_string(), value)
+            })
+            .collect();
+        JsonValue::Object(map)
+    }
+
+    fn create_test_flow(registry: &Registry) -> Flow<String, String, ()> {
+        define_flow(
+            registry,
+            "testFlow",
+            |input: String, _: ActionFnArg<()>| async move { Ok(format!("bar {}", input)) },
+        )
+    }
+
+    #[rstest]
+    #[tokio::test]
+    /// 'should create a trace'
+    async fn test_create_a_trace(registry: Registry) {
+        clear_spans();
+        let test_flow = create_test_flow(&registry);
+        let mut labels = HashMap::new();
+        labels.insert("custom".to_string(), "label".to_string());
+        let options = ActionRunOptions {
+            telemetry_labels: Some(labels),
+            ..Default::default()
+        };
+
+        let result = test_flow
+            .run("foo".to_string(), Some(options))
+            .await
+            .unwrap();
+        assert_eq!(result.result, "bar foo");
+
+        let spans = get_spans();
+        assert_eq!(spans.len(), 1);
+        let span = &spans[0];
+        assert_eq!(span.name.as_ref(), "testFlow");
+
+        let expected_attrs = json!({
+            "genkit:input": "\"foo\"",
+            "genkit:isRoot": true,
+            "genkit:metadata.subtype": "flow",
+            "genkit:name": "testFlow",
+            "genkit:output": "\"bar foo\"",
+            "genkit:path": "/{testFlow,t:flow,s:flow}",
+            "genkit:state": "success",
+            "genkit:type": "flow",
+            "custom": "label"
+        });
+        assert_eq!(attributes_to_json_value(&span.attributes), expected_attrs);
+    }
+
+    #[rstest]
+    #[tokio::test]
+    /// 'should create a trace when streaming'
+    async fn test_create_a_trace_when_streaming(registry: Registry) {
+        clear_spans();
+        let test_flow = create_test_flow(&registry);
+        let mut labels = HashMap::new();
+        labels.insert("custom".to_string(), "label".to_string());
+        let context = ActionContext {
+            ..Default::default()
+        };
+        let options = ActionRunOptions {
+            telemetry_labels: Some(labels),
+            context: Some(context),
+            ..Default::default()
+        };
+
+        let response = test_flow.stream("foo".to_string(), Some(options));
+        let result = response.output.await.unwrap();
+        assert_eq!(result, "bar foo");
+
+        let spans = get_spans();
+        assert_eq!(spans.len(), 1);
+        let span = &spans[0];
+        assert_eq!(span.name.as_ref(), "testFlow");
+
+        let expected_attrs = json!({
+            "genkit:input": "\"foo\"",
+            "genkit:isRoot": true,
+            "genkit:metadata.subtype": "flow",
+            "genkit:metadata.context": "{\"auth\":null}",
+            "genkit:name": "testFlow",
+            "genkit:output": "\"bar foo\"",
+            "genkit:path": "/{testFlow,t:flow,s:flow}",
+            "genkit:state": "success",
+            "genkit:type": "flow",
+            "custom": "label"
+        });
+        assert_eq!(attributes_to_json_value(&span.attributes), expected_attrs);
+    }
+
+    #[rstest]
+    #[tokio::test]
+    /// 'records traces of nested actions'
+    async fn test_records_traces_of_nested_actions(mut registry: Registry) {
+        clear_spans();
+        let test_action = define_action(
+            &mut registry,
+            ActionType::Tool,
+            "testAction",
+            |_: (), _: ActionFnArg<()>| async { Ok("bar".to_string()) },
+        );
+        let test_flow = define_flow(
+            &registry,
+            "testFlow",
+            move |_: String, _: ActionFnArg<()>| {
+                let test_action = test_action.clone();
+                async move {
+                    run("custom", move || async move {
+                        let res = test_action.run((), None).await?.result;
+                        Ok(format!("foo {}", res))
+                    })
+                    .await
+                }
+            },
+        );
+
+        let mut context = ActionContext::default();
+        context
+            .additional_context
+            .insert("user".to_string(), json!("pavel"));
+        let options = ActionRunOptions {
+            context: Some(context),
+            ..Default::default()
+        };
+        let result = test_flow
+            .run("foo".to_string(), Some(options))
+            .await
+            .unwrap();
+        assert_eq!(result.result, "foo bar");
+
+        let mut spans = get_spans();
+        assert_eq!(spans.len(), 3);
+        spans.sort_by_key(|s| s.start_time);
+
+        // Span 0: testAction
+        let action_span = &spans[0];
+        assert_eq!(action_span.name.as_ref(), "testAction");
+        let expected_action_attrs = json!({
+            "genkit:metadata.subtype": "tool",
+            "genkit:name": "testAction",
+            "genkit:output": "\"bar\"",
+            "genkit:path": "/{testFlow,t:flow,s:flow}/{custom,t:flowStep}/{testAction,t:tool,s:tool}",
+            "genkit:state": "success",
+            "genkit:type": "tool"
+        });
+        assert_eq!(
+            attributes_to_json_value(&action_span.attributes),
+            expected_action_attrs
+        );
+
+        // Span 1: custom
+        let custom_span = &spans[1];
+        assert_eq!(custom_span.name.as_ref(), "custom");
+        let expected_custom_attrs = json!({
+            "genkit:name": "custom",
+            "genkit:output": "\"foo bar\"",
+            "genkit:path": "/{testFlow,t:flow,s:flow}/{custom,t:flowStep}",
+            "genkit:state": "success",
+            "genkit:type": "flowStep"
+        });
+        assert_eq!(
+            attributes_to_json_value(&custom_span.attributes),
+            expected_custom_attrs
+        );
+
+        // Span 2: testFlow
+        let flow_span = &spans[2];
+        assert_eq!(flow_span.name.as_ref(), "testFlow");
+        let expected_flow_attrs = json!({
+            "genkit:input": "\"foo\"",
+            "genkit:isRoot": true,
+            "genkit:metadata.subtype": "flow",
+            "genkit:metadata.context": "{\"auth\":null,\"user\":\"pavel\"}",
+            "genkit:name": "testFlow",
+            "genkit:output": "\"foo bar\"",
+            "genkit:path": "/{testFlow,t:flow,s:flow}",
+            "genkit:state": "success",
+            "genkit:type": "flow"
+        });
+        assert_eq!(
+            attributes_to_json_value(&flow_span.attributes),
+            expected_flow_attrs
+        );
+    }
+}

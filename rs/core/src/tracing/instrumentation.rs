@@ -17,13 +17,15 @@
 //! This module provides the core functions for creating and managing trace spans.
 //! It is the Rust equivalent of `tracing/instrumentation.ts`.
 
-use super::types::{SpanMetadata, SpanState};
 use crate::action::TelemetryInfo;
 use crate::error::Result;
+use crate::tracing::TRACE_PATH;
+use opentelemetry::trace::Span;
 use opentelemetry::{
     trace::{FutureExt, Status, TraceContextExt, Tracer},
     Context, KeyValue,
 };
+use serde_json::Value;
 use std::collections::HashMap;
 use std::future::Future;
 
@@ -36,10 +38,11 @@ const TRACER_NAME: &str = "genkit-tracer";
 ///
 /// This function is the primary way to instrument code in Genkit. It creates a
 /// new span, sets it as the active span for the duration of the future, and
-/// records the outcome (success or error) and attributes.
+/// records the outcome (success or error) and attributes. It also manages the
+/// nested `genkit:path` attribute.
 pub async fn in_new_span<F, Fut, T>(
     name: String,
-    attrs: Option<HashMap<String, serde_json::Value>>,
+    attrs: Option<HashMap<String, Value>>,
     f: F,
 ) -> Result<(T, TelemetryInfo)>
 where
@@ -48,93 +51,94 @@ where
     T: Send,
 {
     let tracer = opentelemetry::global::tracer(TRACER_NAME);
-    let span = tracer.start(name); // This returns a guard that must be kept alive.
+    let mut user_attrs = attrs.unwrap_or_default();
 
-    let cx = Context::current_with_span(span);
+    // Determine path and if this is a root span by checking the TRACE_PATH task-local.
+    let (path_for_span, path_for_scope, is_root) = TRACE_PATH
+        .try_with(|parent_path| {
+            let mut new_path_segments = parent_path.clone();
 
-    let trace_context = {
-        let span_ref = cx.span(); // Get a reference to the span inside the context
-        let span_context = span_ref.span_context();
-        crate::tracing::TraceContext {
-            trace_id: span_context.trace_id().to_string(),
-            span_id: span_context.span_id().to_string(),
-        }
-    };
+            let genkit_type = user_attrs
+                .get("genkit:type")
+                .and_then(|v| v.as_str())
+                .unwrap_or("unknown");
 
-    let telemetry_info = TelemetryInfo {
-        trace_id: trace_context.trace_id.clone(),
-        span_id: trace_context.span_id.clone(),
-    };
+            let subtype_str = user_attrs
+                .get("genkit:metadata.subtype")
+                .and_then(|v| v.as_str())
+                .map(|s| format!(",s:{}", s))
+                .unwrap_or_default();
 
-    // Run the async operation within the span's context.
-    let result = f(trace_context).with_context(cx.clone()).await;
+            new_path_segments.push(format!("{{{},t:{}{}}}", name, genkit_type, subtype_str));
 
-    // Now that the future is complete, we can update the span's status before it's dropped.
-    let span = cx.span();
-    if let Some(a) = attrs {
-        span.set_attributes(a.into_iter().map(|(k, v)| KeyValue::new(k, v.to_string())));
-    }
-    match &result {
-        Ok(_) => span.set_status(Status::Ok),
-        Err(e) => {
-            span.set_status(Status::Error {
-                description: format!("{e:#?}").into(),
-            });
-            span.record_error(e);
-        }
-    }
+            let path_string = format!("/{}", new_path_segments.join("/"));
 
-    // `span` (the guard from cx.span()) goes out of scope here, and its Drop impl will call `end()`.
-    result.map(|r| (r, telemetry_info))
-}
+            (path_string, new_path_segments, parent_path.is_empty())
+        })
+        .unwrap_or_else(|_| {
+            // Fallback if TRACE_PATH is not set. This span becomes the root.
+            let genkit_type = user_attrs
+                .get("genkit:type")
+                .and_then(|v| v.as_str())
+                .unwrap_or("unknown");
+            let segment = format!("{{{},t:{}}}", name, genkit_type);
+            (format!("/{}", segment), vec![segment], true)
+        });
 
-/// Converts `SpanMetadata` into a `Vec` of OpenTelemetry `KeyValue` pairs.
-pub fn metadata_to_attributes(metadata: &SpanMetadata) -> Vec<KeyValue> {
-    let mut attributes = Vec::new();
-    attributes.push(KeyValue::new(
-        format!("{}:name", ATTR_PREFIX),
-        metadata.name.clone(),
-    ));
-    if let Some(state) = &metadata.state {
-        attributes.push(KeyValue::new(
-            format!("{}:state", ATTR_PREFIX),
-            match state {
-                SpanState::Success => "success",
-                SpanState::Error => "error",
+    TRACE_PATH
+        .scope(path_for_scope, async move {
+            // Build attributes for the span
+            user_attrs.insert("genkit:path".to_string(), Value::String(path_for_span));
+            user_attrs.insert("genkit:name".to_string(), Value::String(name.clone()));
+            if is_root {
+                user_attrs.insert("genkit:isRoot".to_string(), Value::Bool(true));
             }
-            .to_string(),
-        ));
-    }
-    if let Some(input) = &metadata.input {
-        if let Ok(json_str) = serde_json::to_string(input) {
-            attributes.push(KeyValue::new(format!("{}:input", ATTR_PREFIX), json_str));
-        }
-    }
-    if let Some(output) = &metadata.output {
-        if let Ok(json_str) = serde_json::to_string(output) {
-            attributes.push(KeyValue::new(format!("{}:output", ATTR_PREFIX), json_str));
-        }
-    }
-    if let Some(is_root) = metadata.is_root {
-        attributes.push(KeyValue::new(format!("{}:isRoot", ATTR_PREFIX), is_root));
-    }
-    if let Some(path) = &metadata.path {
-        attributes.push(KeyValue::new(format!("{}:path", ATTR_PREFIX), path.clone()));
-    }
-    if let Some(is_failure_source) = metadata.is_failure_source {
-        attributes.push(KeyValue::new(
-            format!("{}:isFailureSource", ATTR_PREFIX),
-            is_failure_source,
-        ));
-    }
-    if let Some(meta) = &metadata.metadata {
-        for (key, value) in meta {
-            attributes.push(KeyValue::new(
-                format!("{}:metadata:{}", ATTR_PREFIX, key),
-                value.clone(),
-            ));
-        }
-    }
 
-    attributes
+            // Convert serde_json::Value to opentelemetry::Value for the span attributes
+            let span_attributes: Vec<KeyValue> = user_attrs
+                .into_iter()
+                .map(|(k, v)| KeyValue::new(k, v.to_string()))
+                .collect();
+
+            let mut span = tracer.start_with_context(name, &Context::current());
+            span.set_attributes(span_attributes);
+
+            let cx = Context::current_with_span(span);
+
+            let trace_context = {
+                let span_ref = cx.span();
+                let span_context = span_ref.span_context();
+                crate::tracing::TraceContext {
+                    trace_id: span_context.trace_id().to_string(),
+                    span_id: span_context.span_id().to_string(),
+                }
+            };
+
+            let telemetry_info = TelemetryInfo {
+                trace_id: trace_context.trace_id.clone(),
+                span_id: trace_context.span_id.clone(),
+            };
+
+            // Run the provided async operation
+            let result = f(trace_context).with_context(cx.clone()).await;
+
+            // Finalize span based on result
+            let span = cx.span();
+            match &result {
+                Ok(_) => {
+                    span.set_status(Status::Ok);
+                    span.set_attribute(KeyValue::new("genkit:state", "success"));
+                }
+                Err(e) => {
+                    span.set_status(Status::Error {
+                        description: e.to_string().into(),
+                    });
+                    span.record_error(e);
+                    span.set_attribute(KeyValue::new("genkit:state", "error"));
+                }
+            }
+
+            result.map(|r| (r, telemetry_info))
+        })
+        .await
 }
