@@ -259,7 +259,7 @@ async fn test_prompt_logic(#[case] case: Box<TestCase>) {
             .unwrap();
             let session_arc = std::sync::Arc::new(session);
             session_arc
-                .run(async move { p_clone.generate(input_clone, options_clone).await })
+                .run(move || async move { p_clone.generate(input_clone, options_clone).await })
                 .await
         } else {
             p_clone.generate(input_clone, options_clone).await
