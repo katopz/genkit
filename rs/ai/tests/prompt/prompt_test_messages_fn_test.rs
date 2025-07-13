@@ -63,7 +63,7 @@ async fn test_renders_messages_from_function() -> Result<()> {
         },
     );
 
-    test_runner(TestCase {
+    test_runner(Box::new(TestCase {
         name: "renders messages from function".to_string(),
         config: PromptConfig {
             name: "prompt1".to_string(),
@@ -91,7 +91,7 @@ async fn test_renders_messages_from_function() -> Result<()> {
                 { "role": "user", "content": [{ "text": "user bar" }] },
             ],
         }),
-    })
+    }))
     .await
 }
 
@@ -134,7 +134,7 @@ async fn test_renders_messages_from_function_with_context() -> Result<()> {
     let mut context_map = HashMap::new();
     context_map.insert("auth".to_string(), json!({ "email": "a@b.c" }));
 
-    test_runner(TestCase {
+    test_runner(Box::new(TestCase {
         name: "renders messages from function with context".to_string(),
         config: PromptConfig {
             name: "prompt1".to_string(),
@@ -161,6 +161,6 @@ async fn test_renders_messages_from_function_with_context() -> Result<()> {
                 { "role": "user", "content": [{ "text": "user bar, a@b.c" }] },
             ],
         }),
-    })
+    }))
     .await
 }

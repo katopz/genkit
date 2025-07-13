@@ -50,7 +50,7 @@ async fn test_renders_user_prompt_from_function() -> Result<()> {
         },
     );
 
-    test_runner(TestCase {
+    test_runner(Box::new(TestCase {
         name: "renders user prompt from function".to_string(),
         config: PromptConfig {
             name: "prompt1".to_string(),
@@ -74,7 +74,7 @@ async fn test_renders_user_prompt_from_function() -> Result<()> {
             "config": { "banana": "ripe", "temperature": 11 },
             "messages": [{ "role": "user", "content": [{ "text": "hello foo (bar)" }] }],
         }),
-    })
+    }))
     .await
 }
 
@@ -109,7 +109,7 @@ async fn test_renders_user_prompt_from_function_with_context() -> Result<()> {
     let mut context_map = HashMap::new();
     context_map.insert("auth".to_string(), json!({ "email": "a@b.c" }));
 
-    test_runner(TestCase {
+    test_runner(Box::new(TestCase {
         name: "renders user prompt from function with context".to_string(),
         config: PromptConfig {
             name: "prompt1".to_string(),
@@ -133,7 +133,7 @@ async fn test_renders_user_prompt_from_function_with_context() -> Result<()> {
             "config": { "banana": "ripe", "temperature": 11 },
             "messages": [{ "role": "user", "content": [{ "text": "hello foo (bar, a@b.c)" }] }],
         }),
-    })
+    }))
     .await
 }
 
@@ -168,7 +168,7 @@ async fn test_renders_user_prompt_from_function_with_context_as_render_option() 
     let mut context_map = HashMap::new();
     context_map.insert("auth".to_string(), json!({ "email": "a@b.c" }));
 
-    test_runner(TestCase {
+    test_runner(Box::new(TestCase {
         name: "renders user prompt from function with context as render option".to_string(),
         config: PromptConfig {
             name: "prompt1".to_string(),
@@ -194,6 +194,6 @@ async fn test_renders_user_prompt_from_function_with_context_as_render_option() 
             "context": { "auth": { "email": "a@b.c" } },
             "messages": [{ "role": "user", "content": [{ "text": "hello foo (bar, a@b.c)" }] }],
         }),
-    })
+    }))
     .await
 }

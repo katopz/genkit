@@ -56,7 +56,7 @@ async fn test_docs_from_function() -> Result<()> {
 
     let want_text = "Echo: hello foo (bar),\n\nUse the following information to complete your task:\n\n- [0]: doc foo\n- [1]: doc bar\n\n; config: {\"banana\":\"ripe\",\"temperature\":11}".to_string();
 
-    test_runner(TestCase {
+    test_runner(Box::new(TestCase {
         name: "includes docs from function".to_string(),
         config: PromptConfig {
             name: "prompt1".to_string(),
@@ -84,6 +84,6 @@ async fn test_docs_from_function() -> Result<()> {
             ]
         }),
         context: None,
-    })
+    }))
     .await
 }

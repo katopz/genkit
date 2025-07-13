@@ -239,7 +239,7 @@ struct TestCase {
         }
     })).unwrap())]
 #[tokio::test]
-async fn test_prompt_logic(#[case] case: TestCase) {
+async fn test_prompt_logic(#[case] case: Box<TestCase>) {
     let (registry, _last_request) = registry_with_echo_model_and_tool().await;
     let p = define_prompt(&registry, case.prompt);
 
@@ -248,7 +248,7 @@ async fn test_prompt_logic(#[case] case: TestCase) {
     let options_clone = case.input_options.clone();
 
     let execution_fut = async {
-        if let Some(state) = case.state {
+        if let Some(state) = case.state.clone() {
             let session = Session::new(
                 registry.clone(),
                 None,

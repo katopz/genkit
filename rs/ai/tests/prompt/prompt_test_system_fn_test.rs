@@ -50,7 +50,7 @@ async fn test_renders_system_prompt_from_a_function() -> Result<()> {
         },
     );
 
-    test_runner(TestCase {
+    test_runner(Box::new(TestCase {
         name: "renders system prompt from a function".to_string(),
         config: PromptConfig {
             name: "prompt1".to_string(),
@@ -75,7 +75,7 @@ async fn test_renders_system_prompt_from_a_function() -> Result<()> {
             "config": { "banana": "ripe", "temperature": 11 },
             "messages": [{ "role": "system", "content": [{ "text": "hello foo (bar)" }] }],
         }),
-    })
+    }))
     .await
 }
 
@@ -110,7 +110,7 @@ async fn test_renders_system_prompt_from_a_function_with_context() -> Result<()>
     let mut context_map = HashMap::new();
     context_map.insert("auth".to_string(), json!({ "email": "a@b.c" }));
 
-    test_runner(TestCase {
+    test_runner(Box::new(TestCase {
         name: "renders system prompt from a function with context".to_string(),
         config: PromptConfig {
             name: "prompt1".to_string(),
@@ -135,7 +135,7 @@ async fn test_renders_system_prompt_from_a_function_with_context() -> Result<()>
             "config": { "banana": "ripe", "temperature": 11 },
             "messages": [{ "role": "system", "content": [{ "text": "hello foo (bar, a@b.c)" }] }],
         }),
-    })
+    }))
     .await
 }
 
@@ -170,7 +170,7 @@ async fn test_renders_system_prompt_from_a_function_with_context_as_render_optio
     let mut context_map = HashMap::new();
     context_map.insert("auth".to_string(), json!({ "email": "a@b.c" }));
 
-    test_runner(TestCase {
+    test_runner(Box::new(TestCase {
         name: "renders system prompt from a function with context as render option".to_string(),
         config: PromptConfig {
             name: "prompt1".to_string(),
@@ -199,6 +199,6 @@ async fn test_renders_system_prompt_from_a_function_with_context_as_render_optio
                 { "role": "system", "content": [{ "text": "hello foo (bar, a@b.c)" }] },
             ],
         }),
-    })
+    }))
     .await
 }
