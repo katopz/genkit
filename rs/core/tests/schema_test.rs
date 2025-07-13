@@ -221,3 +221,97 @@ mod validate_test {
         }
     }
 }
+
+#[cfg(test)]
+/// 'parse()'
+mod parse_test {
+    use super::*;
+
+    #[derive(JsonSchema, Deserialize, Debug, PartialEq)]
+    struct ParseSchema {
+        foo: bool,
+    }
+
+    #[test]
+    /// 'should return a ValidationError for invalid schema'
+    fn test_returns_validation_error_for_invalid_schema() {
+        let data = json!({ "foo": 123 });
+        let schema = ProvidedSchema::FromType(schema_for::<ParseSchema>());
+        let result: Result<ParseSchema> = parse_schema(data, schema);
+
+        assert!(result.is_err(), "Expected parse_schema to return an error.");
+
+        let err = result.unwrap_err();
+        match err {
+            Error::Validation(_) => {
+                // Correct error type, test passes.
+            }
+            _ => panic!("Expected Error::Validation, but got a different error type."),
+        }
+    }
+
+    #[test]
+    /// 'should return the data if valid'
+    fn test_returns_data_if_valid() {
+        let data = json!({ "foo": true });
+        let schema = ProvidedSchema::FromType(schema_for::<ParseSchema>());
+        let result: Result<ParseSchema> = parse_schema(data, schema);
+
+        assert!(
+            result.is_ok(),
+            "Expected parse_schema to succeed, but it failed: {:?}",
+            result.err()
+        );
+
+        assert_eq!(
+            result.unwrap(),
+            ParseSchema { foo: true },
+            "The parsed data did not match the expected data."
+        );
+    }
+}
+
+#[cfg(test)]
+/// 'toJsonSchema'
+mod to_json_schema_test {
+    use super::*;
+    use schemars::schema_for;
+    use serde_json::{json, to_value, Value};
+
+    #[test]
+    /// 'converts struct to JSON schema'
+    fn test_converts_struct_to_json_schema() {
+        // The Rust equivalent of a Zod schema is a struct that derives `JsonSchema`.
+        #[derive(JsonSchema)]
+        #[allow(unused)]
+        struct MySchema {
+            output: String,
+        }
+
+        // `schema_for!` is the equivalent of the `toJsonSchema` function.
+        let generated_schema = schema_for!(MySchema);
+        let generated_json: Value =
+            to_value(generated_schema).expect("Failed to serialize generated schema to JSON");
+
+        // The expected schema now includes the `$schema` and `title` fields that
+        // `schemars` adds by default.
+        let expected_json = json!({
+          "$schema": "https://json-schema.org/draft/2020-12/schema",
+          "title": "MySchema",
+          "type": "object",
+          "properties": {
+            "output": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "output"
+          ]
+        });
+
+        assert_eq!(
+            generated_json, expected_json,
+            "The generated schema does not match the expected JSON schema."
+        );
+    }
+}
