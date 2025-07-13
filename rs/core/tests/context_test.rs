@@ -16,11 +16,13 @@
 //!
 //! Integration tests for the context providers, ported from `context_test.ts`.
 
-use genkit_core::context::{ApiKeyPolicy, ApiKeyProvider, ContextProvider, RequestData};
-use genkit_core::error::Error;
+use genkit_core::context::{api_key, ActionContext, ApiKeyPolicy, ContextProvider, RequestData};
+use genkit_core::error::{Error, Result};
 use genkit_core::status::StatusCode;
+use rstest::*;
 use serde_json::{json, Value};
 use std::collections::HashMap;
+use std::sync::Arc;
 
 /// Helper function to create `RequestData` for testing purposes.
 fn test_request(key: Option<&str>) -> RequestData {
@@ -37,60 +39,123 @@ fn test_request(key: Option<&str>) -> RequestData {
 }
 
 #[cfg(test)]
+/// 'apiKey'
 mod test {
-    use crate::*;
+    use super::*;
+
+    #[rstest]
     #[tokio::test]
-    async fn test_api_key_extractor_only() {
-        let provider = ApiKeyProvider::new(ApiKeyPolicy::ExtractOnly);
+    /// 'can merely save api keys'
+    async fn can_merely_save_api_keys() {
+        let provider = api_key(ApiKeyPolicy::ExtractOnly);
 
-        // Test case: No key provided in the request.
-        let context_no_key = provider.provide(&test_request(None)).await.unwrap();
-        let expected_auth_no_key = json!({ "apiKey": null });
-        assert_eq!(context_no_key.auth.unwrap(), expected_auth_no_key);
+        // No key provided
+        let context = provider.provide(&test_request(None)).await.unwrap();
+        assert_eq!(
+            context,
+            ActionContext {
+                auth: Some(json!({"apiKey": null})),
+                ..Default::default()
+            }
+        );
 
-        // Test case: A key is provided in the request.
-        let context_with_key = provider
-            .provide(&test_request(Some("my-secret-key")))
-            .await
-            .unwrap();
-        let expected_auth_with_key = json!({ "apiKey": "my-secret-key" });
-        assert_eq!(context_with_key.auth.unwrap(), expected_auth_with_key);
+        // Key provided
+        let context_with_key = provider.provide(&test_request(Some("key"))).await.unwrap();
+        assert_eq!(
+            context_with_key,
+            ActionContext {
+                auth: Some(json!({"apiKey": "key"})),
+                ..Default::default()
+            }
+        );
     }
 
+    #[rstest]
     #[tokio::test]
-    async fn test_api_key_validator_require() {
-        let required_key = "my-secret-key".to_string();
-        let provider = ApiKeyProvider::new(ApiKeyPolicy::Require(required_key.clone()));
+    /// 'can expect specific keys'
+    async fn can_expect_specific_keys() {
+        let provider = api_key(ApiKeyPolicy::Require("key".to_string()));
 
-        // Test case: Correct key is provided.
-        let context_correct = provider
-            .provide(&test_request(Some(&required_key)))
-            .await
-            .unwrap();
-        let expected_auth_correct = json!({ "apiKey": required_key });
-        assert_eq!(context_correct.auth.unwrap(), expected_auth_correct);
+        // Correct key
+        let context = provider.provide(&test_request(Some("key"))).await.unwrap();
+        assert_eq!(
+            context,
+            ActionContext {
+                auth: Some(json!({"apiKey": "key"})),
+                ..Default::default()
+            }
+        );
 
-        // Test case: An incorrect key is provided.
-        let err_wrong_key = provider
+        // Wrong key
+        let err = provider
             .provide(&test_request(Some("wrong-key")))
             .await
             .unwrap_err();
-        match err_wrong_key {
+        match err {
             Error::UserFacing(status) => {
                 assert_eq!(status.code, StatusCode::PermissionDenied);
                 assert_eq!(status.message, "Permission Denied");
             }
-            _ => panic!("Expected a UserFacing error for wrong key"),
+            other => panic!(
+                "Expected UserFacing PermissionDenied error, got {:?}",
+                other
+            ),
         }
 
-        // Test case: No key is provided.
+        // No key
         let err_no_key = provider.provide(&test_request(None)).await.unwrap_err();
         match err_no_key {
             Error::UserFacing(status) => {
                 assert_eq!(status.code, StatusCode::Unauthenticated);
                 assert_eq!(status.message, "Unauthenticated");
             }
-            _ => panic!("Expected a UserFacing error for no key"),
+            other => panic!("Expected UserFacing Unauthenticated error, got {:?}", other),
         }
+    }
+
+    #[rstest]
+    #[tokio::test]
+    /// 'can use a policy function'
+    async fn can_use_a_policy_function() {
+        // Test with a key provided
+        let policy_with_key = ApiKeyPolicy::Custom(Arc::new(|context: &ActionContext| {
+            let expected_context = ActionContext {
+                auth: Some(json!({"apiKey": "key"})),
+                ..Default::default()
+            };
+            assert_eq!(context, &expected_context);
+            Ok(())
+        }));
+
+        let provider_with_key = api_key(policy_with_key);
+        // The policy function just asserts; if it doesn't panic or error, the test passes for this part.
+        let result = provider_with_key
+            .provide(&test_request(Some("key")))
+            .await
+            .unwrap();
+        // We can also assert the provider returns the correct context.
+        assert_eq!(
+            result.auth,
+            Some(json!({
+                "apiKey": "key"
+            }))
+        );
+
+        // Test without a key
+        let policy_without_key = ApiKeyPolicy::Custom(Arc::new(|context: &ActionContext| {
+            let expected_context = ActionContext {
+                auth: Some(json!({"apiKey": null})),
+                ..Default::default()
+            };
+            assert_eq!(context, &expected_context);
+            Ok(())
+        }));
+
+        let provider_without_key = api_key(policy_without_key);
+        let result_no_key = provider_without_key
+            .provide(&test_request(None))
+            .await
+            .unwrap();
+        assert_eq!(result_no_key.auth, Some(json!({"apiKey": null})));
     }
 }

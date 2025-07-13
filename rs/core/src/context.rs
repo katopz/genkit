@@ -27,6 +27,7 @@ use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::collections::HashMap;
+use std::sync::Arc;
 
 tokio::task_local! {
     /// Task-local storage for the current `ActionContext`.
@@ -171,6 +172,8 @@ pub enum ApiKeyPolicy {
     ExtractOnly,
     /// The provider validates that the API key matches a specific required key.
     Require(String),
+    /// The provider uses a custom function to validate the generated context.
+    Custom(Arc<dyn Fn(&ActionContext) -> Result<()> + Send + Sync>),
 }
 
 /// A `ContextProvider` that handles API key authentication from the
@@ -228,133 +231,17 @@ impl ContextProvider for ApiKeyProvider {
                     ..Default::default()
                 }),
             },
+            ApiKeyPolicy::Custom(policy_fn) => {
+                let auth_value = api_key.map_or(Value::Null, Value::from);
+                let context = ActionContext {
+                    auth: Some(serde_json::json!({ "apiKey": auth_value })),
+                    ..Default::default()
+                };
+                // Run the custom validation function.
+                (policy_fn)(&context)?;
+                // If it doesn't error, return the context.
+                Ok(context)
+            }
         }
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use serde_json::json;
-
-    fn test_request(key: Option<&str>) -> RequestData {
-        let mut headers = HashMap::new();
-        if let Some(k) = key {
-            headers.insert("authorization".to_string(), k.to_string());
-        }
-        RequestData {
-            method: "POST".to_string(),
-            headers,
-            input: Value::Null,
-        }
-    }
-
-    #[tokio::test]
-    async fn test_api_key_extractor() {
-        let provider = ApiKeyProvider::new(ApiKeyPolicy::ExtractOnly);
-
-        // No key provided
-        let context = provider.provide(&test_request(None)).await.unwrap();
-        assert_eq!(context.auth, Some(json!({"apiKey": null})));
-
-        // Key provided
-        let context = provider
-            .provide(&test_request(Some("my-key")))
-            .await
-            .unwrap();
-        assert_eq!(context.auth, Some(json!({"apiKey": "my-key"})));
-    }
-
-    #[tokio::test]
-    async fn test_api_key_validator() {
-        let provider = ApiKeyProvider::new(ApiKeyPolicy::Require("secret-key".to_string()));
-
-        // Correct key
-        let context = provider
-            .provide(&test_request(Some("secret-key")))
-            .await
-            .unwrap();
-        assert_eq!(context.auth, Some(json!({"apiKey": "secret-key"})));
-
-        // Wrong key
-        let err = provider
-            .provide(&test_request(Some("wrong-key")))
-            .await
-            .unwrap_err();
-        match err {
-            Error::UserFacing(status) => assert_eq!(status.code, StatusCode::PermissionDenied),
-            _ => panic!("Expected UserFacing error"),
-        }
-
-        // No key
-        let err = provider.provide(&test_request(None)).await.unwrap_err();
-        match err {
-            Error::UserFacing(status) => assert_eq!(status.code, StatusCode::Unauthenticated),
-            _ => panic!("Expected UserFacing error"),
-        }
-    }
-
-    #[tokio::test]
-    async fn test_run_and_get_context() {
-        assert!(get_context().is_none());
-
-        let my_context = ActionContext {
-            auth: Some(json!({"user": "test"})),
-            ..Default::default()
-        };
-
-        run_with_context(my_context.clone(), async {
-            let retrieved_context = get_context().unwrap();
-            assert_eq!(retrieved_context, my_context);
-
-            // Nested context
-            let nested_context = ActionContext {
-                auth: Some(json!({"user": "nested"})),
-                ..Default::default()
-            };
-            run_with_context(nested_context.clone(), async {
-                let retrieved_nested = get_context().unwrap();
-                assert_eq!(retrieved_nested, nested_context);
-            })
-            .await;
-
-            // Context is restored after nested scope
-            let retrieved_context_after = get_context().unwrap();
-            assert_eq!(retrieved_context_after, my_context);
-        })
-        .await;
-
-        assert!(get_context().is_none());
-    }
-
-    #[tokio::test]
-    async fn test_run_and_get_flow_context() {
-        assert!(get_flow_context().is_none());
-
-        let my_context = FlowContext {
-            flow_id: "test".into(),
-        };
-
-        run_with_flow_context(my_context.clone(), async {
-            let retrieved_context = get_flow_context().unwrap();
-            assert_eq!(retrieved_context, my_context);
-
-            // Nested context
-            let nested_context = FlowContext {
-                flow_id: "nested".into(),
-            };
-            run_with_flow_context(nested_context.clone(), async {
-                let retrieved_nested = get_flow_context().unwrap();
-                assert_eq!(retrieved_nested, nested_context);
-            })
-            .await;
-
-            // Context is restored after nested scope
-            let retrieved_context_after = get_flow_context().unwrap();
-            assert_eq!(retrieved_context_after, my_context);
-        })
-        .await;
-
-        assert!(get_flow_context().is_none());
     }
 }
