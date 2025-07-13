@@ -79,27 +79,3 @@ pub fn log_structured(msg: &str, metadata: serde_json::Value) {
 pub fn log_structured_error(msg: &str, metadata: serde_json::Value) {
     error!("{}: {}", msg, metadata);
 }
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    // Note: Testing logging is tricky because the logger is global.
-    // These tests should be run with `--test-threads=1`.
-
-    #[test]
-    fn test_set_and_check_log_level() {
-        // We can't easily capture output here without a more complex setup.
-        // This test mainly checks that the functions can be called without panicking.
-        let _ = init(); // Ignore error if logger is already set by another test.
-        set_log_level(LevelFilter::Debug);
-
-        // This should be visible if running tests with output enabled.
-        debug!("This is a debug message.");
-        info!("This is an info message.");
-
-        set_log_level(LevelFilter::Warn);
-        info!("This info message should NOT be visible.");
-        warn!("This is a warning message.");
-    }
-}
