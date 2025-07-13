@@ -79,7 +79,7 @@ pub type MessagesResolver<I> = Arc<
 >;
 
 /// Configuration for a prompt action.
-#[derive(Default, Serialize, Deserialize, JsonSchema)]
+#[derive(Default, Serialize, Deserialize, JsonSchema, Clone)]
 #[serde(rename_all = "camelCase")]
 pub struct PromptConfig<I = Value, O = Value, C = Value> {
     pub name: String,
@@ -375,7 +375,7 @@ where
 
         // 3. Resolve docs
         let docs = if let Some(docs_fn) = &self.config.docs_fn {
-            docs_fn(input, state, resolver_context).await?
+            docs_fn(input, state, resolver_context.clone()).await?
         } else {
             self.config.docs.clone().unwrap_or_default()
         };
@@ -409,7 +409,7 @@ where
             docs: if docs.is_empty() { None } else { Some(docs) },
             config: final_config,
             output: self.config.output.clone(),
-            context: opts.as_ref().and_then(|o| o.context.clone()),
+            context: resolver_context,
             max_turns: self.config.max_turns,
             return_tool_requests: self.config.return_tool_requests,
             r#use: {
