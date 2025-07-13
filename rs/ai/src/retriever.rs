@@ -189,9 +189,9 @@ where
     Fut: Future<Output = Result<RetrieverResponse>> + Send + 'static,
 {
     let action = ActionBuilder::new(ActionType::Retriever, name.to_string(), runner).build();
-    let retriever_action = RetrieverAction(action);
+    let retriever_action = RetrieverAction(action.clone());
     registry
-        .register_action(name, retriever_action.clone())
+        .register_action(action.meta.action_type, retriever_action.clone())
         .unwrap();
     retriever_action
 }
@@ -204,9 +204,9 @@ where
     Fut: Future<Output = Result<()>> + Send + 'static,
 {
     let action = ActionBuilder::new(ActionType::Indexer, name.to_string(), runner).build();
-    let indexer_action = IndexerAction(action);
+    let indexer_action = IndexerAction(action.clone());
     registry
-        .register_action(name, indexer_action.clone())
+        .register_action(action.meta.action_type, indexer_action.clone())
         .unwrap();
     indexer_action
 }

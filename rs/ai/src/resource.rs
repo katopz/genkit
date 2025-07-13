@@ -83,9 +83,9 @@ where
 {
     let dynamic_res = dynamic_resource(opts, runner)?;
     let mut action = dynamic_res.into_action();
-    let name = action.name().to_string();
+
     action.metadata_mut().remove("dynamic");
-    registry.register_action(&name, action.clone())?;
+    registry.register_action(action.meta.action_type, action.clone())?;
     Ok(Arc::new(action))
 }
 

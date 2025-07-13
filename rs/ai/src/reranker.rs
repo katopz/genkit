@@ -149,9 +149,9 @@ where
     Fut: Future<Output = Result<RerankerResponse>> + Send + 'static,
 {
     let action = ActionBuilder::new(ActionType::Reranker, name.to_string(), runner).build();
-    let reranker_action = RerankerAction(action);
+    let reranker_action = RerankerAction(action.clone());
     registry
-        .register_action(name, reranker_action.clone())
+        .register_action(action.meta.action_type, reranker_action.clone())
         .unwrap();
     reranker_action
 }

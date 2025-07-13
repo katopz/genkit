@@ -139,9 +139,9 @@ where
     Fut: Future<Output = Result<EmbedResponse>> + Send + 'static,
 {
     let action = ActionBuilder::new(ActionType::Embedder, name.to_string(), runner).build();
-    let embedder_action = EmbedderAction(action);
+    let embedder_action = EmbedderAction(action.clone());
     registry
-        .register_action(name, embedder_action.clone())
+        .register_action(action.meta.action_type, embedder_action.clone())
         .expect("Failed to register embedder");
     embedder_action
 }

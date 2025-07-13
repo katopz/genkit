@@ -20,7 +20,6 @@
 //!
 //! In Rust, the `Registry` is designed to be thread-safe using `Arc` for shared
 //! ownership and `Mutex` for interior mutability, allowing it to be safely
-
 //! used across asynchronous tasks.
 
 /// A macro to associate a struct with a string identifier for registration purposes.
@@ -355,20 +354,29 @@ impl Registry {
     /// Registers an action with the registry.
     ///
     /// The action key is automatically generated from its type and name.
-    /// The action must be wrapped in an `Arc` to allow for shared ownership.
     pub fn register_action<A: ErasedAction + Send + Sync + 'static>(
         &self,
-        _name: &str,
+        action_type: ActionType,
         action: A,
     ) -> Result<()> {
         let action_arc: Arc<dyn ErasedAction> = Arc::new(action);
         let mut state = self.state.lock().unwrap();
         let meta = action_arc.metadata();
-        let key = format!(
-            "/{}/{}",
-            format!("{:?}", meta.action_type).to_lowercase(),
-            meta.name
-        );
+
+        if action_type != meta.action_type {
+            return Err(Error::new_internal(format!(
+                "action type ({:?}) does not match type on action ({:?})",
+                action_type, meta.action_type
+            )));
+        }
+
+        // Use serde_json to serialize the enum to respect `rename_all = "camelCase"`
+        let type_str = serde_json::to_value(action_type)?
+            .as_str()
+            .unwrap_or(&action_type.to_string())
+            .to_string();
+
+        let key = format!("/{}/{}", type_str, meta.name);
 
         if state.actions.contains_key(&key) {
             // In a production framework, you might want to log a warning here.

@@ -552,7 +552,7 @@ where
     let name_str = name.into();
     let action = ActionBuilder::new(action_type, name_str.clone(), func).build();
     registry
-        .register_action(name_str.as_str(), action.clone())
+        .register_action(action_type, action.clone())
         .expect("Failed to register action"); // Or handle error more gracefully
     action
 }

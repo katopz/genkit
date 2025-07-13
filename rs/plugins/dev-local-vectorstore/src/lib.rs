@@ -26,7 +26,12 @@ use genkit_ai::{
     },
     EmbedResponse,
 };
-use genkit_core::{error::Error, plugin::Plugin, registry::Registry, Result};
+use genkit_core::{
+    error::Error,
+    plugin::Plugin,
+    registry::{ActionType, Registry},
+    Result,
+};
 use semanticsimilarity_rs::cosine_similarity;
 use serde::{Deserialize, Serialize};
 use std::{collections::HashMap, fs, path::Path, sync::Arc};
@@ -162,7 +167,7 @@ impl Plugin for DevLocalVectorStorePlugin {
                     }
                 },
             );
-            registry.register_action(action_name, retriever_action)?;
+            registry.register_action(ActionType::Embedder, retriever_action)?;
 
             let indexer_data_path = data_path.clone();
             let indexer_embedder_action = embedder_action.clone();
@@ -204,7 +209,7 @@ impl Plugin for DevLocalVectorStorePlugin {
                     }
                 },
             );
-            registry.register_action(action_name, indexer_action)?;
+            registry.register_action(indexer_action.meta.action_type, indexer_action)?;
         }
         Ok(())
     }

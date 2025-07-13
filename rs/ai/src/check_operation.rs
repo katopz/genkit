@@ -36,7 +36,7 @@ pub async fn check_operation(
         .ok_or_else(|| Error::new_internal("Operation is missing original action key"))?;
 
     let check_action_key =
-        start_action_key.replace("/background-model/", "/checkoperation/") + "/check";
+        start_action_key.replace("/background-model/", "/checkOperation/") + "/check";
 
     println!(
         "[check_operation] Looking for check action key: {}",

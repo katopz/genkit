@@ -16,11 +16,11 @@ use genkit_ai::document::Document;
 use genkit_ai::embedder::{define_embedder, EmbedRequest, EmbedResponse, Embedding};
 use genkit_ai::generate::{generate, GenerateOptions};
 use genkit_ai::model::{
-    define_model, CandidateData, FinishReason, GenerateRequest, GenerateResponseData,
+    define_model, CandidateData, FinishReason, GenerateRequest, GenerateResponseData, Model,
 };
 use genkit_ai::retriever::{index, retrieve, CommonRetrieverOptions};
 use genkit_core::plugin::Plugin;
-use genkit_core::registry::Registry;
+use genkit_core::registry::{ActionType, Registry};
 use genkit_plugins_dev_local_vectorstore::{
     local_indexer_ref, local_retriever_ref, DevLocalVectorStorePlugin, LocalVectorStoreConfig,
 };
@@ -107,12 +107,12 @@ async fn test_dev_local_vectorstore_e2e() {
 
     let embedder_action = mock_embedder();
     registry
-        .register_action("mock-embedder", embedder_action)
+        .register_action(ActionType::Embedder, embedder_action)
         .unwrap();
 
     let model_action = mock_model();
     registry
-        .register_action("mock-model", model_action)
+        .register_action(ActionType::Model, model_action)
         .unwrap();
 
     // 2. Configure and initialize the vector store plugin.
@@ -172,7 +172,7 @@ async fn test_dev_local_vectorstore_e2e() {
     let generate_result = generate(
         &arc_registry,
         GenerateOptions::<()> {
-            model: Some(genkit_ai::model::Model::Name("mock-model".to_string())),
+            model: Some(Model::Name("mock-model".to_string())),
             prompt: Some(vec![genkit_ai::document::Part {
                 text: Some(format!(
                     "Use the provided context to answer this query: {}",

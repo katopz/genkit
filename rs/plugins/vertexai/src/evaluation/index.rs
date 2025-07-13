@@ -22,6 +22,7 @@ use super::{
 };
 use crate::common::get_derived_params;
 use async_trait::async_trait;
+use genkit::common::ActionType;
 use genkit_core::{plugin::Plugin, registry::Registry, Result};
 use std::sync::Arc;
 
@@ -49,7 +50,7 @@ impl Plugin for VertexAIEvaluationPlugin {
         let factory = EvaluatorFactory::new(params);
         let evaluators = vertex_evaluators(&factory, &self.options.evaluation.metrics);
         for evaluator in evaluators {
-            registry.register_action(self.name(), evaluator)?;
+            registry.register_action(ActionType::Evaluator, evaluator)?;
         }
         Ok(())
     }

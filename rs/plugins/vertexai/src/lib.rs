@@ -98,13 +98,13 @@ impl VertexAIPlugin {
 
             if short_name.contains("gemini") {
                 let action = define_gemini_model(short_name, &self.options);
-                registry.register_action(&format!("vertexai/{}", short_name), action)?;
+                registry.register_action(action.meta.action_type, action)?;
             } else if short_name.contains("imagen") {
                 let action = define_imagen_model(short_name, &self.options);
-                registry.register_action(&format!("vertexai/{}", short_name), action)?;
+                registry.register_action(action.meta.action_type, action)?;
             } else if SUPPORTED_EMBEDDER_MODELS.contains(&short_name) {
                 let embedder = define_vertex_ai_embedder(short_name, &self.options);
-                registry.register_action(&format!("vertexai/{}", short_name), embedder)?;
+                registry.register_action(embedder.meta.action_type, embedder)?;
             }
         }
         Ok(())

@@ -569,7 +569,7 @@ where
         .build()
     };
 
-    let _ = registry.register_action(&key_name, prompt_action);
+    let _ = registry.register_action(prompt_action.meta.action_type, prompt_action);
 
     registry.register_any(
         "prompt",

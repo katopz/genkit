@@ -43,7 +43,6 @@ use crate::GenerateResponseData;
 use futures_util::stream::Stream;
 use genkit_core::context::ActionContext;
 use genkit_core::error::{Error, Result};
-use genkit_core::registry::ErasedAction;
 use genkit_core::registry::Registry;
 use genkit_core::status::StatusCode;
 use genkit_core::tracing;
@@ -497,8 +496,9 @@ fn maybe_register_dynamic_resources<O>(registry: &mut Registry, options: &Genera
             *registry = Registry::with_parent(&parent);
             for r in resources {
                 let action = r.action().clone();
-                let name = action.name().to_string();
-                registry.register_action(&name, action).unwrap();
+                registry
+                    .register_action(action.meta.action_type, action)
+                    .unwrap();
             }
         }
     }

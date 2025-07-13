@@ -296,13 +296,10 @@ where
     .with_description(config.description)
     .build();
 
-    let tool_action = ToolAction(action);
-    println!(
-        "define_tool: registering action named `{}` of type {:?}",
-        config.name,
-        std::any::Any::type_id(&tool_action)
-    );
-    registry.register_action(&config.name, tool_action).unwrap();
+    let tool_action = ToolAction(action.clone());
+    registry
+        .register_action(action.meta.action_type, tool_action)
+        .unwrap();
 }
 
 /// A factory for producing metadata for an interrupt.
@@ -407,7 +404,7 @@ where
         );
 
         registry
-            .register_action(&self.config.name, action.clone())
+            .register_action(action.meta.action_type, action.clone())
             .unwrap();
 
         ToolArgument::from(ToolAction(action))
