@@ -391,3 +391,184 @@ async fn test_can_send_rendered_prompt_to_chat(#[future] genkit_instance: Arc<Ge
 
     assert_eq!(left_value, right_value);
 }
+
+#[rstest]
+#[tokio::test]
+/// 'initializes chat with history'
+async fn test_initializes_chat_with_history(#[future] genkit_instance: Arc<Genkit>) {
+    let genkit = genkit_instance.await;
+    let history = vec![
+        MessageData {
+            role: Role::User,
+            content: vec![Part::text("hi")],
+            ..Default::default()
+        },
+        MessageData {
+            role: Role::Model,
+            content: vec![Part::text("bye")],
+            ..Default::default()
+        },
+    ];
+
+    let mut messages_with_system = vec![MessageData {
+        role: Role::System,
+        content: vec![Part::text("system instructions")],
+        metadata: Some([("preamble".to_string(), json!(true))].into()),
+        ..Default::default()
+    }];
+    messages_with_system.extend(history.clone());
+
+    let session =
+        genkit_ai::Session::<()>::new(Arc::new(genkit.registry().clone()), None, None, None)
+            .await
+            .unwrap();
+
+    let chat = Arc::new(session)
+        .chat::<()>(Some(ChatOptions {
+            base_options: Some(genkit_ai::generate::BaseGenerateOptions {
+                model: Some(genkit::model::Model::Name("echoModel".to_string())),
+                messages: messages_with_system.clone(),
+                ..Default::default()
+            }),
+            ..Default::default()
+        }))
+        .await
+        .unwrap();
+
+    let response = chat.send("hi again").await.unwrap();
+
+    let mut expected_messages = messages_with_system;
+    expected_messages.push(MessageData {
+        role: Role::User,
+        content: vec![Part::text("hi again")],
+        ..Default::default()
+    });
+    expected_messages.push(MessageData {
+        role: Role::Model,
+        content: vec![
+            Part::text("Echo: system instructions,hi,bye,hi again"),
+            Part::text("; config: {}"),
+        ],
+        ..Default::default()
+    });
+
+    assert_eq!(response.messages().unwrap(), expected_messages);
+}
+
+#[derive(Serialize, Deserialize, JsonSchema, Debug, PartialEq, Clone, Default)]
+struct MyState {
+    name: String,
+}
+
+#[rstest]
+#[tokio::test]
+/// 'updates the preamble on fresh chat instance'
+async fn test_updates_preamble_on_fresh_chat_instance(#[future] genkit_instance: Arc<Genkit>) {
+    let genkit = genkit_instance.await;
+
+    let agent = genkit.define_prompt::<(), Value, Value>(PromptConfig {
+        name: "agent".to_string(),
+        messages: Some(vec![MessageData {
+            role: Role::System,
+            content: vec![Part::text("greet {{ @state.name }}")],
+            ..Default::default()
+        }]),
+        config: Some(json!({ "temperature": 2 })),
+        ..Default::default()
+    });
+
+    let session = genkit_ai::Session::new(
+        Arc::new(genkit.registry().clone()),
+        None, // use in-memory store
+        None, // new session id
+        Some(MyState {
+            name: "Pavel".to_string(),
+        }),
+    )
+    .await
+    .unwrap();
+    let session = Arc::new(session);
+
+    let chat = session
+        .chat(Some(ChatOptions {
+            preamble: Some(&agent),
+            base_options: Some(genkit_ai::generate::BaseGenerateOptions {
+                model: Some(genkit::model::Model::Name("echoModel".to_string())),
+                ..Default::default()
+            }),
+            ..Default::default()
+        }))
+        .await
+        .unwrap();
+
+    let response1 = chat.send("hi").await.unwrap();
+
+    let mut expected_messages1 = vec![
+        MessageData {
+            role: Role::System,
+            content: vec![Part::text("greet Pavel")],
+            metadata: Some([("preamble".to_string(), json!(true))].into()),
+            ..Default::default()
+        },
+        MessageData {
+            role: Role::User,
+            content: vec![Part::text("hi")],
+            ..Default::default()
+        },
+        MessageData {
+            role: Role::Model,
+            content: vec![
+                Part::text("Echo: greet Pavel,hi"),
+                Part::text("; config: {\"temperature\":2}"),
+            ],
+            ..Default::default()
+        },
+    ];
+    assert_eq!(response1.messages().unwrap(), expected_messages1);
+
+    session
+        .update_state(MyState {
+            name: "Michael".to_string(),
+        })
+        .await
+        .unwrap();
+
+    let fresh_chat = session
+        .chat(Some(ChatOptions {
+            preamble: Some(&agent),
+            base_options: Some(genkit_ai::generate::BaseGenerateOptions {
+                model: Some(genkit::model::Model::Name("echoModel".to_string())),
+                ..Default::default()
+            }),
+            ..Default::default()
+        }))
+        .await
+        .unwrap();
+
+    let response2 = fresh_chat.send("hi again").await.unwrap();
+
+    // The history now includes the first turn. The preamble is updated.
+    expected_messages1.push(MessageData {
+        role: Role::User,
+        content: vec![Part::text("hi again")],
+        ..Default::default()
+    });
+    expected_messages1[0] = MessageData {
+        role: Role::System,
+        content: vec![Part::text("greet Michael")],
+        metadata: Some([("preamble".to_string(), json!(true))].into()),
+        ..Default::default()
+    };
+    expected_messages1.push(MessageData {
+        role: Role::Model,
+        content: vec![
+            Part::text(
+                "Echo: greet Michael,hi,Echo: greet Pavel,hi; config: {\"temperature\":2},hi again",
+            ),
+            Part::text("; config: {\"temperature\":2}"),
+        ],
+        ..Default::default()
+    });
+
+    assert_eq!(response2.messages().unwrap(), expected_messages1);
+}
