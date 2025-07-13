@@ -21,6 +21,8 @@
 //! analogous to `AsyncLocalStorage` in Node.js.
 
 use crate::error::{Error, Result};
+// Import the new runtime context function
+use crate::runtime::run_in_action_runtime_context;
 use crate::status::StatusCode;
 use async_trait::async_trait;
 use schemars::JsonSchema;
@@ -133,12 +135,15 @@ pub trait ContextProvider: Send + Sync {
 /// Executes a future within the scope of a given `ActionContext`.
 ///
 /// Any code inside the future (and any functions it calls) can access the
-/// context using `get_context()`.
+/// context using `get_context()`. This also puts the execution into a
+/// "runtime context", which allows for lazy initialization of plugins.
 pub async fn run_with_context<F, R>(context: ActionContext, future: F) -> R
 where
     F: std::future::Future<Output = R>,
 {
-    CONTEXT.scope(context, future).await
+    CONTEXT
+        .scope(context, run_in_action_runtime_context(future))
+        .await
 }
 
 /// Gets a clone of the `ActionContext` for the current task.

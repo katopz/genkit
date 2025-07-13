@@ -16,17 +16,14 @@
 //!
 //! Integration tests for the registry, refined from the TypeScript version.
 
-// Use the standard testing framework and rstest for fixtures
-use rstest::*;
-use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::Arc;
-
-// Import necessary components from the genkit_core crate
 use async_trait::async_trait;
 use genkit_core::action::{define_action, ActionBuilder, ActionFnArg, ActionName};
 use genkit_core::error::Result;
-// Crucially, use the Plugin trait from the registry module as indicated by the compiler error
 use genkit_core::registry::{ActionType, Plugin, Registry};
+use genkit_core::runtime;
+use rstest::*;
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::Arc;
 
 /// Fixture that provides a new, empty `Registry` for each test.
 #[fixture]
@@ -316,6 +313,67 @@ mod list_resolvable_actions_test {
         assert!(actions.contains_key("/model/foo/something"));
         assert!(actions.contains_key("/model/bar/something"));
         assert!(actions.contains_key("/model/bar/sub/something"));
+    }
+
+    #[rstest]
+    #[tokio::test]
+    /// 'should allow plugin initialization from runtime context'
+    async fn should_allow_plugin_initialization_from_runtime_context(mut registry: Registry) {
+        let initialized = Arc::new(AtomicBool::new(false));
+
+        struct FooPlugin {
+            initialized: Arc<AtomicBool>,
+        }
+        #[async_trait]
+        impl Plugin for FooPlugin {
+            fn name(&self) -> &'static str {
+                "foo"
+            }
+            async fn initialize(&self, registry: &Registry) -> Result<()> {
+                define_action(
+                    registry,
+                    ActionType::Model,
+                    "foo/something",
+                    |_: (), _: ActionFnArg<()>| async { Ok(()) },
+                );
+                self.initialized.store(true, Ordering::SeqCst);
+                Ok(())
+            }
+        }
+
+        let plugin = Arc::new(FooPlugin {
+            initialized: initialized.clone(),
+        });
+        registry.register_plugin(plugin).await.unwrap();
+
+        assert!(
+            !initialized.load(Ordering::SeqCst),
+            "Plugin should not be initialized yet."
+        );
+        let action_before = registry.lookup_action("/model/foo/something").await;
+        assert!(
+            action_before.is_none(),
+            "Action should not exist before runtime lookup."
+        );
+        assert!(
+            !initialized.load(Ordering::SeqCst),
+            "Plugin should still not be initialized."
+        );
+
+        // Correctly call the function from the `runtime` module.
+        let action_after = runtime::run_in_action_runtime_context(async {
+            registry.lookup_action("/model/foo/something").await
+        })
+        .await;
+
+        assert!(
+            action_after.is_some(),
+            "Action should be found after runtime lookup."
+        );
+        assert!(
+            initialized.load(Ordering::SeqCst),
+            "Plugin initializer should have been called."
+        );
     }
 
     #[rstest]

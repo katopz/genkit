@@ -29,6 +29,7 @@ pub mod logging;
 pub mod plugin;
 pub mod reflection;
 pub mod registry;
+pub mod runtime;
 pub mod schema;
 pub mod status;
 pub mod telemetry;

@@ -44,11 +44,10 @@ macro_rules! impl_register {
 
 use crate::action::{Action, ActionMetadata, ActionRunOptions, StreamingResponse};
 use crate::error::{Error, Result};
+use crate::runtime;
 use crate::schema::{self, parse_schema, ProvidedSchema};
 use crate::status::StatusCode;
 use async_trait::async_trait;
-// #[cfg(feature = "dotprompt-private")]
-// use dotprompt::Dotprompt;
 use futures::{FutureExt, StreamExt};
 use schemars::JsonSchema;
 use serde::{de::DeserializeOwned, Deserialize, Serialize};
@@ -58,6 +57,9 @@ use std::collections::HashMap;
 use std::fmt::Debug;
 use std::sync::{Arc, Mutex};
 use strum::Display;
+
+// Re-export the Plugin trait to make it accessible via `genkit_core::registry::Plugin`
+pub use crate::plugin::Plugin;
 
 /// The type of a runnable action.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, Display)]
@@ -107,18 +109,6 @@ pub trait ErasedAction: Send + Sync {
     fn metadata(&self) -> &ActionMetadata;
     /// Provides a way to downcast to the concrete `Any` type for inspection.
     fn as_any(&self) -> &dyn Any;
-}
-
-/// A trait for Genkit plugins.
-///
-/// Plugins are the primary mechanism for extending Genkit with new capabilities,
-/// such as integrating with different model providers or services.
-#[async_trait]
-pub trait Plugin: Send + Sync {
-    /// Returns the unique name of the plugin.
-    fn name(&self) -> &'static str;
-    /// Initializes the plugin, registering any actions or other components with the registry.
-    async fn initialize(&self, registry: &Registry) -> Result<()>;
 }
 
 // A concrete implementation of `ErasedAction` is needed to store our test
@@ -221,8 +211,6 @@ where
 pub struct Registry {
     /// Using `Arc<Mutex<...>>` allows for thread-safe interior mutability.
     state: Arc<Mutex<RegistryState>>,
-    // #[cfg(feature = "dotprompt-private")]
-    // pub dotprompt: Arc<Dotprompt<'static>>,
 }
 
 #[derive(Default)]
@@ -233,6 +221,7 @@ struct RegistryState {
     values: HashMap<String, Arc<dyn Any + Send + Sync>>,
     parent: Option<Registry>,
     default_model: Option<String>,
+    plugins_initialized: bool,
 }
 
 impl Debug for Registry {
@@ -258,52 +247,6 @@ impl Registry {
     /// Creates a new, empty `Registry`.
     pub fn new() -> Self {
         let state = Arc::new(Mutex::new(RegistryState::default()));
-        // #[cfg(feature = "dotprompt-private")]
-        // {
-        //     let state_for_resolver = state.clone();
-        //     let resolver = move |name: String| {
-        //         let resolver_state = state_for_resolver.clone();
-        //         async move {
-        //             fn lookup_schema_from_state(
-        //                 state_arc: &Arc<Mutex<RegistryState>>,
-        //                 name: &str,
-        //             ) -> Option<ProvidedSchema> {
-        //                 let state = state_arc.lock().unwrap();
-        //                 if let Some(schema) = state.schemas.get(name) {
-        //                     return Some(schema.clone());
-        //                 }
-        //                 if let Some(parent) = &state.parent {
-        //                     return lookup_schema_from_state(&parent.state, name);
-        //                 }
-        //                 None
-        //             }
-
-        //             match lookup_schema_from_state(&resolver_state, &name) {
-        //                 Some(schema) => {
-        //                     let json_val = match schema {
-        //                         ProvidedSchema::FromType(s) => {
-        //                             serde_json::to_value(s).map_err(|e| {
-        //                                 dotprompt::Error::new_render_error(format!(
-        //                                     "Failed to serialize schema: {}",
-        //                                     e
-        //                                 ))
-        //                             })?
-        //                         }
-        //                         ProvidedSchema::Raw(v) => v,
-        //                     };
-        //                     Ok(json_val)
-        //                 }
-        //                 None => Err(dotprompt::Error::new_render_error(format!(
-        //                     "Schema '{}' not found",
-        //                     name
-        //                 ))),
-        //             }
-        //         }
-        //     };
-        //     let dotprompt = Arc::new(Dotprompt::new_with_resolver(Box::new(resolver)));
-        //     Self { state, dotprompt }
-        // }
-        // #[cfg(not(feature = "dotprompt-private"))]
         Self { state }
     }
 
@@ -316,18 +259,30 @@ impl Registry {
             parent: Some(parent.clone()),
             ..Default::default()
         }));
-
-        // #[cfg(feature = "dotprompt-private")]
-        // {
-        //     // NOTE: This follows the TS implementation by sharing the parent's dotprompt instance.
-        //     // This means partials and helpers are shared, but it also means the schema resolver
-        //     // will not see schemas defined only in the child registry. This may be revised later.
-        //     let dotprompt = parent.dotprompt.clone();
-
-        //     Self { state, dotprompt }
-        // }
-        // #[cfg(not(feature = "dotprompt-private"))]
         Self { state }
+    }
+
+    /// Initializes all registered plugins if they haven't been already.
+    /// This is typically called lazily when an action is looked up within a runtime context.
+    async fn initialize_all_plugins(&self) -> Result<()> {
+        let plugins_to_init = {
+            let mut state = self.state.lock().unwrap();
+            if state.plugins_initialized {
+                return Ok(());
+            }
+            // Clone plugins to avoid holding the lock during async operations.
+            let plugins = state.plugins.values().cloned().collect::<Vec<_>>();
+            // Eagerly set the flag to prevent concurrent initializations.
+            state.plugins_initialized = true;
+            plugins
+        }; // Lock is released here.
+
+        for plugin in plugins_to_init {
+            // We need a separate `Registry` clone for each async call because `self` is consumed.
+            plugin.initialize(&self.clone()).await?;
+        }
+
+        Ok(())
     }
 
     pub fn set_default_model(&self, name: String) {
@@ -387,7 +342,17 @@ impl Registry {
     }
 
     /// Looks up an action by its full key (e.g., "/flow/myflow").
+    /// If in a runtime context, this will trigger plugin initialization.
     pub async fn lookup_action(&self, key: &str) -> Option<Arc<dyn ErasedAction>> {
+        // If we're in a runtime context, ensure plugins are initialized.
+        if runtime::is_in_runtime_context() {
+            if let Err(e) = self.initialize_all_plugins().await {
+                // In a real scenario, you might want to log this error.
+                println!("Failed to initialize plugins during lookup: {}", e);
+                return None;
+            }
+        }
+
         let parent = {
             let state = self.state.lock().unwrap();
             if let Some(action) = state.actions.get(key) {
@@ -397,7 +362,6 @@ impl Registry {
         };
 
         if let Some(parent) = parent {
-            // Box the future to break the recursive type definition.
             return Box::pin(parent.lookup_action(key)).await;
         }
 
