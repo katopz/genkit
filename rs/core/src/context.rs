@@ -167,13 +167,16 @@ pub fn get_flow_context() -> Option<FlowContext> {
 }
 
 /// Defines the validation policy for the `ApiKeyProvider`.
+/// A type alias for the custom validation function used by `ApiKeyPolicy::Custom`.
+pub type ApiKeyValidator = Arc<dyn Fn(&ActionContext) -> Result<()> + Send + Sync>;
+
 pub enum ApiKeyPolicy {
     /// No validation is performed; the provider only extracts the key if present.
     ExtractOnly,
     /// The provider validates that the API key matches a specific required key.
     Require(String),
     /// The provider uses a custom function to validate the generated context.
-    Custom(Arc<dyn Fn(&ActionContext) -> Result<()> + Send + Sync>),
+    Custom(ApiKeyValidator),
 }
 
 /// A `ContextProvider` that handles API key authentication from the
