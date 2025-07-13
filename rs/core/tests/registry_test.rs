@@ -710,6 +710,88 @@ mod lookup_action_test {
         assert_eq!(action1.name(), "foo/something");
         assert_eq!(action2.name(), "foo/sub/something");
     }
-    
-    
+
+    #[rstest]
+    #[tokio::test]
+    /// 'returns none for unknown action'
+    async fn returns_none_for_unknown_action(registry: Registry) {
+        let action = registry.lookup_action("/model/foo/something").await;
+        assert!(
+            action.is_none(),
+            "Should return None for an unknown action."
+        );
+    }
+
+    #[rstest]
+    #[tokio::test]
+    /// 'should lookup parent registry when child missing action'
+    async fn should_lookup_parent_registry_when_child_missing_action(registry: Registry) {
+        // The fixture `registry` will serve as the parent.
+        let parent_registry = registry;
+        let child_registry = Registry::with_parent(&parent_registry);
+
+        // Register an action only on the parent registry.
+        let foo_action = define_action(
+            &parent_registry,
+            ActionType::Model,
+            "foo",
+            |_: (), _: ActionFnArg<()>| async { Ok(()) },
+        );
+
+        // Assert that the parent registry can find the action.
+        let parent_lookup = parent_registry
+            .lookup_action("/model/foo")
+            .await
+            .expect("Parent should find its own action.");
+        assert_eq!(parent_lookup.name(), foo_action.meta.name);
+
+        // Assert that the child registry can also find the action,
+        // demonstrating the fallback lookup.
+        let child_lookup = child_registry
+            .lookup_action("/model/foo")
+            .await
+            .expect("Child should find the action in the parent registry.");
+        assert_eq!(child_lookup.name(), foo_action.meta.name);
+    }
+
+    #[rstest]
+    #[tokio::test]
+    /// 'registration on the child registry should not modify parent'
+    async fn registration_on_child_should_not_modify_parent(registry: Registry) {
+        // The fixture `registry` will serve as the parent.
+        let parent_registry = registry;
+        let child_registry = Registry::with_parent(&parent_registry);
+
+        // Assert that the child has a parent relationship set up.
+        assert!(
+            child_registry.parent().is_some(),
+            "Child registry should have a parent."
+        );
+
+        // Register an action only on the child registry.
+        let foo_action = define_action(
+            &child_registry,
+            ActionType::Model,
+            "foo",
+            |_: (), _: ActionFnArg<()>| async { Ok(()) },
+        );
+
+        // Assert that the parent registry does NOT have the action.
+        let parent_lookup = parent_registry.lookup_action("/model/foo").await;
+        assert!(
+            parent_lookup.is_none(),
+            "Parent registry should not be modified by child registration."
+        );
+
+        // Assert that the child registry has the action.
+        let child_lookup = child_registry
+            .lookup_action("/model/foo")
+            .await
+            .expect("Child should find its own registered action.");
+        assert_eq!(
+            child_lookup.name(),
+            foo_action.meta.name,
+            "Child registry should have the 'foo' action."
+        );
+    }
 }
