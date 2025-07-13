@@ -351,7 +351,7 @@ async fn test_start_chat_from_prompt_file_with_input(#[future] genkit_instance: 
 #[rstest]
 #[tokio::test]
 /// 'can send a rendered prompt to chat'
-async fn test_can_send_rendered_prompt_to_chat(#[future] genkit_instance: Arc<Genkit>) {
+async fn test_send_rendered_prompt_to_chat(#[future] genkit_instance: Arc<Genkit>) {
     let genkit = genkit_instance.await;
 
     let prompt = genkit.define_prompt::<NameInput, Value, Value>(PromptConfig {
@@ -360,6 +360,22 @@ async fn test_can_send_rendered_prompt_to_chat(#[future] genkit_instance: Arc<Ge
         prompt: Some("hi {{name}}".to_string()),
         ..Default::default()
     });
+
+    let session =
+        genkit_ai::Session::<()>::new(Arc::new(genkit.registry().clone()), None, None, None)
+            .await
+            .unwrap();
+
+    let chat = Arc::new(session)
+        .chat::<()>(Some(ChatOptions {
+            base_options: Some(genkit_ai::generate::BaseGenerateOptions {
+                model: Some(genkit::model::Model::Name("echoModel".to_string())),
+                ..Default::default()
+            }),
+            ..Default::default()
+        }))
+        .await
+        .unwrap();
 
     let rendered = prompt
         .render(
@@ -374,16 +390,20 @@ async fn test_can_send_rendered_prompt_to_chat(#[future] genkit_instance: Arc<Ge
         .await
         .unwrap();
 
-    let response = genkit.generate_with_options(rendered).await.unwrap();
+    let response = chat.send(rendered).await.unwrap();
 
-    // To address the non-deterministic key order in JSON serialization,
-    // we parse the strings into `serde_json::Value` and compare them.
+    let right_str = "Echo: hi Genkit; config: {\"temperature\":11,\"version\":\"abc\"}";
     let left_str = response.text().unwrap();
-    let right_str = "Echo: hi Genkit; config: {\"version\":\"abc\",\"temperature\":11}";
-    let prefix = "Echo: hi Genkit; config: ";
 
-    let left_json_str = left_str.strip_prefix(prefix).expect("Prefix not found");
-    let right_json_str = right_str.strip_prefix(prefix).expect("Prefix not found");
+    let prefix = "Echo: hi Genkit; config: ";
+    assert!(
+        left_str.starts_with(prefix),
+        "Response prefix did not match. Got: '{}'",
+        left_str
+    );
+
+    let left_json_str = left_str.strip_prefix(prefix).unwrap();
+    let right_json_str = right_str.strip_prefix(prefix).unwrap();
 
     let left_value: Value = serde_json::from_str(left_json_str).expect("Failed to parse left JSON");
     let right_value: Value =
@@ -397,12 +417,10 @@ async fn test_can_send_rendered_prompt_to_chat(#[future] genkit_instance: Arc<Ge
 /// 'initializes chat with history'
 async fn test_initializes_chat_with_history(#[future] genkit_instance: Arc<Genkit>) {
     let genkit = genkit_instance.await;
+
+    // The history we want to load into the chat.
     let history = vec![
-        MessageData {
-            role: Role::User,
-            content: vec![Part::text("hi")],
-            ..Default::default()
-        },
+        MessageData::user(vec![Part::text("hi")]),
         MessageData {
             role: Role::Model,
             content: vec![Part::text("bye")],
@@ -410,26 +428,23 @@ async fn test_initializes_chat_with_history(#[future] genkit_instance: Arc<Genki
         },
     ];
 
-    let mut messages_with_system = vec![MessageData {
-        role: Role::System,
-        content: vec![Part::text("system instructions")],
-        metadata: Some([("preamble".to_string(), json!(true))].into()),
-        ..Default::default()
-    }];
-    messages_with_system.extend(history.clone());
+    // The system prompt to start the chat with.
+    let system_prompt = MessageData::system(vec![Part::text("system instructions")]);
 
     let session =
         genkit_ai::Session::<()>::new(Arc::new(genkit.registry().clone()), None, None, None)
             .await
             .unwrap();
 
+    // Create the chat, providing both a new system prompt and the existing history.
     let chat = Arc::new(session)
         .chat::<()>(Some(ChatOptions {
             base_options: Some(genkit_ai::generate::BaseGenerateOptions {
                 model: Some(genkit::model::Model::Name("echoModel".to_string())),
-                messages: messages_with_system.clone(),
+                messages: vec![system_prompt], // This becomes the new preamble
                 ..Default::default()
             }),
+            history: Some(history.clone()), // This is the persisted history
             ..Default::default()
         }))
         .await
@@ -437,16 +452,32 @@ async fn test_initializes_chat_with_history(#[future] genkit_instance: Arc<Genki
 
     let response = chat.send("hi again").await.unwrap();
 
-    let mut expected_messages = messages_with_system;
-    expected_messages.push(MessageData {
-        role: Role::User,
-        content: vec![Part::text("hi again")],
-        ..Default::default()
-    });
+    // The `echoModel` doesn't support system prompts, so middleware simulates it.
+    let mut expected_messages = vec![
+        MessageData {
+            role: Role::User,
+            content: vec![
+                Part::text("SYSTEM INSTRUCTIONS:\n"),
+                Part::text("system instructions"),
+            ],
+            ..Default::default()
+        },
+        MessageData {
+            role: Role::Model,
+            content: vec![Part::text("Understood.")],
+            ..Default::default()
+        },
+    ];
+    // The original history follows the simulated system prompt.
+    expected_messages.extend(history);
+    // Finally, add the latest turn.
+    expected_messages.push(MessageData::user(vec![Part::text("hi again")]));
     expected_messages.push(MessageData {
         role: Role::Model,
         content: vec![
-            Part::text("Echo: system instructions,hi,bye,hi again"),
+            Part::text(
+                "Echo: SYSTEM INSTRUCTIONS:\nsystem instructions,Understood.,hi,bye,hi again",
+            ),
             Part::text("; config: {}"),
         ],
         ..Default::default()
@@ -503,22 +534,22 @@ async fn test_updates_preamble_on_fresh_chat_instance(#[future] genkit_instance:
 
     let response1 = chat.send("hi").await.unwrap();
 
+    // Middleware simulates the system prompt
     let mut expected_messages1 = vec![
+        MessageData::user(vec![
+            Part::text("SYSTEM INSTRUCTIONS:\n"),
+            Part::text("greet Pavel"),
+        ]),
         MessageData {
-            role: Role::System,
-            content: vec![Part::text("greet Pavel")],
-            metadata: Some([("preamble".to_string(), json!(true))].into()),
+            role: Role::Model,
+            content: vec![Part::text("Understood.")],
             ..Default::default()
         },
-        MessageData {
-            role: Role::User,
-            content: vec![Part::text("hi")],
-            ..Default::default()
-        },
+        MessageData::user(vec![Part::text("hi")]),
         MessageData {
             role: Role::Model,
             content: vec![
-                Part::text("Echo: greet Pavel,hi"),
+                Part::text("Echo: SYSTEM INSTRUCTIONS:\ngreet Pavel,Understood.,hi"),
                 Part::text("; config: {\"temperature\":2}"),
             ],
             ..Default::default()
@@ -533,6 +564,7 @@ async fn test_updates_preamble_on_fresh_chat_instance(#[future] genkit_instance:
         .await
         .unwrap();
 
+    // Create a new chat from the same session to pick up the state change.
     let fresh_chat = session
         .chat(Some(ChatOptions {
             preamble: Some(&agent),
@@ -547,28 +579,28 @@ async fn test_updates_preamble_on_fresh_chat_instance(#[future] genkit_instance:
 
     let response2 = fresh_chat.send("hi again").await.unwrap();
 
-    // The history now includes the first turn. The preamble is updated.
-    expected_messages1.push(MessageData {
-        role: Role::User,
-        content: vec![Part::text("hi again")],
-        ..Default::default()
-    });
-    expected_messages1[0] = MessageData {
-        role: Role::System,
-        content: vec![Part::text("greet Michael")],
-        metadata: Some([("preamble".to_string(), json!(true))].into()),
-        ..Default::default()
-    };
-    expected_messages1.push(MessageData {
+    let mut expected_messages2 = vec![
+        MessageData::user(vec![
+            Part::text("SYSTEM INSTRUCTIONS:\n"),
+            Part::text("greet Michael"), // Preamble is updated
+        ]),
+        MessageData {
+            role: Role::Model,
+            content: vec![Part::text("Understood.")],
+            ..Default::default()
+        },
+    ];
+    // History from the first chat is preserved
+    expected_messages2.extend(response1.messages().unwrap());
+    expected_messages2.push(MessageData::user(vec![Part::text("hi again")]));
+    expected_messages2.push(MessageData {
         role: Role::Model,
         content: vec![
-            Part::text(
-                "Echo: greet Michael,hi,Echo: greet Pavel,hi; config: {\"temperature\":2},hi again",
-            ),
+            Part::text("Echo: SYSTEM INSTRUCTIONS:\ngreet Michael,Understood.,SYSTEM INSTRUCTIONS:\ngreet Pavel,Understood.,hi,Echo: SYSTEM INSTRUCTIONS:\ngreet Pavel,Understood.,hi; config: {\"temperature\":2},hi again"),
             Part::text("; config: {\"temperature\":2}"),
         ],
         ..Default::default()
     });
 
-    assert_eq!(response2.messages().unwrap(), expected_messages1);
+    assert_eq!(response2.messages().unwrap(), expected_messages2);
 }

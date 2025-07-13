@@ -113,43 +113,37 @@ impl<S: Serialize + DeserializeOwned + Clone + Send + Sync + 'static> Chat<S> {
         thread_name: String,
         history: Vec<MessageData>,
     ) -> Self {
-        // This logic merges a "preamble" (e.g., from a system prompt) with the
-        // existing chat history, ensuring the preamble always comes first.
-        if !request_base.messages.is_empty() {
-            let preamble = request_base
-                .messages
-                .iter()
-                .filter(|m| {
-                    m.metadata
-                        .as_ref()
-                        .and_then(|meta| meta.get("preamble"))
-                        .and_then(|v| v.as_bool())
-                        .unwrap_or(false)
-                })
-                .cloned()
-                .collect::<Vec<_>>();
+        // This logic merges messages from options (request_base) with persisted history.
+        let (new_preamble, other_new_messages): (Vec<_>, Vec<_>) =
+            request_base.messages.into_iter().partition(|m| {
+                m.metadata
+                    .as_ref()
+                    .and_then(|meta| meta.get("preamble"))
+                    .and_then(|v| v.as_bool())
+                    .unwrap_or(false)
+            });
 
-            if !preamble.is_empty() {
-                let history_no_preamble = history
-                    .into_iter()
-                    .filter(|m| {
-                        m.metadata
-                            .as_ref()
-                            .and_then(|meta| meta.get("preamble"))
-                            .and_then(|v| v.as_bool())
-                            .is_none()
-                    })
-                    .collect::<Vec<_>>();
-                request_base.messages = preamble;
-                request_base.messages.extend(history_no_preamble);
-            } else {
-                let mut full_history = history;
-                full_history.extend(request_base.messages);
-                request_base.messages = full_history;
-            }
+        let mut final_messages;
+
+        if !new_preamble.is_empty() {
+            // If a new preamble is provided, it replaces any old one.
+            final_messages = new_preamble;
+            // Then, add the historical messages, filtering out any that were preambles.
+            final_messages.extend(history.into_iter().filter(|m| {
+                !m.metadata
+                    .as_ref()
+                    .and_then(|meta| meta.get("preamble"))
+                    .and_then(|v| v.as_bool())
+                    .unwrap_or(false)
+            }));
         } else {
-            request_base.messages = history;
+            // If no new preamble, use the existing history as is.
+            final_messages = history;
         }
+
+        // Finally, append any other messages that were passed in during chat creation.
+        final_messages.extend(other_new_messages);
+        request_base.messages = final_messages;
 
         let state = ChatState {
             thread_name,
