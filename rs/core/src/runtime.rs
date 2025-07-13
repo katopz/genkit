@@ -39,9 +39,7 @@ pub async fn run_in_action_runtime_context<F, R>(future: F) -> R
 where
     F: std::future::Future<Output = R>,
 {
-    println!(">>> RUNTIME: ENTER run_in_action_runtime_context");
     let result = IS_RUNTIME_CONTEXT.scope(true, future).await;
-    println!("<<< RUNTIME: EXIT run_in_action_runtime_context");
     result
 }
 

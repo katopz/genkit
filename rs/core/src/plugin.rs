@@ -63,7 +63,7 @@ pub trait Plugin: Send + Sync {
         &self,
         _action_type: ActionType,
         _target: &str,
-        _registry: &mut Registry,
+        _registry: &Registry,
     ) -> Result<()> {
         Err(Error::new_internal(format!(
             "resolve_action is not implemented for plugin '{}'",

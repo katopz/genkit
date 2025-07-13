@@ -55,14 +55,15 @@ use serde_json::Value;
 use std::any::Any;
 use std::collections::HashMap;
 use std::fmt::Debug;
+use std::str::FromStr;
 use std::sync::{Arc, Mutex};
-use strum::Display;
+use strum::{Display, EnumString};
 
 // Re-export the Plugin trait to make it accessible via `genkit_core::registry::Plugin`
 pub use crate::plugin::Plugin;
 
 /// The type of a runnable action.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, Display)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, Display, EnumString)]
 #[serde(rename_all = "camelCase")]
 #[strum(serialize_all = "lowercase")]
 pub enum ActionType {
@@ -342,9 +343,9 @@ impl Registry {
     }
 
     /// Looks up an action by its full key (e.g., "/flow/myflow").
-    /// If in a runtime context, this will trigger plugin initialization.
+    /// If in a runtime context, this will trigger plugin initialization and dynamic resolution.
     pub async fn lookup_action(&self, key: &str) -> Option<Arc<dyn ErasedAction>> {
-        // If we're in a runtime context, ensure plugins are initialized.
+        // If we're in a runtime context, ensure all plugins are initialized.
         if runtime::is_in_runtime_context() {
             if let Err(e) = self.initialize_all_plugins().await {
                 // In a real scenario, you might want to log this error.
@@ -353,11 +354,50 @@ impl Registry {
             }
         }
 
-        let parent = {
+        // 1. Check if the action is already registered locally.
+        {
             let state = self.state.lock().unwrap();
             if let Some(action) = state.actions.get(key) {
                 return Some(action.clone());
             }
+        } // Lock is released.
+
+        // 2. If not found and in a runtime context, try to resolve it dynamically.
+        if runtime::is_in_runtime_context() {
+            let parts: Vec<&str> = key.trim_start_matches('/').splitn(3, '/').collect();
+            if parts.len() == 3 {
+                let action_type_str = parts[0];
+                let plugin_id = parts[1];
+                let action_id = parts[2];
+
+                if let Ok(action_type) = ActionType::from_str(action_type_str) {
+                    let plugin_to_resolve = {
+                        let state = self.state.lock().unwrap();
+                        state.plugins.get(plugin_id).cloned()
+                    };
+
+                    if let Some(plugin) = plugin_to_resolve {
+                        // Attempt to resolve the action. We ignore errors because a plugin
+                        // might not implement the resolver, which is a valid case.
+                        if plugin
+                            .resolve_action(action_type, action_id, &self.clone())
+                            .await
+                            .is_ok()
+                        {
+                            // If resolution was attempted, check again if the action now exists.
+                            let state = self.state.lock().unwrap();
+                            if let Some(action) = state.actions.get(key) {
+                                return Some(action.clone());
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        // 3. If still not found, check the parent registry.
+        let parent = {
+            let state = self.state.lock().unwrap();
             state.parent.clone()
         };
 

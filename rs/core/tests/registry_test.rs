@@ -408,3 +408,308 @@ mod list_resolvable_actions_test {
         assert!(parent_actions.contains_key("/model/parent_action"));
     }
 }
+
+#[cfg(test)]
+/// 'lookupAction'
+mod lookup_action_test {
+    use super::*;
+
+    #[rstest]
+    #[tokio::test]
+    /// 'initializes plugins on first lookup'
+    async fn initializes_plugins_on_first_lookup(mut registry: Registry) {
+        let foo_initialized = Arc::new(AtomicBool::new(false));
+        let bar_initialized = Arc::new(AtomicBool::new(false));
+
+        // Define mock plugin 'foo'
+        struct FooPlugin {
+            initialized: Arc<AtomicBool>,
+        }
+        #[async_trait]
+        impl Plugin for FooPlugin {
+            fn name(&self) -> &'static str {
+                "foo"
+            }
+            async fn initialize(&self, registry: &Registry) -> Result<()> {
+                define_action(
+                    registry,
+                    ActionType::Model,
+                    "foo/something",
+                    |_: (), _: ActionFnArg<()>| async { Ok(()) },
+                );
+                self.initialized.store(true, Ordering::SeqCst);
+                Ok(())
+            }
+        }
+
+        // Define mock plugin 'bar'
+        struct BarPlugin {
+            initialized: Arc<AtomicBool>,
+        }
+        #[async_trait]
+        impl Plugin for BarPlugin {
+            fn name(&self) -> &'static str {
+                "bar"
+            }
+            async fn initialize(&self, registry: &Registry) -> Result<()> {
+                define_action(
+                    registry,
+                    ActionType::Model,
+                    "bar/something",
+                    |_: (), _: ActionFnArg<()>| async { Ok(()) },
+                );
+                self.initialized.store(true, Ordering::SeqCst);
+                Ok(())
+            }
+        }
+
+        let foo_plugin = Arc::new(FooPlugin {
+            initialized: foo_initialized.clone(),
+        });
+        let bar_plugin = Arc::new(BarPlugin {
+            initialized: bar_initialized.clone(),
+        });
+
+        registry.register_plugin(foo_plugin).await.unwrap();
+        registry.register_plugin(bar_plugin).await.unwrap();
+
+        assert!(
+            !foo_initialized.load(Ordering::SeqCst),
+            "Pre-check: Foo should not be initialized."
+        );
+        assert!(
+            !bar_initialized.load(Ordering::SeqCst),
+            "Pre-check: Bar should not be initialized."
+        );
+
+        // Lookup an action that should come from the 'foo' plugin.
+        // This must be done in a runtime context to trigger initialization.
+        runtime::run_in_action_runtime_context(async {
+            registry.lookup_action("/model/foo/something").await
+        })
+        .await;
+
+        // NOTE: This behavior differs from the TypeScript implementation. The Rust
+        // registry initializes all registered plugins on the first lookup, rather
+        // than initializing them one by one as they are needed.
+        assert!(
+            foo_initialized.load(Ordering::SeqCst),
+            "FooPlugin should be initialized."
+        );
+        assert!(
+            bar_initialized.load(Ordering::SeqCst),
+            "BarPlugin should also be initialized on the first lookup."
+        );
+
+        // We can verify that the second plugin's action is also available.
+        let bar_action = runtime::run_in_action_runtime_context(async {
+            registry.lookup_action("/model/bar/something").await
+        })
+        .await;
+        assert!(
+            bar_action.is_some(),
+            "Bar action should be available after initialization."
+        );
+    }
+
+    #[rstest]
+    #[tokio::test]
+    /// 'returns registered action'
+    async fn returns_registered_action(registry: Registry) {
+        // Define and register three separate actions.
+        let foo_action = define_action(
+            &registry,
+            ActionType::Model,
+            "foo_something",
+            |_: (), _: ActionFnArg<()>| async { Ok(()) },
+        );
+        let bar_action = define_action(
+            &registry,
+            ActionType::Model,
+            "bar_something",
+            |_: (), _: ActionFnArg<()>| async { Ok(()) },
+        );
+        let bar_sub_action = define_action(
+            &registry,
+            ActionType::Model,
+            "sub/bar_something",
+            |_: (), _: ActionFnArg<()>| async { Ok(()) },
+        );
+
+        // Look up each action and assert that the correct one is returned.
+        let looked_up_foo = registry
+            .lookup_action("/model/foo_something")
+            .await
+            .expect("foo_something should exist");
+        assert_eq!(
+            looked_up_foo.name(),
+            foo_action.meta.name,
+            "Should retrieve the correct foo action."
+        );
+
+        let looked_up_bar = registry
+            .lookup_action("/model/bar_something")
+            .await
+            .expect("bar_something should exist");
+        assert_eq!(
+            looked_up_bar.name(),
+            bar_action.meta.name,
+            "Should retrieve the correct bar action."
+        );
+
+        let looked_up_bar_sub = registry
+            .lookup_action("/model/sub/bar_something")
+            .await
+            .expect("sub/bar_something should exist");
+        assert_eq!(
+            looked_up_bar_sub.name(),
+            bar_sub_action.meta.name,
+            "Should retrieve the correct sub/bar action."
+        );
+    }
+
+    #[rstest]
+    #[tokio::test]
+    /// 'returns action registered by plugin'
+    async fn returns_action_registered_by_plugin(mut registry: Registry) {
+        // Define a mock plugin that registers actions.
+        struct FooPlugin;
+        #[async_trait]
+        impl Plugin for FooPlugin {
+            fn name(&self) -> &'static str {
+                "foo"
+            }
+            async fn initialize(&self, registry: &Registry) -> Result<()> {
+                define_action(
+                    registry,
+                    ActionType::Model,
+                    ActionName::Namespaced {
+                        plugin_id: "foo".to_string(),
+                        action_id: "something".to_string(),
+                    },
+                    |_: (), _: ActionFnArg<()>| async { Ok(()) },
+                );
+                define_action(
+                    registry,
+                    ActionType::Model,
+                    ActionName::Namespaced {
+                        plugin_id: "foo".to_string(),
+                        action_id: "sub/something".to_string(),
+                    },
+                    |_: (), _: ActionFnArg<()>| async { Ok(()) },
+                );
+                Ok(())
+            }
+        }
+
+        // Register the plugin with the registry.
+        let foo_plugin = Arc::new(FooPlugin);
+        registry.register_plugin(foo_plugin).await.unwrap();
+
+        // Use a runtime context to trigger lazy initialization and look up the actions.
+        let (action1, action2) = runtime::run_in_action_runtime_context(async {
+            let action1 = registry
+                .lookup_action("/model/foo/something")
+                .await
+                .expect("Action foo/something should be found.");
+            let action2 = registry
+                .lookup_action("/model/foo/sub/something")
+                .await
+                .expect("Action foo/sub/something should be found.");
+            (action1, action2)
+        })
+        .await;
+
+        // Assert that the correct actions were retrieved.
+        assert_eq!(
+            action1.name(),
+            "foo/something",
+            "Should retrieve the correct namespaced action."
+        );
+        assert_eq!(
+            action2.name(),
+            "foo/sub/something",
+            "Should retrieve the correct namespaced sub-action."
+        );
+    }
+
+    #[rstest]
+    #[tokio::test]
+    /// 'returns action dynamically resolved by plugin'
+    async fn returns_action_dynamically_resolved_by_plugin(mut registry: Registry) {
+        // Define a plugin that resolves actions dynamically.
+        struct DynamicPlugin;
+        #[async_trait]
+        impl Plugin for DynamicPlugin {
+            fn name(&self) -> &'static str {
+                "foo"
+            }
+
+            async fn initialize(&self, _registry: &Registry) -> Result<()> {
+                // Nothing to do here for this test.
+                Ok(())
+            }
+
+            async fn resolve_action(
+                &self,
+                action_type: ActionType,
+                target: &str,
+                registry: &Registry,
+            ) -> Result<()> {
+                if action_type != ActionType::Model {
+                    return Ok(()); // Not our concern
+                }
+                match target {
+                    "something" => {
+                        define_action(
+                            registry,
+                            ActionType::Model,
+                            ActionName::Namespaced {
+                                plugin_id: "foo".to_string(),
+                                action_id: "something".to_string(),
+                            },
+                            |_: (), _: ActionFnArg<()>| async { Ok(()) },
+                        );
+                    }
+                    "sub/something" => {
+                        define_action(
+                            registry,
+                            ActionType::Model,
+                            ActionName::Namespaced {
+                                plugin_id: "foo".to_string(),
+                                action_id: "sub/something".to_string(),
+                            },
+                            |_: (), _: ActionFnArg<()>| async { Ok(()) },
+                        );
+                    }
+                    _ => {} // Ignore other actions
+                }
+                Ok(())
+            }
+        }
+
+        // Register the plugin.
+        let plugin = Arc::new(DynamicPlugin);
+        registry.register_plugin(plugin).await.unwrap();
+
+        // In a runtime context, look up the actions to trigger resolution.
+        let (action1, action2) = runtime::run_in_action_runtime_context(async {
+            let action1 = registry
+                .lookup_action("/model/foo/something")
+                .await
+                .expect("Action foo/something should be resolved.");
+            let action2 = registry
+                .lookup_action("/model/foo/sub/something")
+                .await
+                .expect("Action foo/sub/something should be resolved.");
+            (action1, action2)
+        })
+        .await;
+
+        // Assert that the correct actions were returned.
+        assert_eq!(action1.name(), "foo/something");
+        assert_eq!(action2.name(), "foo/sub/something");
+    }
+    
+    
+}
