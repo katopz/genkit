@@ -139,6 +139,7 @@ mod validate_test {
     /// We use structs with `#[derive(JsonSchema)]` as the Rust equivalent.
 
     #[derive(JsonSchema, Deserialize, Debug)]
+    #[allow(unused)]
     struct SimpleSchema {
         foo: bool,
     }
@@ -189,11 +190,13 @@ mod validate_test {
     }
 
     #[derive(JsonSchema, Deserialize, Debug)]
+    #[allow(unused)]
     struct NestedSchemaItem {
         bar: bool,
     }
 
     #[derive(JsonSchema, Deserialize, Debug)]
+    #[allow(unused)]
     struct NestedSchema {
         foo: Vec<NestedSchemaItem>,
     }
