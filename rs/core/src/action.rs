@@ -398,8 +398,15 @@ where
 
                 let fut = self.func.run(input, args);
 
-                let run_result = if let Some(ctx) = opts.context {
-                    context::run_with_context(ctx, fut).await
+                let is_context_already_set =
+                    opts.context.is_some() && context::get_context().is_some();
+
+                let run_result = if !is_context_already_set {
+                    if let Some(ctx) = opts.context {
+                        context::run_with_context(ctx, fut).await
+                    } else {
+                        fut.await
+                    }
                 } else {
                     fut.await
                 };

@@ -141,6 +141,10 @@ pub async fn run_with_context<F, R>(context: ActionContext, future: F) -> R
 where
     F: std::future::Future<Output = R>,
 {
+    if crate::runtime::is_in_runtime_context() {
+        // Already in a runtime context, just set the ActionContext.
+        return CONTEXT.scope(context, future).await;
+    }
     CONTEXT
         .scope(context, run_in_action_runtime_context(future))
         .await
