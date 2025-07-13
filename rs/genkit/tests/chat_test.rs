@@ -545,7 +545,7 @@ async fn test_updates_preamble_on_fresh_chat_instance(#[future] genkit_instance:
     let response1 = chat.send("hi").await.unwrap();
 
     // Middleware simulates the system prompt
-    let mut expected_messages1 = vec![
+    let expected_messages1 = vec![
         MessageData::user(vec![
             Part::text("SYSTEM INSTRUCTIONS:\n"),
             Part::text("greet Pavel"),
