@@ -17,7 +17,7 @@
 //! Integration tests for the context providers, ported from `context_test.ts`.
 
 use genkit_core::context::{api_key, ActionContext, ApiKeyPolicy, ContextProvider, RequestData};
-use genkit_core::error::{Error, Result};
+use genkit_core::error::Error;
 use genkit_core::status::StatusCode;
 use rstest::*;
 use serde_json::{json, Value};
