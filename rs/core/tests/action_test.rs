@@ -42,6 +42,7 @@ mod test {
 
     #[rstest]
     #[tokio::test]
+    /// 'applies middleware'
     async fn test_apply_middleware() {
         let middleware1 = ActionMiddleware {
             f: Arc::new(
@@ -93,6 +94,7 @@ mod test {
 
     #[rstest]
     #[tokio::test]
+    /// 'returns telemetry info'
     async fn test_returns_telemetry_info(registry: Arc<Mutex<Registry>>) {
         let test_action = define_action(
             &registry.lock().unwrap(),
@@ -110,6 +112,7 @@ mod test {
 
     #[rstest]
     #[tokio::test]
+    /// 'run the action with options'
     async fn test_run_action_with_options(registry: Arc<Mutex<Registry>>) {
         #[derive(Serialize, Deserialize, Debug, PartialEq, Clone, JsonSchema)]
         struct MyContext {
@@ -178,6 +181,7 @@ mod test {
 
     #[rstest]
     #[tokio::test]
+    ///'should stream the response'
     async fn test_should_stream_the_response(registry: Arc<Mutex<Registry>>) {
         use futures::stream::TryStreamExt;
         #[derive(Serialize, Deserialize, JsonSchema, Debug, PartialEq, Clone)]
@@ -221,6 +225,7 @@ mod test {
 
     #[rstest]
     #[tokio::test]
+    /// 'should inherit context from parent action invocation'
     async fn test_should_inherit_context_from_parent(registry: Arc<Mutex<Registry>>) {
         #[derive(Serialize, Deserialize, Debug, PartialEq, Clone, JsonSchema)]
         struct Auth {
@@ -276,6 +281,7 @@ mod test {
 
     #[rstest]
     #[tokio::test]
+    /// 'should include trace info in the context'
     async fn test_should_include_trace_info_in_context(registry: Arc<Mutex<Registry>>) {
         let test_action = define_action(
             &registry.lock().unwrap(),
