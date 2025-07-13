@@ -29,13 +29,52 @@ use crate::tracing::{self, TraceContext};
 use async_trait::async_trait;
 use futures::{Future, Stream, StreamExt};
 use schemars::{JsonSchema, Schema};
+use serde::Deserialize;
 use serde::{de::DeserializeOwned, Serialize};
 use serde_json::Value;
 use std::collections::HashMap;
-use std::fmt::Debug;
+use std::fmt::{self, Debug, Display};
 use std::pin::Pin;
 use std::sync::Arc;
 use tokio_util::sync::CancellationToken;
+
+// --- ActionName Enum ---
+
+/// Represents the name of an action, which can be simple or namespaced.
+#[derive(Debug, Clone)]
+pub enum ActionName {
+    /// A simple, global action name.
+    Simple(String),
+    /// A name scoped to a specific plugin.
+    Namespaced {
+        plugin_id: String,
+        action_id: String,
+    },
+}
+
+impl From<String> for ActionName {
+    fn from(s: String) -> Self {
+        ActionName::Simple(s)
+    }
+}
+
+impl From<&str> for ActionName {
+    fn from(s: &str) -> Self {
+        ActionName::Simple(s.to_string())
+    }
+}
+
+impl Display for ActionName {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            ActionName::Simple(s) => write!(f, "{}", s),
+            ActionName::Namespaced {
+                plugin_id,
+                action_id,
+            } => write!(f, "{}/{}", plugin_id, action_id),
+        }
+    }
+}
 
 // --- Middleware Structs ---
 
@@ -89,7 +128,7 @@ impl<I, O, S: Send + 'static> Clone for ActionMiddleware<I, O, S> {
 // --- Core Action Structs ---
 
 /// Metadata describing a Genkit `Action`.
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ActionMetadata {
     pub action_type: ActionType,
     pub name: String,
@@ -442,7 +481,7 @@ where
 /// Builder for creating a new `Action`.
 pub struct ActionBuilder<I, O, S: Send + 'static, F> {
     action_type: ActionType,
-    name: String,
+    name: ActionName,
     description: Option<String>,
     metadata: Option<HashMap<String, Value>>,
     func: F,
@@ -458,7 +497,7 @@ where
     F: Fn(I, ActionFnArg<S>) -> Fut + Send + Sync + 'static,
     Fut: Future<Output = Result<O>> + Send,
 {
-    pub fn new(action_type: ActionType, name: impl Into<String>, func: F) -> Self {
+    pub fn new(action_type: ActionType, name: impl Into<ActionName>, func: F) -> Self {
         Self {
             action_type,
             name: name.into(),
@@ -494,7 +533,7 @@ where
         };
         let meta = Arc::new(ActionMetadata {
             action_type: self.action_type,
-            name: self.name,
+            name: self.name.to_string(),
             description: self.description,
             input_schema: Some(schema_for::<I>()),
             output_schema: Some(schema_for::<O>()),
@@ -518,7 +557,7 @@ where
 /// equivalent of `detachedAction` in Genkit TS.
 pub fn detached_action<I, O, S, F, Fut>(
     action_type: ActionType,
-    name: impl Into<String>,
+    name: impl Into<ActionName>,
     func: F,
 ) -> Action<I, O, S>
 where
@@ -538,7 +577,7 @@ where
 pub fn define_action<I, O, S, F, Fut>(
     registry: &Registry,
     action_type: ActionType,
-    name: impl Into<String>,
+    name: impl Into<ActionName>,
     func: F,
 ) -> Action<I, O, S>
 where
@@ -549,8 +588,8 @@ where
     Fut: Future<Output = Result<O>> + Send,
     Action<I, O, S>: crate::registry::ErasedAction + 'static,
 {
-    let name_str = name.into();
-    let action = ActionBuilder::new(action_type, name_str.clone(), func).build();
+    let action_name = name.into();
+    let action = ActionBuilder::new(action_type, action_name, func).build();
     registry
         .register_action(action_type, action.clone())
         .expect("Failed to register action"); // Or handle error more gracefully
