@@ -55,16 +55,15 @@ mod validate_test {
         })),
         json!({ "foo": 123 }),
         false,
-        // NOTE: The exact error message is from the `jsonschema` crate and may differ from TS.
         Some(vec![ValidationErrorDetail {
             path: "/foo".to_string(),
-            message: "123 is not of type `boolean`".to_string()
+            message: "123 is not of type \"boolean\"".to_string()
         }])
     )]
     // Case 3: Top-level error for additional properties
     #[case(
         "should be understandable for top-level errors",
-        ProvidedSchema::Raw(json!({ "type": "object", "additionalProperties": false })),
+        ProvidedSchema::Raw(json!({ "type": "object", "properties": {}, "additionalProperties": false })),
         json!({ "foo": "bar" }),
         false,
         Some(vec![ValidationErrorDetail {
@@ -84,7 +83,7 @@ mod validate_test {
         false,
         Some(vec![ValidationErrorDetail {
             path: "".to_string(),
-            message: "'foo' is a required property".to_string()
+            message: "\"foo\" is a required property".to_string()
         }])
     )]
     fn test_schema_validation(
@@ -166,7 +165,7 @@ mod validate_test {
             Error::Validation(e) => {
                 assert_eq!(e.errors().len(), 1);
                 assert_eq!(e.errors()[0].path, "/foo");
-                assert!(e.errors()[0].message.contains("is not of type `boolean`"));
+                assert!(e.errors()[0].message.contains("is not of type \"boolean\""));
             }
             _ => panic!("Expected a validation error"),
         }
@@ -213,7 +212,7 @@ mod validate_test {
                 assert_eq!(e.errors().len(), 1, "Expected one validation error");
                 let error_detail = &e.errors()[0];
                 assert_eq!(error_detail.path, "/foo/0/bar");
-                assert!(error_detail.message.contains("is not of type `boolean`"));
+                assert!(error_detail.message.contains("is not of type \"boolean\""));
             }
             _ => panic!("Expected a validation error"),
         }
