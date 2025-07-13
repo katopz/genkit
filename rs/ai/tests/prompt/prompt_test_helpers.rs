@@ -45,51 +45,55 @@ pub async fn test_runner(case: Box<TestCase>) -> Result<()> {
         None
     };
 
-    // Test generation in a separate block to manage lifetimes
-    {
-        let p_clone = p.clone();
-        let input = case.input.clone();
-        let options = case.options.clone();
+    // Test generation
+    let p_clone = p.clone();
+    let input_clone = case.input.clone();
+    let options_clone = case.options.clone();
+    let response = if let Some(session_arc) = session.clone() {
+        session_arc
+            .run(move || async move { p_clone.generate(input_clone, options_clone).await })
+            .await?
+    } else {
         let context = case.context.clone().unwrap_or_default();
+        let fut = async move { p_clone.generate(input_clone, options_clone).await };
+        genkit_core::context::run_with_context(context, fut).await?
+    };
 
-        let response = if let Some(session_arc) = session.clone() {
-            let fut = async move { p_clone.generate(input, options).await };
-            session_arc.run(fut).await?
-        } else {
-            let fut = async move { p_clone.generate(input, options).await };
-            genkit_core::context::run_with_context(context, fut).await?
-        };
+    assert_eq!(
+        response.text()?,
+        case.want_text,
+        "Failed generate: {}",
+        case.name
+    );
 
-        assert_eq!(
-            response.text()?,
-            case.want_text,
-            "Failed generate: {}",
-            case.name
-        );
-    }
-
-    // Test render in a separate block
-    {
-        let p_clone = p.clone();
-        let input = case.input.clone();
-        let options = case.options.clone();
+    // Test render
+    let p_clone_render = p.clone();
+    let input_clone_render = case.input.clone();
+    let options_clone_render = case.options.clone();
+    let rendered = if let Some(session_arc) = session {
+        session_arc
+            .run(move || async move {
+                p_clone_render
+                    .render(input_clone_render, options_clone_render)
+                    .await
+            })
+            .await?
+    } else {
         let context = case.context.unwrap_or_default();
-
-        let rendered = if let Some(session_arc) = session {
-            let fut = async move { p_clone.render(input, options).await };
-            session_arc.run(fut).await?
-        } else {
-            let fut = async move { p_clone.render(input, options).await };
-            genkit_core::context::run_with_context(context, fut).await?
+        let fut = async move {
+            p_clone_render
+                .render(input_clone_render, options_clone_render)
+                .await
         };
+        genkit_core::context::run_with_context(context, fut).await?
+    };
 
-        let rendered_json = serde_json::to_value(&rendered)?;
-        assert_eq!(
-            rendered_json, case.want_rendered,
-            "Failed render: {}",
-            case.name
-        );
-    }
+    let rendered_json = serde_json::to_value(&rendered)?;
+    assert_eq!(
+        rendered_json, case.want_rendered,
+        "Failed render: {}",
+        case.name
+    );
 
     Ok(())
 }

@@ -288,15 +288,22 @@ where
 
         let global_context = get_context();
         let options_context = opts.as_ref().and_then(|o| o.context.clone());
+        println!("[prompt.render] global_context: {:?}", global_context);
+        println!("[prompt.render] options_context: {:?}", options_context);
 
-        let mut resolver_context = global_context;
-        if let Some(opts_ctx) = options_context.as_ref() {
-            if let Some(res_ctx) = &mut resolver_context {
-                res_ctx.extend(opts_ctx.clone());
-            } else {
-                resolver_context = Some(opts_ctx.clone());
+        let resolver_context = match (global_context, options_context) {
+            (Some(mut global), Some(options)) => {
+                global.extend(options);
+                Some(global)
             }
-        }
+            (Some(global), None) => Some(global),
+            (None, Some(options)) => Some(options),
+            (None, None) => None,
+        };
+        println!(
+            "[prompt.render] final resolver_context: {:?}",
+            resolver_context
+        );
 
         if let Some(data_obj) = render_data.as_object_mut() {
             if let Some(state_val) = state.clone() {

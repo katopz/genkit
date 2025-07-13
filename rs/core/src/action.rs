@@ -2,7 +2,7 @@
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
-// You a copy of the License at
+// You may obtain a copy of the License at
 //
 //     http://www.apache.org/licenses/LICENSE-2.0
 //
@@ -398,8 +398,10 @@ where
 
                 let fut = self.func.run(input, args);
 
-                let is_context_already_set =
-                    opts.context.is_some() && context::get_context().is_some();
+                // This is the key change to prevent recursion.
+                // We check if a context is already set. If so, we are in a nested call
+                // and should not try to set it again with `run_with_context`.
+                let is_context_already_set = context::get_context().is_some();
 
                 let run_result = if !is_context_already_set {
                     if let Some(ctx) = opts.context {

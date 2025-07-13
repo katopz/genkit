@@ -218,11 +218,12 @@ where
     }
 
     /// Executes a future within the context of this session.
-    pub async fn run<F, R>(self: &Arc<Self>, fut: F) -> R
+    pub async fn run<F, Fut, R>(self: &Arc<Self>, f: F) -> Result<R>
     where
-        F: std::future::Future<Output = R>,
+        F: FnOnce() -> Fut,
+        Fut: std::future::Future<Output = Result<R>>,
     {
-        run_with_session(self.clone(), fut).await
+        run_with_session(self.clone(), f()).await
     }
 }
 
