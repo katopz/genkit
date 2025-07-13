@@ -40,7 +40,7 @@ fn test_request(key: Option<&str>) -> RequestData {
 
 #[cfg(test)]
 /// 'apiKey'
-mod test {
+mod api_key_test {
     use super::*;
 
     #[rstest]
