@@ -85,16 +85,16 @@ pub trait Resumable<I, O> {
 
 /// A wrapper for a tool `Action` that provides tool-specific functionality.
 #[derive(Clone)]
-pub struct ToolAction<I = Value, O = Value, S = ()>(pub Action<I, O, S>);
+pub struct ToolAction<I = Value, O = Value, S: Send + 'static = ()>(pub Action<I, O, S>);
 
-impl<I, O, S> Deref for ToolAction<I, O, S> {
+impl<I, O, S: Send + 'static> Deref for ToolAction<I, O, S> {
     type Target = Action<I, O, S>;
     fn deref(&self) -> &Self::Target {
         &self.0
     }
 }
 
-impl<I, O, S> Resumable<I, O> for ToolAction<I, O, S>
+impl<I, O, S: Send + 'static> Resumable<I, O> for ToolAction<I, O, S>
 where
     I: JsonSchema + Serialize,
     O: Serialize + JsonSchema,
@@ -167,7 +167,7 @@ where
 }
 
 #[async_trait]
-impl<I, O, S> ErasedAction for ToolAction<I, O, S>
+impl<I, O, S: Send + 'static> ErasedAction for ToolAction<I, O, S>
 where
     I: DeserializeOwned + JsonSchema + Send + Sync + Clone + Serialize + 'static,
     O: Serialize + JsonSchema + Send + Sync + 'static,
@@ -211,7 +211,7 @@ pub enum ToolArgument {
     Action(Arc<dyn ErasedAction>),
 }
 
-impl<I, O, S> From<ToolAction<I, O, S>> for ToolArgument
+impl<I, O, S: Send + 'static> From<ToolAction<I, O, S>> for ToolArgument
 where
     I: DeserializeOwned + JsonSchema + Send + Sync + Clone + Serialize + 'static,
     O: Serialize + JsonSchema + Send + Sync + 'static,

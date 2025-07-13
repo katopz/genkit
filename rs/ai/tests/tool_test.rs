@@ -39,7 +39,7 @@ async fn get_tool_action<I, O, S>(registry: &Registry, name: &str) -> Arc<ToolAc
 where
     I: 'static,
     O: 'static,
-    S: 'static,
+    S: Send + 'static,
 {
     let erased_action = registry
         .lookup_action(&format!("/tool/{}", name))

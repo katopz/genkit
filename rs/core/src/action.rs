@@ -2,7 +2,7 @@
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
-// You may obtain a copy of the License at
+// You a copy of the License at
 //
 //     http://www.apache.org/licenses/LICENSE-2.0
 //
@@ -23,10 +23,8 @@ use crate::async_utils::{channel, Channel};
 use crate::context::{self, ActionContext};
 use crate::error::{Error, Result};
 use crate::registry::{ActionType, Registry};
-use crate::schema::{parse_schema, ProvidedSchema};
+use crate::schema::{parse_schema, schema_for, ProvidedSchema};
 use crate::status::StatusCode;
-
-use crate::schema::schema_for;
 use crate::tracing::{self, TraceContext};
 use async_trait::async_trait;
 use futures::{Future, Stream, StreamExt};
@@ -38,6 +36,57 @@ use std::fmt::Debug;
 use std::pin::Pin;
 use std::sync::Arc;
 use tokio_util::sync::CancellationToken;
+
+// --- Middleware Structs ---
+
+/// A function that represents the next step in a middleware chain.
+/// The future returned by a middleware `next` function.
+pub type ActionMiddlewareNextFuture<O> =
+    Pin<Box<dyn Future<Output = Result<ActionResult<O>>> + Send>>;
+
+/// The trait object for a middleware `next` function.
+pub type ActionMiddlewareNextFn<I, O, S> =
+    dyn Fn(I, Option<ActionRunOptions<S>>) -> ActionMiddlewareNextFuture<O> + Send + Sync;
+
+/// A function that represents the next step in a middleware chain.
+pub struct ActionMiddlewareNext<I, O, S: Send + 'static> {
+    pub f: Arc<ActionMiddlewareNextFn<I, O, S>>,
+    pub _phantom: std::marker::PhantomData<(I, O, S)>,
+}
+
+impl<I, O, S: Send + 'static> Clone for ActionMiddlewareNext<I, O, S> {
+    fn clone(&self) -> Self {
+        Self {
+            f: self.f.clone(),
+            _phantom: std::marker::PhantomData,
+        }
+    }
+}
+
+/// A middleware function for an action.
+pub type ActionMiddlewareFn<I, O, S> = dyn Fn(
+        I,
+        Option<ActionRunOptions<S>>,
+        ActionMiddlewareNext<I, O, S>,
+    ) -> ActionMiddlewareNextFuture<O>
+    + Send
+    + Sync;
+
+pub struct ActionMiddleware<I, O, S: Send + 'static> {
+    pub f: Arc<ActionMiddlewareFn<I, O, S>>,
+    pub _phantom: std::marker::PhantomData<(I, O, S)>,
+}
+
+impl<I, O, S: Send + 'static> Clone for ActionMiddleware<I, O, S> {
+    fn clone(&self) -> Self {
+        Self {
+            f: self.f.clone(),
+            _phantom: std::marker::PhantomData,
+        }
+    }
+}
+
+// --- Core Action Structs ---
 
 /// Metadata describing a Genkit `Action`.
 #[derive(Debug, Clone, Serialize)]
@@ -85,6 +134,7 @@ pub struct StreamingResponse<O, S> {
 pub type StreamingCallback<S> = Arc<dyn Fn(Result<S, Error>) + Send + Sync>;
 
 /// Options for running an `Action`.
+#[derive(Clone)]
 pub struct ActionRunOptions<S: Send + 'static> {
     /// A callback to receive streaming chunks.
     pub on_chunk: Option<StreamingCallback<S>>,
@@ -122,6 +172,8 @@ pub struct ActionFnArg<S: Send + 'static> {
     pub abort_signal: CancellationToken,
 }
 
+// --- Action Logic ---
+
 /// A trait that defines the executable logic of a Genkit action.
 ///
 /// This allows for different action functions (e.g., closures) to be stored
@@ -150,26 +202,28 @@ where
 ///
 /// `Action` is the central abstraction in Genkit. It encapsulates metadata
 /// and an executable function, and is managed by a `Registry`.
-pub struct Action<I, O, S> {
+pub struct Action<I, O, S: Send + 'static> {
     pub meta: Arc<ActionMetadata>,
     pub func: Arc<dyn ActionFn<I, O, S>>,
+    pub middleware: Vec<ActionMiddleware<I, O, S>>,
 }
 
-impl<I, O, S> Clone for Action<I, O, S> {
+impl<I, O, S: Send + 'static> Clone for Action<I, O, S> {
     fn clone(&self) -> Self {
         Self {
             meta: self.meta.clone(),
             func: self.func.clone(),
+            middleware: self.middleware.clone(),
         }
     }
 }
 
-impl<I, O, S> Debug for Action<I, O, S> {
+impl<I, O, S: Send + 'static> Debug for Action<I, O, S> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("Action")
             .field("meta", &self.meta)
-            // Note: We can't print the function itself, so we just indicate its presence.
             .field("func", &"Arc<dyn ActionFn>")
+            .field("middleware", &self.middleware.len())
             .finish()
     }
 }
@@ -193,10 +247,44 @@ where
         self
     }
 
+    /// Executes the action, running any configured middleware first.
+    pub async fn run(
+        &self,
+        input: I,
+        options: Option<ActionRunOptions<S>>,
+    ) -> Result<ActionResult<O>> {
+        if self.middleware.is_empty() {
+            return self.run_internal(input, options).await;
+        }
+
+        let self_clone = self.clone();
+        // The final link in the chain calls the internal run method.
+        let mut next: ActionMiddlewareNext<I, O, S> = ActionMiddlewareNext {
+            f: Arc::new(move |i, o| {
+                let self_clone_for_internal = self_clone.clone();
+                Box::pin(async move { self_clone_for_internal.run_internal(i, o).await })
+            }),
+            _phantom: std::marker::PhantomData,
+        };
+
+        // Wrap the `next` function with each middleware, in reverse order.
+        for mw in self.middleware.iter().rev() {
+            let current_mw = mw.clone();
+            let next_in_chain = next.clone();
+            next = ActionMiddlewareNext {
+                f: Arc::new(move |i, o| (current_mw.f)(i, o, next_in_chain.clone())),
+                _phantom: std::marker::PhantomData,
+            };
+        }
+
+        // Execute the full chain.
+        (next.f)(input, options).await
+    }
+
     /// Executes the action with the given input and returns the final result.
     ///
     /// This method can handle streaming via the `on_chunk` callback in `ActionRunOptions`.
-    pub async fn run(
+    async fn run_internal(
         &self,
         input: I,
         options: Option<ActionRunOptions<S>>,
@@ -349,13 +437,16 @@ where
     }
 }
 
+// --- Action Builder ---
+
 /// Builder for creating a new `Action`.
-pub struct ActionBuilder<I, O, S, F> {
+pub struct ActionBuilder<I, O, S: Send + 'static, F> {
     action_type: ActionType,
     name: String,
     description: Option<String>,
     metadata: Option<HashMap<String, Value>>,
     func: F,
+    middleware: Vec<ActionMiddleware<I, O, S>>,
     _marker: std::marker::PhantomData<(I, O, S)>,
 }
 
@@ -374,6 +465,7 @@ where
             description: None,
             metadata: None,
             func,
+            middleware: Vec::new(),
             _marker: std::marker::PhantomData,
         }
     }
@@ -385,6 +477,11 @@ where
 
     pub fn with_metadata(mut self, metadata: HashMap<String, Value>) -> Self {
         self.metadata = Some(metadata);
+        self
+    }
+
+    pub fn with_middleware(mut self, middleware: Vec<ActionMiddleware<I, O, S>>) -> Self {
+        self.middleware = middleware;
         self
     }
 
@@ -409,6 +506,7 @@ where
         Action {
             meta,
             func: Arc::new(self.func),
+            middleware: self.middleware,
         }
     }
 }
