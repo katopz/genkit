@@ -45,7 +45,6 @@ bytes            = "1.10"
 colored          = "3.0"
 handlebars       = "6.3.2"
 http-body-util   = "0.1.3"
-log              = "0.4.27"
 once_cell        = "1.21.3"
 pin-project      = "1.1.10"
 pin-project-lite = "0.2.16"
@@ -59,4 +58,6 @@ uritemplate      = "0.1"
 uuid             = { version = "1.17", features = ["v4", "serde"] }
 
 # For testing
+chrono     = "0.4.41"
+log        = "0.4.27"
 tokio-test = "0.4"
