@@ -36,8 +36,8 @@ mod test {
     };
 
     #[fixture]
-    fn registry() -> Arc<Mutex<Registry>> {
-        Arc::new(Mutex::new(Registry::new()))
+    fn registry() -> Registry {
+        Registry::new()
     }
 
     #[rstest]
@@ -95,9 +95,9 @@ mod test {
     #[rstest]
     #[tokio::test]
     /// 'returns telemetry info'
-    async fn test_returns_telemetry_info(registry: Arc<Mutex<Registry>>) {
+    async fn test_returns_telemetry_info(registry: Registry) {
         let test_action = define_action(
-            &registry.lock().unwrap(),
+            &registry,
             ActionType::Util,
             "foo",
             |input: String, _: ActionFnArg<()>| async move { Ok(input.len() as i32) },
@@ -113,7 +113,7 @@ mod test {
     #[rstest]
     #[tokio::test]
     /// 'run the action with options'
-    async fn test_run_action_with_options(registry: Arc<Mutex<Registry>>) {
+    async fn test_run_action_with_options(registry: Registry) {
         #[derive(Serialize, Deserialize, Debug, PartialEq, Clone, JsonSchema)]
         struct MyContext {
             foo: String,
@@ -123,7 +123,7 @@ mod test {
         let passed_context_clone = passed_context.clone();
 
         let test_action = define_action(
-            &registry.lock().unwrap(),
+            &registry,
             ActionType::Util,
             "foo",
             move |input: String, args: ActionFnArg<i32>| {
@@ -182,7 +182,7 @@ mod test {
     #[rstest]
     #[tokio::test]
     ///'should stream the response'
-    async fn test_should_stream_the_response(registry: Arc<Mutex<Registry>>) {
+    async fn test_should_stream_the_response(registry: Registry) {
         use futures::stream::TryStreamExt;
         #[derive(Serialize, Deserialize, JsonSchema, Debug, PartialEq, Clone)]
         struct StreamCount {
@@ -190,7 +190,7 @@ mod test {
         }
 
         let test_action = define_action(
-            &registry.lock().unwrap(),
+            &registry,
             ActionType::Util,
             "hello",
             |input: String, args: ActionFnArg<StreamCount>| async move {
@@ -226,14 +226,14 @@ mod test {
     #[rstest]
     #[tokio::test]
     /// 'should inherit context from parent action invocation'
-    async fn test_should_inherit_context_from_parent(registry: Arc<Mutex<Registry>>) {
+    async fn test_should_inherit_context_from_parent(registry: Registry) {
         #[derive(Serialize, Deserialize, Debug, PartialEq, Clone, JsonSchema)]
         struct Auth {
             email: String,
         }
 
         let child_action = define_action(
-            &registry.lock().unwrap(),
+            &registry,
             ActionType::Util,
             "child",
             |_: (), args: ActionFnArg<()>| async move {
@@ -248,7 +248,7 @@ mod test {
         );
 
         let parent_action = define_action(
-            &registry.lock().unwrap(),
+            &registry,
             ActionType::Util,
             "parent",
             move |_: (), _: ActionFnArg<()>| {
@@ -262,10 +262,8 @@ mod test {
             },
         );
 
-        let mut context_map = HashMap::new();
-        context_map.insert("auth".to_string(), json!({"email": "a@b.c"}));
         let context = ActionContext {
-            additional_context: context_map,
+            auth: Some(json!({"email": "a@b.c"})),
             ..Default::default()
         };
 
@@ -282,9 +280,9 @@ mod test {
     #[rstest]
     #[tokio::test]
     /// 'should include trace info in the context'
-    async fn test_should_include_trace_info_in_context(registry: Arc<Mutex<Registry>>) {
+    async fn test_should_include_trace_info_in_context(registry: Registry) {
         let test_action = define_action(
-            &registry.lock().unwrap(),
+            &registry,
             ActionType::Util,
             "foo",
             |_: (), args: ActionFnArg<()>| async move {
