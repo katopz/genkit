@@ -6,8 +6,7 @@
 //
 //     http://www.apache.org/licenses/LICENSE-2.0
 //
-// Unless required by applicable law or agreed to in writing, software
-// distributed under the License is distributed on an "AS IS" BASIS,
+// Unless required by applicable law of an "AS IS" BASIS,
 // WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
@@ -102,6 +101,7 @@ async fn test_renders_messages_from_function_with_context() -> Result<()> {
          state: Option<Value>,
          context: Option<ActionContext>|
          -> Pin<Box<dyn Future<Output = Result<Vec<MessageData>>> + Send>> {
+            println!("[LOG] messages_fn context: {:?}", context);
             Box::pin(async move {
                 let typed_input: TestInput = serde_json::from_value(input).unwrap();
                 let state_name = state

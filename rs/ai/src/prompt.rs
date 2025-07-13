@@ -241,8 +241,15 @@ where
     pub async fn generate(
         &self,
         input: I,
-        opts: Option<PromptGenerateOptions<O>>,
+        mut opts: Option<PromptGenerateOptions<O>>,
     ) -> Result<GenerateResponse<O>> {
+        if opts.as_ref().and_then(|o| o.context.as_ref()).is_none() {
+            if let Some(global_context) = get_context() {
+                let mut new_opts = opts.take().unwrap_or_default();
+                new_opts.context = Some(global_context);
+                opts = Some(new_opts);
+            }
+        }
         let render_opts = self.render(input, opts).await?;
         generate::<O>(&self.registry, render_opts).await
     }
@@ -251,8 +258,15 @@ where
     pub async fn stream(
         &self,
         input: I,
-        opts: Option<PromptGenerateOptions<O>>,
+        mut opts: Option<PromptGenerateOptions<O>>,
     ) -> Result<GenerateStreamResponse<O>> {
+        if opts.as_ref().and_then(|o| o.context.as_ref()).is_none() {
+            if let Some(global_context) = get_context() {
+                let mut new_opts = opts.take().unwrap_or_default();
+                new_opts.context = Some(global_context);
+                opts = Some(new_opts);
+            }
+        }
         let render_opts = self.render(input, opts).await?;
         generate_stream::<O>(&self.registry, render_opts).await
     }
@@ -287,9 +301,9 @@ where
         };
 
         let global_context = get_context();
+        println!("[LOG] global_context: {:?}", global_context);
         let options_context = opts.as_ref().and_then(|o| o.context.clone());
-        println!("[prompt.render] global_context: {:?}", global_context);
-        println!("[prompt.render] options_context: {:?}", options_context);
+        println!("[LOG] options_context: {:?}", options_context);
 
         let resolver_context = match (global_context, options_context) {
             (Some(mut global), Some(options)) => {
@@ -300,10 +314,7 @@ where
             (None, Some(options)) => Some(options),
             (None, None) => None,
         };
-        println!(
-            "[prompt.render] final resolver_context: {:?}",
-            resolver_context
-        );
+        println!("[LOG] final resolver_context: {:?}", resolver_context);
 
         if let Some(data_obj) = render_data.as_object_mut() {
             if let Some(state_val) = state.clone() {
@@ -311,20 +322,35 @@ where
                 data_obj.insert("@state".to_string(), state_val);
             }
             if let Some(context) = &resolver_context {
-                if let Some(auth_val) = context.get("auth") {
-                    data_obj.insert("auth".to_string(), auth_val.clone());
+                if let Some(Value::Object(auth_map)) = &context.auth {
+                    println!("[LOG] Extending render_data with auth_map: {:?}", auth_map);
+                    data_obj.extend(auth_map.clone());
                 }
             }
         }
+        println!(
+            "[LOG] Final render_data before templates: {}",
+            serde_json::to_string_pretty(&render_data).unwrap_or_default()
+        );
+
+        let resolved_input: I = serde_json::from_value(render_data.clone()).map_err(|e| {
+            Error::new_internal(format!("Failed to deserialize resolved input: {}", e))
+        })?;
 
         // 2. Build the message list in the correct order
         let mut messages = Vec::new();
 
         // System Prompt
         if let Some(resolver) = &self.config.system_fn {
-            let text = resolver(input.clone(), state.clone(), resolver_context.clone()).await?;
+            let text = resolver(
+                resolved_input.clone(),
+                state.clone(),
+                resolver_context.clone(),
+            )
+            .await?;
             messages.push(MessageData::system(vec![Part::text(text)]));
         } else if let Some(system_template) = &self.config.system {
+            println!("[LOG] Rendering system_template: '{}'", system_template);
             let system_text = handlebars
                 .render_template(system_template, &render_data)
                 .map_err(|e| {
@@ -338,8 +364,12 @@ where
             messages.extend(opts_messages.clone());
         }
         if let Some(resolver) = &self.config.messages_fn {
-            let resolved_messages =
-                resolver(input.clone(), state.clone(), resolver_context.clone()).await?;
+            let resolved_messages = resolver(
+                resolved_input.clone(),
+                state.clone(),
+                resolver_context.clone(),
+            )
+            .await?;
             messages.extend(resolved_messages);
         } else if let Some(config_messages) = &self.config.messages {
             let mut rendered_messages = Vec::new();
@@ -349,6 +379,7 @@ where
                 for part_template in &msg_template.content {
                     let mut new_part = part_template.clone();
                     if let Some(text_template) = &part_template.text {
+                        println!("[LOG] Rendering message part template: '{}'", text_template);
                         let rendered_text = handlebars
                             .render_template(text_template, &render_data)
                             .map_err(|e| {
@@ -369,9 +400,18 @@ where
 
         // Main User Prompt
         if let Some(resolver) = &self.config.prompt_fn {
-            let text = resolver(input.clone(), state.clone(), resolver_context.clone()).await?;
+            let text = resolver(
+                resolved_input.clone(),
+                state.clone(),
+                resolver_context.clone(),
+            )
+            .await?;
             messages.push(MessageData::user(vec![Part::text(text)]));
         } else if let Some(prompt_template) = &self.config.prompt {
+            println!(
+                "[LOG] Rendering main prompt template: '{}'",
+                prompt_template
+            );
             let prompt_text = handlebars
                 .render_template(prompt_template, &render_data)
                 .map_err(|e| {
@@ -382,7 +422,7 @@ where
 
         // 3. Resolve docs
         let docs = if let Some(docs_fn) = &self.config.docs_fn {
-            docs_fn(input, state, resolver_context.clone()).await?
+            docs_fn(resolved_input, state, resolver_context.clone()).await?
         } else {
             self.config.docs.clone().unwrap_or_default()
         };
