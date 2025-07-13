@@ -191,15 +191,16 @@ pub fn simulate_system_prompt(options: Option<SystemPromptSimulateOptions>) -> M
                     .position(|m| m.role == crate::model::Role::System)
                 {
                     let system_message = req.messages.remove(pos);
-                    let mut user_content = vec![Part {
-                        text: Some(preface),
-                        ..Default::default()
-                    }];
-                    user_content.extend(system_message.content);
+                    let system_text = system_message
+                        .content
+                        .iter()
+                        .filter_map(|p| p.text.as_deref())
+                        .collect::<String>();
+                    let combined_text = format!("{}{}", preface, system_text);
 
                     let user_message = MessageData {
                         role: crate::model::Role::User,
-                        content: user_content,
+                        content: vec![Part::text(combined_text)],
                         metadata: None,
                     };
                     let model_message = MessageData {
