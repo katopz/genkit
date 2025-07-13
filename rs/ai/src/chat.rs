@@ -141,7 +141,7 @@ impl<S: Serialize + DeserializeOwned + Clone + Send + Sync + 'static> Chat<S> {
             final_messages = history;
         }
 
-        // Finally, append any other messages that were passed in during chat creation.
+        // Finally, append any other non-preamble messages that were passed in during chat creation.
         final_messages.extend(other_new_messages);
         request_base.messages = final_messages;
 

@@ -24,6 +24,7 @@ use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 
+use genkit_ai::session::SessionUpdater;
 use std::sync::Arc;
 use tokio_stream::StreamExt;
 
@@ -428,15 +429,25 @@ async fn test_initializes_chat_with_history(#[future] genkit_instance: Arc<Genki
         },
     ];
 
-    // The system prompt to start the chat with.
-    let system_prompt = MessageData::system(vec![Part::text("system instructions")]);
-
     let session =
         genkit_ai::Session::<()>::new(Arc::new(genkit.registry().clone()), None, None, None)
             .await
             .unwrap();
 
-    // Create the chat, providing both a new system prompt and the existing history.
+    // Manually update the session's message store to simulate a pre-existing conversation.
+    session
+        .update_messages(genkit_ai::chat::MAIN_THREAD, &history)
+        .await
+        .unwrap();
+
+    // The system prompt to start the new chat with.
+    let system_prompt = MessageData {
+        role: Role::System,
+        content: vec![Part::text("system instructions")],
+        metadata: Some([("preamble".to_string(), json!(true))].into()),
+    };
+
+    // Create the chat. It should automatically load the history we just saved.
     let chat = Arc::new(session)
         .chat::<()>(Some(ChatOptions {
             base_options: Some(genkit_ai::generate::BaseGenerateOptions {
@@ -444,7 +455,6 @@ async fn test_initializes_chat_with_history(#[future] genkit_instance: Arc<Genki
                 messages: vec![system_prompt], // This becomes the new preamble
                 ..Default::default()
             }),
-            history: Some(history.clone()), // This is the persisted history
             ..Default::default()
         }))
         .await
@@ -460,12 +470,12 @@ async fn test_initializes_chat_with_history(#[future] genkit_instance: Arc<Genki
                 Part::text("SYSTEM INSTRUCTIONS:\n"),
                 Part::text("system instructions"),
             ],
-            ..Default::default()
+            metadata: Some([("preamble".to_string(), json!(true))].into()),
         },
         MessageData {
             role: Role::Model,
             content: vec![Part::text("Understood.")],
-            ..Default::default()
+            metadata: Some([("preamble".to_string(), json!(true))].into()),
         },
     ];
     // The original history follows the simulated system prompt.
