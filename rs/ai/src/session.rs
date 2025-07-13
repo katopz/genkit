@@ -106,6 +106,7 @@ pub struct ChatOptions<'a, I, S> {
     pub thread_name: Option<String>,
     pub preamble: Option<&'a ExecutablePrompt<I>>,
     pub base_options: Option<BaseGenerateOptions>,
+    pub history: Option<Vec<MessageData>>,
     pub prompt_render_input: Option<I>,
     pub _marker: std::marker::PhantomData<S>,
 }
@@ -116,6 +117,7 @@ impl<'a, I, S> Default for ChatOptions<'a, I, S> {
             thread_name: None,
             preamble: None,
             base_options: None,
+            history: None,
             prompt_render_input: None,
             _marker: std::marker::PhantomData,
         }
@@ -196,8 +198,12 @@ where
             }
         };
 
-        let data = self.data.lock().await;
-        let history = data.threads.get(&thread_name).cloned().unwrap_or_default();
+        let history = if let Some(h) = options.history {
+            h
+        } else {
+            let data = self.data.lock().await;
+            data.threads.get(&thread_name).cloned().unwrap_or_default()
+        };
 
         let chat_base_options = BaseGenerateOptions {
             model: base_options.model,
