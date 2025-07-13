@@ -285,15 +285,15 @@ mod get_context_test {
         assert_eq!(result, r#"bar foo {"user":"test-user"}"#);
     }
 
-    #[derive(Serialize, Deserialize, JsonSchema, Debug, PartialEq, Clone)]
-    struct StreamCount {
-        count: i32,
-    }
-
     #[rstest]
     #[tokio::test]
     /// 'should streams the flow' (with context)
     async fn test_streaming_with_context(registry: Registry) {
+        #[derive(Serialize, Deserialize, JsonSchema, Debug, PartialEq, Clone)]
+        struct StreamCount {
+            count: i32,
+        }
+
         let test_flow = define_flow(
             &registry,
             "streamingContextFlow",

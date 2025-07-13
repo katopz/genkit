@@ -12,199 +12,286 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! # Flow Tests
+//! # Action Tests
 //!
-//! Integration tests for the action, ported from `action_test.ts`.
-
-use futures::StreamExt;
-use genkit_core::action::{ActionBuilder, ActionFnArg, ActionRunOptions};
-use genkit_core::async_utils::channel;
-use genkit_core::context::ActionContext;
-use genkit_core::error;
-use genkit_core::registry::ActionType;
-use genkit_core::tracing::TraceContext;
-use schemars::JsonSchema;
-use serde::{Deserialize, Serialize};
-use serde_json::json;
-use tokio_util::sync::CancellationToken;
-
-#[derive(Serialize, Deserialize, JsonSchema, Debug, PartialEq, Clone)]
-struct TestInput {
-    name: String,
-}
-
-#[derive(Serialize, Deserialize, JsonSchema, Debug, PartialEq, Clone)]
-struct TestOutput {
-    greeting: String,
-}
-
-#[derive(Serialize, Deserialize, JsonSchema, Debug, PartialEq, Clone)]
-struct TestStreamChunk {
-    count: i32,
-}
+//! Integration tests for the action system.
 
 #[cfg(test)]
 mod test {
-    use crate::*;
+    use genkit_core::{
+        action::{
+            define_action, ActionBuilder, ActionFnArg, ActionMiddleware, ActionMiddlewareNext,
+            ActionRunOptions, StreamingResponse,
+        },
+        context::ActionContext,
+        registry::{ActionType, Registry},
+    };
+    use rstest::*;
+    use schemars::JsonSchema;
+    use serde::{Deserialize, Serialize};
+    use serde_json::json;
+    use std::{
+        collections::HashMap,
+        sync::{Arc, Mutex},
+    };
 
-    #[tokio::test]
-    async fn test_action_execution_with_context() {
-        // Define an action using the builder
-        let test_action = ActionBuilder::new(
-            ActionType::Util,
-            "testUtil",
-            |input: TestInput, args: ActionFnArg<TestStreamChunk>| async move {
-                assert!(args.context.is_some());
-                let context = args.context.unwrap();
-                let auth_user = context
-                    .auth
-                    .unwrap()
-                    .get("user")
-                    .unwrap()
-                    .as_str()
-                    .unwrap()
-                    .to_string();
-
-                Ok(TestOutput {
-                    greeting: format!("Hello, {} from {}!", input.name, auth_user),
-                })
-            },
-        )
-        .build();
-
-        // Manually construct the arguments for invocation
-        let (chunk_tx, _chunk_rx) = channel();
-        let args = ActionFnArg {
-            streaming_requested: false,
-            chunk_sender: chunk_tx,
-            context: Some(ActionContext {
-                auth: Some(json!({"user": "test-user"})),
-                ..Default::default()
-            }),
-            trace: TraceContext {
-                trace_id: "trace-1".into(),
-                span_id: "span-1".into(),
-            },
-            abort_signal: CancellationToken::new(),
-        };
-
-        let input = TestInput {
-            name: "Genkit".into(),
-        };
-
-        // Directly call the action's underlying function
-        let result = test_action.func.run(input, args).await.unwrap();
-
-        assert_eq!(result.greeting, "Hello, Genkit from test-user!");
+    #[fixture]
+    fn registry() -> Arc<Mutex<Registry>> {
+        Arc::new(Mutex::new(Registry::new()))
     }
 
+    #[rstest]
     #[tokio::test]
-    async fn test_action_streaming() {
-        // Define a streaming action
-        let streaming_action = ActionBuilder::new(
-            ActionType::Flow,
-            "streamingFlow",
-            |input: TestInput, args: ActionFnArg<TestStreamChunk>| async move {
-                for i in 1..=3 {
-                    let _ = args.chunk_sender.send(TestStreamChunk { count: i });
-                }
-                // Close the sender to signal the end of the stream.
-                // Note: The async_utils::Channel doesn't have an explicit close on the sender side.
-                // The stream ends when the sender is dropped.
-                Ok(TestOutput {
-                    greeting: format!("Streamed for {}", input.name),
-                })
-            },
+    async fn test_apply_middleware() {
+        let middleware1 = ActionMiddleware {
+            f: Arc::new(
+                |input: String, options, next: ActionMiddlewareNext<String, i32, ()>| {
+                    Box::pin(async move {
+                        let mut result = (next.f)(input + "middle1", options).await?;
+                        result.result += 1;
+                        Ok(result)
+                    })
+                },
+            ),
+            _phantom: std::marker::PhantomData,
+        };
+
+        let middleware2 = ActionMiddleware {
+            f: Arc::new(
+                |input: String, options, next: ActionMiddlewareNext<String, i32, ()>| {
+                    Box::pin(async move {
+                        let mut result = (next.f)(input + "middle2", options).await?;
+                        result.result += 2;
+                        Ok(result)
+                    })
+                },
+            ),
+            _phantom: std::marker::PhantomData,
+        };
+
+        let action = ActionBuilder::new(
+            ActionType::Util,
+            "foo",
+            |input: String, _: ActionFnArg<()>| async move { Ok(input.len() as i32) },
         )
+        .with_middleware(vec![middleware1, middleware2])
         .build();
 
-        let input = TestInput {
-            name: "Streamer".into(),
-        };
-        let options = Some(ActionRunOptions {
-            context: Some(ActionContext {
-                auth: Some(json!({"user": "stream-user"})),
-                ..Default::default()
-            }),
+        let result = action.run("foo".to_string(), None).await.unwrap();
+
+        // "foomiddle2middle1".len() = 17. 17 + 1 + 2 = 20.
+        // Middleware is applied in reverse order of definition to form a call stack.
+        // The effective order of execution is middleware2, then middleware1.
+        // input -> "foo"
+        // middleware2 adds "middle2" -> "foomiddle2"
+        // middleware1 adds "middle1" -> "foomiddle2middle1" (length 17)
+        // action fn returns 17
+        // middleware1 adds 1 -> 18
+        // middleware2 adds 2 -> 20
+        assert_eq!(result.result, 20);
+    }
+
+    #[rstest]
+    #[tokio::test]
+    async fn test_returns_telemetry_info(registry: Arc<Mutex<Registry>>) {
+        let test_action = define_action(
+            &registry.lock().unwrap(),
+            ActionType::Util,
+            "foo",
+            |input: String, _: ActionFnArg<()>| async move { Ok(input.len() as i32) },
+        );
+
+        let action_result = test_action.run("foo".to_string(), None).await.unwrap();
+
+        assert_eq!(action_result.result, 3);
+        assert!(!action_result.telemetry.trace_id.is_empty());
+        assert!(!action_result.telemetry.span_id.is_empty());
+    }
+
+    #[rstest]
+    #[tokio::test]
+    async fn test_run_action_with_options(registry: Arc<Mutex<Registry>>) {
+        #[derive(Serialize, Deserialize, Debug, PartialEq, Clone, JsonSchema)]
+        struct MyContext {
+            foo: String,
+        }
+
+        let passed_context = Arc::new(Mutex::new(None));
+        let passed_context_clone = passed_context.clone();
+
+        let test_action = define_action(
+            &registry.lock().unwrap(),
+            ActionType::Util,
+            "foo",
+            move |input: String, args: ActionFnArg<i32>| {
+                let passed_context_clone_inner = passed_context.clone();
+                async move {
+                    if let Some(ctx) = args.context {
+                        *passed_context_clone_inner.lock().unwrap() =
+                            serde_json::from_value::<MyContext>(
+                                ctx.get("my_context").unwrap().clone(),
+                            )
+                            .ok();
+                    }
+                    let _ = args.chunk_sender.send(1);
+                    let _ = args.chunk_sender.send(2);
+                    let _ = args.chunk_sender.send(3);
+                    Ok(input.len() as i32)
+                }
+            },
+        );
+
+        let chunks = Arc::new(Mutex::new(Vec::new()));
+        let chunks_clone = chunks.clone();
+
+        let mut context_map = HashMap::new();
+        context_map.insert("my_context".to_string(), json!({"foo": "bar"}));
+        let context = ActionContext {
+            additional_context: context_map,
             ..Default::default()
-        });
+        };
 
-        // Use the .stream() helper method
-        let response = streaming_action.stream(input, options);
+        let options = ActionRunOptions {
+            on_chunk: Some(Arc::new(move |chunk| {
+                if let Ok(c) = chunk {
+                    chunks_clone.lock().unwrap().push(c);
+                }
+            })),
+            context: Some(context),
+            ..Default::default()
+        };
 
-        // Poll the stream and the final result concurrently to avoid deadlock.
-        let (stream_results, output_result) =
-            tokio::join!(response.stream.collect::<Vec<_>>(), response.output);
+        let result = test_action
+            .run("1234".to_string(), Some(options))
+            .await
+            .unwrap();
 
-        // Check the collected chunks.
-        let chunks: Vec<TestStreamChunk> = stream_results.into_iter().map(|r| r.unwrap()).collect();
-
-        // Check the final output.
-        let output = output_result.unwrap();
-
+        assert_eq!(result.result, 4);
         assert_eq!(
-            chunks,
+            *passed_context_clone.lock().unwrap(),
+            Some(MyContext {
+                foo: "bar".to_string()
+            })
+        );
+        assert_eq!(*chunks.lock().unwrap(), vec![1, 2, 3]);
+    }
+
+    #[rstest]
+    #[tokio::test]
+    async fn test_should_stream_the_response(registry: Arc<Mutex<Registry>>) {
+        use futures::stream::TryStreamExt;
+        #[derive(Serialize, Deserialize, JsonSchema, Debug, PartialEq, Clone)]
+        struct StreamCount {
+            count: i32,
+        }
+
+        let test_action = define_action(
+            &registry.lock().unwrap(),
+            ActionType::Util,
+            "hello",
+            |input: String, args: ActionFnArg<StreamCount>| async move {
+                let _ = args.chunk_sender.send(StreamCount { count: 1 });
+                let _ = args.chunk_sender.send(StreamCount { count: 2 });
+                let _ = args.chunk_sender.send(StreamCount { count: 3 });
+                Ok(format!("hi {}", input))
+            },
+        );
+
+        let streaming_response: StreamingResponse<String, StreamCount> =
+            test_action.stream("Pavel".to_string(), None);
+
+        let (chunks_result, output_result) = tokio::join!(
+            streaming_response.stream.try_collect::<Vec<_>>(),
+            streaming_response.output
+        );
+
+        let received_chunks = chunks_result.unwrap();
+        let final_output = output_result.unwrap();
+
+        assert_eq!(final_output, "hi Pavel".to_string());
+        assert_eq!(
+            received_chunks,
             vec![
-                TestStreamChunk { count: 1 },
-                TestStreamChunk { count: 2 },
-                TestStreamChunk { count: 3 }
+                StreamCount { count: 1 },
+                StreamCount { count: 2 },
+                StreamCount { count: 3 }
             ]
         );
-        assert_eq!(output.greeting, "Streamed for Streamer");
     }
 
+    #[rstest]
     #[tokio::test]
-    async fn test_action_aborts_via_signal() {
-        let long_running_action = ActionBuilder::new(
+    async fn test_should_inherit_context_from_parent(registry: Arc<Mutex<Registry>>) {
+        #[derive(Serialize, Deserialize, Debug, PartialEq, Clone, JsonSchema)]
+        struct Auth {
+            email: String,
+        }
+
+        let child_action = define_action(
+            &registry.lock().unwrap(),
             ActionType::Util,
-            "longRunning",
+            "child",
             |_: (), args: ActionFnArg<()>| async move {
-                tokio::select! {
-                    _ = args.abort_signal.cancelled() => {
-                        // The operation was cancelled.
-                        Err(genkit_core::error::Error::new_user_facing(
-                            genkit_core::status::StatusCode::Cancelled,
-                            "Operation was cancelled by the user.",
-                            None
-                        ))
-                    },
-                    _ = tokio::time::sleep(std::time::Duration::from_secs(5)) => {
-                        // This part should not be reached in this test.
-                        Ok(())
-                    }
+                let email = args
+                    .context
+                    .and_then(|ctx| ctx.get("auth").cloned())
+                    .and_then(|v| serde_json::from_value::<Auth>(v).ok())
+                    .map(|auth| auth.email)
+                    .unwrap_or_else(|| "unknown".to_string());
+                Ok(format!("hi {}", email))
+            },
+        );
+
+        let parent_action = define_action(
+            &registry.lock().unwrap(),
+            ActionType::Util,
+            "parent",
+            move |_: (), _: ActionFnArg<()>| {
+                let child_action_clone = child_action.clone();
+                async move {
+                    // Because the parent's `run` will establish the context, the child's `run`
+                    // will pick it up from the task-local storage.
+                    let child_result = child_action_clone.run((), None).await.unwrap();
+                    Ok(child_result.result)
                 }
             },
-        )
-        .build();
+        );
 
-        let cancel_token = CancellationToken::new();
-
-        let (chunk_tx, _chunk_rx) = channel();
-        let args = ActionFnArg {
-            streaming_requested: false,
-            chunk_sender: chunk_tx,
-            context: None,
-            trace: TraceContext {
-                trace_id: "trace-cancel".into(),
-                span_id: "span-cancel".into(),
-            },
-            abort_signal: cancel_token.clone(),
+        let mut context_map = HashMap::new();
+        context_map.insert("auth".to_string(), json!({"email": "a@b.c"}));
+        let context = ActionContext {
+            additional_context: context_map,
+            ..Default::default()
         };
 
-        let handle = tokio::spawn(async move { long_running_action.func.run((), args).await });
+        let options = ActionRunOptions {
+            context: Some(context),
+            ..Default::default()
+        };
 
-        // Cancel the task after a short delay
-        tokio::time::sleep(std::time::Duration::from_millis(50)).await;
-        cancel_token.cancel();
+        let result = parent_action.run((), Some(options)).await.unwrap();
 
-        let result = handle.await.unwrap();
-        assert!(result.is_err());
+        assert_eq!(result.result, "hi a@b.c");
+    }
 
-        if let Err(error::Error::UserFacing(status)) = result {
-            assert_eq!(status.code, genkit_core::status::StatusCode::Cancelled);
-            assert_eq!(status.message, "Operation was cancelled by the user.");
-        } else {
-            panic!("Expected a UserFacing error with Cancelled status");
-        }
+    #[rstest]
+    #[tokio::test]
+    async fn test_should_include_trace_info_in_context(registry: Arc<Mutex<Registry>>) {
+        let test_action = define_action(
+            &registry.lock().unwrap(),
+            ActionType::Util,
+            "foo",
+            |_: (), args: ActionFnArg<()>| async move {
+                Ok(format!(
+                    "traceId={} spanId={}",
+                    !args.trace.trace_id.is_empty(),
+                    !args.trace.span_id.is_empty()
+                ))
+            },
+        );
+
+        let result = test_action.run((), None).await.unwrap();
+        println!("{:?}", result.result);
+        assert_eq!(result.result, "traceId=true spanId=true");
     }
 }
