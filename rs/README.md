@@ -97,7 +97,3 @@ This section tracks features from the JavaScript implementation that are not yet
         -   [ ] Load prompts from the filesystem (`loadPromptFolder`).
         -   [ ] Define partials (`definePartial`) and helpers (`defineHelper`).
         > **Note**: This is blocked by the completion of the [Rust implementation in `dotprompt` (Issue #310)](https://github.com/google/dotprompt/issues/310).
-
-
-## TOFIX
-- session_test.rs
