@@ -30,6 +30,8 @@ use serde_json::{json, to_value, Value};
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
 
+use crate::helpers::TestMemorySessionStore;
+
 #[fixture]
 async fn genkit_instance() -> Arc<Genkit> {
     helpers::genkit_instance_with_echo_model().await
@@ -501,4 +503,83 @@ async fn test_can_start_chat_from_a_prompt_with_input(#[future] genkit_instance:
 
     let actual_messages = to_value(response.messages().unwrap()).unwrap();
     assert_eq!(actual_messages, expected_messages);
+}
+
+#[rstest]
+#[tokio::test]
+/// 'can start chat thread from a prompt with input'
+async fn test_can_start_chat_thread_from_a_prompt_with_input(
+    #[future] genkit_instance: Arc<Genkit>,
+) {
+    let genkit = genkit_instance.await;
+
+    #[derive(Serialize, Deserialize, JsonSchema, Debug, PartialEq, Clone, Default)]
+    struct NameInput {
+        name: String,
+    }
+
+    let agent = genkit.define_prompt::<NameInput, Value, Value>(genkit::prompt::PromptConfig {
+        name: "agent".to_string(),
+        description: Some("Agent description".to_string()),
+        config: Some(json!({ "temperature": 1 })),
+        messages: Some(vec![MessageData {
+            role: Role::System,
+            content: vec![Part::text("hello {{name}} from template")],
+            ..Default::default()
+        }]),
+        ..Default::default()
+    });
+
+    let store = Arc::new(TestMemorySessionStore::<Value>::new());
+    let session = genkit
+        .create_session(CreateSessionOptions {
+            store: Some(store.clone()),
+            ..Default::default()
+        })
+        .await
+        .unwrap();
+    let session_id = session.id.clone();
+
+    let chat = session
+        .chat(Some(ChatOptions::<NameInput, Value> {
+            thread_name: Some("mythread".to_string()),
+            preamble: Some(&agent),
+            prompt_render_input: Some(NameInput {
+                name: "Genkit".to_string(),
+            }),
+            ..Default::default()
+        }))
+        .await
+        .unwrap();
+
+    chat.send("hi").await.unwrap();
+
+    let got_state = store.get(&session_id).await.unwrap().unwrap();
+
+    let expected_messages = json!({
+      "mythread": [
+        {
+          "role": "system",
+          "content": [{ "text": "hello Genkit from template" }],
+          "metadata": { "preamble": true },
+        },
+        {
+          "content": [{ "text": "hi" }],
+          "role": "user",
+        },
+        {
+          "content": [
+            { "text": "Echo: system: hello Genkit from template,hi" },
+            { "text": "; config: {\"temperature\":1}" },
+          ],
+          "role": "model",
+        },
+      ],
+    });
+
+    let got_threads_value = to_value(&got_state.threads).unwrap();
+    assert_eq!(
+        got_threads_value.get("mythread"),
+        expected_messages.get("mythread")
+    );
 }
