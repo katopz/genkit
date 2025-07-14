@@ -147,8 +147,8 @@ impl<S: Serialize + DeserializeOwned + Clone + Send + Sync + 'static> Chat<S> {
 
         let state = ChatState {
             thread_name,
-            request_base,
-            messages: Vec::new(),
+            request_base: request_base.clone(),
+            messages: request_base.messages.clone(),
         };
 
         Chat {

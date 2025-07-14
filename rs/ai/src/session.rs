@@ -26,7 +26,7 @@ use genkit_core::error::{Error, Result};
 use genkit_core::registry::Registry;
 use schemars::JsonSchema;
 use serde::{de::DeserializeOwned, Deserialize, Serialize};
-use serde_json::Value;
+use serde_json::{json, Value};
 use std::collections::HashMap;
 use std::sync::Arc;
 use tokio::sync::Mutex;
@@ -110,6 +110,7 @@ pub struct ChatOptions<'a, I, S> {
     pub preamble: Option<&'a ExecutablePrompt<I>>,
     pub base_options: Option<BaseGenerateOptions>,
     pub prompt_render_input: Option<I>,
+    pub config: Option<Value>,
     pub _marker: std::marker::PhantomData<S>,
 }
 
@@ -120,6 +121,7 @@ impl<'a, I, S> Default for ChatOptions<'a, I, S> {
             preamble: None,
             base_options: None,
             prompt_render_input: None,
+            config: None,
             _marker: std::marker::PhantomData,
         }
     }
@@ -182,7 +184,7 @@ where
                 .thread_name
                 .unwrap_or_else(|| MAIN_THREAD.to_string());
 
-            let base_options = if let Some(preamble) = options.preamble {
+            let mut base_options = if let Some(preamble) = options.preamble {
                 preamble
                     .render(options.prompt_render_input.unwrap_or_default(), None)
                     .await?
@@ -200,6 +202,16 @@ where
                 }
             };
 
+            if let Some(new_config) = options.config {
+                let base_config = base_options.config.get_or_insert_with(|| json!({}));
+                if let (Some(base_obj), Some(new_obj)) =
+                    (base_config.as_object_mut(), new_config.as_object())
+                {
+                    base_obj.extend(new_obj.clone());
+                } else {
+                    *base_config = new_config;
+                }
+            }
             // Correctly load history from the session store for the given thread.
             let history = self
                 .data
