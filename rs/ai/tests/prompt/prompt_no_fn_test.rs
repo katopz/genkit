@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use crate::prompt_test_helpers::helpers::registry_with_echo_model_and_tool;
+use crate::prompt_helpers_test::helpers::registry_with_echo_model_and_tool;
 use genkit_ai::generate::GenerateOptions;
 use genkit_ai::prompt::{define_prompt, PromptConfig, PromptGenerateOptions};
 use genkit_ai::session::Session;

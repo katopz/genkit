@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-mod middleware_test_augment_with_context;
-mod middleware_test_simulate_constrained_generation;
-mod middleware_test_simulate_system_prompt;
-mod middleware_test_validate_support;
+mod middleware_augment_with_context_test;
+mod middleware_simulate_constrained_generation_test;
+mod middleware_simulate_system_prompt_test;
+mod middleware_validate_support_test;

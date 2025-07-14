@@ -25,7 +25,7 @@ use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 
-use crate::prompt_test_helpers::{test_runner, TestCase};
+use crate::prompt_helpers_test::{test_runner, TestCase};
 
 #[derive(Serialize, Deserialize, JsonSchema)]
 struct TestInput {

@@ -24,7 +24,7 @@ use std::future::Future;
 use std::pin::Pin;
 use std::sync::Arc;
 
-use crate::prompt_test_helpers::{test_runner, TestCase};
+use crate::prompt_helpers_test::{test_runner, TestCase};
 
 #[derive(Serialize, Deserialize, JsonSchema, Debug)]
 struct TestInput {
@@ -32,8 +32,8 @@ struct TestInput {
 }
 
 #[tokio::test]
-async fn test_renders_system_prompt_from_a_function() -> Result<()> {
-    let system_fn = Arc::new(
+async fn test_renders_user_prompt_from_function() -> Result<()> {
+    let prompt_fn = Arc::new(
         |input: Value,
          state: Option<Value>,
          _: Option<ActionContext>|
@@ -51,13 +51,13 @@ async fn test_renders_system_prompt_from_a_function() -> Result<()> {
     );
 
     test_runner(Box::new(TestCase {
-        name: "renders system prompt from a function".to_string(),
+        name: "renders user prompt from function".to_string(),
         config: PromptConfig {
             name: "prompt1".to_string(),
             model: Some(Model::Name("echoModel".to_string())),
             config: Some(json!({ "banana": "ripe" })),
             input: Some(serde_json::to_value(schemars::schema_for!(TestInput))?),
-            system_fn: Some(system_fn),
+            prompt_fn: Some(prompt_fn),
             ..Default::default()
         },
         input: json!({ "name": "foo" }),
@@ -67,21 +67,20 @@ async fn test_renders_system_prompt_from_a_function() -> Result<()> {
             ..Default::default()
         }),
         context: None,
-        want_text:
-            "Echo: system: hello foo (bar); config: {\"banana\":\"ripe\",\"temperature\":11}"
-                .to_string(),
+        want_text: "Echo: hello foo (bar); config: {\"banana\":\"ripe\",\"temperature\":11}"
+            .to_string(),
         want_rendered: json!({
             "model": "echoModel",
             "config": { "banana": "ripe", "temperature": 11 },
-            "messages": [{ "role": "system", "content": [{ "text": "hello foo (bar)" }] }],
+            "messages": [{ "role": "user", "content": [{ "text": "hello foo (bar)" }] }],
         }),
     }))
     .await
 }
 
 #[tokio::test]
-async fn test_renders_system_prompt_from_a_function_with_context() -> Result<()> {
-    let system_fn = Arc::new(
+async fn test_renders_user_prompt_from_function_with_context() -> Result<()> {
+    let prompt_fn = Arc::new(
         |input: Value,
          state: Option<Value>,
          context: Option<ActionContext>|
@@ -111,13 +110,13 @@ async fn test_renders_system_prompt_from_a_function_with_context() -> Result<()>
     context_map.insert("auth".to_string(), json!({ "email": "a@b.c" }));
 
     test_runner(Box::new(TestCase {
-        name: "renders system prompt from a function with context".to_string(),
+        name: "renders user prompt from function with context".to_string(),
         config: PromptConfig {
             name: "prompt1".to_string(),
             model: Some(Model::Name("echoModel".to_string())),
             config: Some(json!({ "banana": "ripe" })),
             input: Some(serde_json::to_value(schemars::schema_for!(TestInput))?),
-            system_fn: Some(system_fn),
+            prompt_fn: Some(prompt_fn),
             ..Default::default()
         },
         input: json!({ "name": "foo" }),
@@ -127,21 +126,20 @@ async fn test_renders_system_prompt_from_a_function_with_context() -> Result<()>
             ..Default::default()
         }),
         context: Some(context_map.into()),
-        want_text:
-            "Echo: system: hello foo (bar, a@b.c); config: {\"banana\":\"ripe\",\"temperature\":11}"
-                .to_string(),
+        want_text: "Echo: hello foo (bar, a@b.c); config: {\"banana\":\"ripe\",\"temperature\":11}"
+            .to_string(),
         want_rendered: json!({
             "model": "echoModel",
             "config": { "banana": "ripe", "temperature": 11 },
-            "messages": [{ "role": "system", "content": [{ "text": "hello foo (bar, a@b.c)" }] }],
+            "messages": [{ "role": "user", "content": [{ "text": "hello foo (bar, a@b.c)" }] }],
         }),
     }))
     .await
 }
 
 #[tokio::test]
-async fn test_renders_system_prompt_from_a_function_with_context_as_render_option() -> Result<()> {
-    let system_fn = Arc::new(
+async fn test_renders_user_prompt_from_function_with_context_as_render_option() -> Result<()> {
+    let prompt_fn = Arc::new(
         |input: Value,
          state: Option<Value>,
          context: Option<ActionContext>|
@@ -171,13 +169,13 @@ async fn test_renders_system_prompt_from_a_function_with_context_as_render_optio
     context_map.insert("auth".to_string(), json!({ "email": "a@b.c" }));
 
     test_runner(Box::new(TestCase {
-        name: "renders system prompt from a function with context as render option".to_string(),
+        name: "renders user prompt from function with context as render option".to_string(),
         config: PromptConfig {
             name: "prompt1".to_string(),
             model: Some(Model::Name("echoModel".to_string())),
             config: Some(json!({ "banana": "ripe" })),
             input: Some(serde_json::to_value(schemars::schema_for!(TestInput))?),
-            system_fn: Some(system_fn),
+            prompt_fn: Some(prompt_fn),
             ..Default::default()
         },
         input: json!({ "name": "foo" }),
@@ -188,16 +186,13 @@ async fn test_renders_system_prompt_from_a_function_with_context_as_render_optio
             ..Default::default()
         }),
         context: None,
-        want_text:
-            "Echo: system: hello foo (bar, a@b.c); config: {\"banana\":\"ripe\",\"temperature\":11}"
-                .to_string(),
+        want_text: "Echo: hello foo (bar, a@b.c); config: {\"banana\":\"ripe\",\"temperature\":11}"
+            .to_string(),
         want_rendered: json!({
             "model": "echoModel",
             "config": { "banana": "ripe", "temperature": 11 },
             "context": { "auth": { "email": "a@b.c" } },
-            "messages": [
-                { "role": "system", "content": [{ "text": "hello foo (bar, a@b.c)" }] },
-            ],
+            "messages": [{ "role": "user", "content": [{ "text": "hello foo (bar, a@b.c)" }] }],
         }),
     }))
     .await

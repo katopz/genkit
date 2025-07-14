@@ -13,6 +13,6 @@
 // limitations under the License.
 
 mod chunk_test;
-mod generate_test_basic;
-mod generate_test_e2e;
+mod generate_basic_test;
+mod generate_e2e_test;
 mod response_test;

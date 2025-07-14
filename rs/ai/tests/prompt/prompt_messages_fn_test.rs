@@ -25,7 +25,7 @@ use std::future::Future;
 use std::pin::Pin;
 use std::sync::Arc;
 
-use crate::prompt_test_helpers::{test_runner, TestCase};
+use crate::prompt_helpers_test::{test_runner, TestCase};
 
 #[derive(Serialize, Deserialize, JsonSchema, Debug)]
 struct TestInput {
