@@ -200,6 +200,7 @@ pub fn define_generate_action(registry: &mut Registry) -> Arc<GenerateAction> {
 }
 
 /// Encapsulates all generate logic, similar to `generateAction` but callable internally.
+/// Encapsulates all generate logic, similar to `generateAction` but callable internally.
 pub async fn generate_helper<O>(
     registry: Arc<Registry>,
     options: GenerateHelperOptions<O>,
@@ -218,12 +219,10 @@ where
     let registry_for_response = registry.clone();
 
     // The span is now created by the caller (e.g., `generate::generate`)
-    let original_request =
-        to_generate_request(&registry_for_response, &raw_request_for_response).await?;
-    let (response_data, _request_sent_to_model) = generate_internal(registry, options).await?;
+    let (response_data, request_sent_to_model) = generate_internal(registry, options).await?;
 
     let final_request = reconstruct_user_facing_request(
-        &original_request,
+        &request_sent_to_model,
         &raw_request_for_response,
         &registry_for_response,
     )

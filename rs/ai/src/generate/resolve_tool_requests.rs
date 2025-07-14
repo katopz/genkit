@@ -290,11 +290,13 @@ async fn resolve_resumed_tool_request<O: Default + Send + Sync + 'static>(
     tool_map: &HashMap<String, Arc<dyn ErasedAction>>,
 ) -> Result<ResumedToolRequestResult> {
     if let Some(pending_output) = part.metadata.as_ref().and_then(|m| m.get("pendingOutput")) {
-        let mut metadata = part.metadata.clone().unwrap_or_default();
-        metadata.remove("pendingOutput");
+        let mut request_part = part.clone();
+        if let Some(meta) = request_part.metadata.as_mut() {
+            meta.remove("pendingOutput");
+        }
 
-        let tool_response = Part {
-            tool_response: Some(ToolResponse {
+        let response_part = Part {
+            tool_response: Some(crate::document::ToolResponse {
                 name: part.tool_request.as_ref().unwrap().name.clone(),
                 ref_id: part.tool_request.as_ref().unwrap().ref_id.clone(),
                 output: Some(pending_output.clone()),
@@ -307,13 +309,10 @@ async fn resolve_resumed_tool_request<O: Default + Send + Sync + 'static>(
             ),
             ..Default::default()
         };
-        let tool_request = Part {
-            metadata: Some(metadata),
-            ..part.clone()
-        };
+
         return Ok(ResumedToolRequestResult {
-            tool_request,
-            tool_response,
+            tool_request: request_part,
+            tool_response: response_part,
         });
     }
 
@@ -353,12 +352,13 @@ async fn resolve_resumed_tool_request<O: Default + Send + Sync + 'static>(
             if let Some(interrupt_meta) = metadata.remove("interrupt") {
                 metadata.insert("resolvedInterrupt".to_string(), interrupt_meta);
             }
+
+            let mut final_request_part = part.clone();
+            final_request_part.metadata = Some(metadata);
+
             return Ok(ResumedToolRequestResult {
                 tool_response: response,
-                tool_request: Part {
-                    metadata: Some(metadata),
-                    ..part.clone()
-                },
+                tool_request: final_request_part,
             });
         }
     }
@@ -390,49 +390,87 @@ pub async fn resolve_resume_option<O: Default + Clone + Send + Sync + 'static>(
         }
     };
 
+    println!("[RRO_DEBUG] ENTERING resolve_resume_option");
+
     let tool_map =
         to_tool_map(&tool::resolve_tools(registry, raw_request.tools.as_deref()).await?)?;
 
     let mut messages = raw_request.messages.take().unwrap_or_default();
-    let last_message = match messages.last_mut() {
-        Some(msg) if msg.role == Role::Model && msg.content.iter().any(is_tool_request) => msg,
-        _ => {
+    println!(
+        "[RRO_DEBUG] Initial messages taken from request: {:#?}",
+        &messages
+    );
+
+    let last_message_index = messages
+        .iter()
+        .rposition(|m| m.role == Role::Model && m.content.iter().any(is_tool_request));
+
+    let last_message_index = match last_message_index {
+        Some(index) => {
+            println!(
+                "[RRO_DEBUG] Found model message with tool requests at index: {}",
+                index
+            );
+            index
+        }
+        None => {
             return Err(Error::new_internal(
                 "Cannot 'resume' generation unless the last message is a model message with tool requests.",
-            ))
+            ));
         }
     };
 
+    let old_content = std::mem::take(&mut messages[last_message_index].content);
+    println!(
+        "[RRO_DEBUG] Extracted old content to revise: {:#?}",
+        &old_content
+    );
+
+    let mut new_content = Vec::new();
     let mut tool_responses: Vec<ToolResponsePart> = Vec::new();
     let mut interrupted = false;
-    let mut new_content = Vec::new();
-    let old_content = std::mem::take(&mut last_message.content);
 
     for part in old_content {
         if is_tool_request(&part) {
+            println!("[RRO_DEBUG] Processing tool request part: {:#?}", &part);
             match resolve_resumed_tool_request(&raw_request, &part, &tool_map).await {
                 Ok(resolved) => {
+                    println!(
+                        "[RRO_DEBUG] -> SUCCESS. Revised Request: {:#?}, Response: {:#?}",
+                        &resolved.tool_request, &resolved.tool_response
+                    );
                     new_content.push(resolved.tool_request);
                     tool_responses.push(resolved.tool_response);
                 }
-                Err(_) => {
+                Err(e) => {
+                    println!(
+                        "[RRO_DEBUG] -> ERROR on resolve: {}. Keeping original part.",
+                        e
+                    );
                     new_content.push(part);
                     interrupted = true;
                 }
             }
         } else {
+            println!("[RRO_DEBUG] Keeping non-tool part: {:#?}", &part);
             new_content.push(part);
         }
     }
-    last_message.content = new_content;
+    messages[last_message_index].content = new_content;
+    println!(
+        "[RRO_DEBUG] Message history after revising model message content: {:#?}",
+        &messages
+    );
 
     if interrupted {
+        println!("[RRO_DEBUG] Interruption detected. Returning early.");
         let interrupted_response = GenerateResponseData {
             candidates: vec![crate::model::CandidateData {
                 index: 0,
-                message: last_message.clone(),
+                message: messages[last_message_index].clone(),
                 finish_reason: Some(crate::model::FinishReason::Interrupted),
                 finish_message: Some("One or more tools triggered interrupts while resuming generation. The model was not called.".to_string()),
+                ..Default::default()
             }],
             ..Default::default()
         };
@@ -442,7 +480,7 @@ pub async fn resolve_resume_option<O: Default + Clone + Send + Sync + 'static>(
         });
     }
 
-    let num_tool_requests = last_message
+    let num_tool_requests = messages[last_message_index]
         .content
         .iter()
         .filter(|p| p.tool_request.is_some())
@@ -468,8 +506,13 @@ pub async fn resolve_resume_option<O: Default + Clone + Send + Sync + 'static>(
     };
 
     messages.push(tool_message.clone());
-    raw_request.messages = Some(messages);
+    raw_request.messages = Some(messages.clone());
     raw_request.resume = None;
+
+    println!(
+        "[RRO_DEBUG] Final messages being returned: {:#?}",
+        &messages
+    );
 
     Ok(ResolveResumeOptionResult {
         revised_request: Some(raw_request),
