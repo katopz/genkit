@@ -384,21 +384,8 @@ impl<S: Serialize + DeserializeOwned + Clone + Send + Sync + 'static> Chat<S> {
         state.messages = messages.to_vec();
 
         // Strip transient preamble metadata before persisting.
-        let messages_to_persist: Vec<MessageData> = messages
-            .iter()
-            .map(|m| {
-                let mut new_m = m.clone();
-                if let Some(metadata) = new_m.metadata.as_mut() {
-                    if metadata.remove("preamble").is_some() && metadata.is_empty() {
-                        new_m.metadata = None;
-                    }
-                }
-                new_m
-            })
-            .collect();
-
         self.session
-            .update_messages(&state.thread_name, &messages_to_persist)
+            .update_messages(&state.thread_name, messages)
             .await
     }
 }
