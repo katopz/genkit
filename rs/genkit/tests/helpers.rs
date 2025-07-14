@@ -30,6 +30,10 @@ use std::pin::Pin;
 use std::sync::{Arc, Mutex};
 use tokio::time::{sleep, Duration};
 
+use genkit_ai::session::{SessionData, SessionStore};
+use std::collections::HashMap;
+use tokio::sync::Mutex as TokioMutex;
+
 #[allow(unused)]
 pub async fn run_async<F, O>(f: F) -> O
 where
@@ -449,4 +453,41 @@ pub async fn genkit_instance_for_test() -> (Arc<Genkit>, Arc<Mutex<Option<Genera
     .await
     .unwrap();
     (genkit, last_request)
+}
+
+/// An in-memory session store for testing purposes.
+#[derive(Debug)]
+pub struct TestMemorySessionStore<S> {
+    data: TokioMutex<HashMap<String, SessionData<S>>>,
+}
+
+impl<S: Send> Default for TestMemorySessionStore<S> {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl<S: Send> TestMemorySessionStore<S> {
+    pub fn new() -> Self {
+        Self {
+            data: TokioMutex::new(HashMap::new()),
+        }
+    }
+}
+
+#[async_trait]
+impl<S> SessionStore<S> for TestMemorySessionStore<S>
+where
+    S: Clone + Send + Sync,
+{
+    async fn get(&self, session_id: &str) -> Result<Option<SessionData<S>>> {
+        let lock = self.data.lock().await;
+        Ok(lock.get(session_id).cloned())
+    }
+
+    async fn save(&self, session_id: &str, session_data: &SessionData<S>) -> Result<()> {
+        let mut lock = self.data.lock().await;
+        lock.insert(session_id.to_string(), session_data.clone());
+        Ok(())
+    }
 }
