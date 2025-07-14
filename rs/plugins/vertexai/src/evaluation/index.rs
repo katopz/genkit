@@ -22,8 +22,11 @@ use super::{
 };
 use crate::common::get_derived_params;
 use async_trait::async_trait;
-use genkit::registry::ActionType;
-use genkit_core::{plugin::Plugin, registry::Registry, Result};
+use genkit::{
+    plugin::Plugin,
+    registry::{ActionType, Registry},
+    Result,
+};
 use std::sync::Arc;
 
 /// The Vertex AI evaluation plugin.

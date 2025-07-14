@@ -19,12 +19,10 @@
 
 use crate::common::{get_derived_params, VertexAIPluginOptions};
 use crate::{Error, Result};
-use genkit_ai::model::{
-    define_model, CandidateData, FinishReason, GenerateRequest, GenerateResponseData, ModelAction,
-    ModelRef,
-};
-use genkit_ai::{Part, Role};
-use genkit_core::Registry;
+use genkit::common::model::DefineModelOptions;
+use genkit::model::{FinishReason, GenerateRequest};
+use genkit::{define_model, CandidateData, GenerateResponseData, ModelAction, ModelRef, Registry};
+use genkit::{Part, Role};
 use reqwest::header::{HeaderMap, AUTHORIZATION, CONTENT_TYPE};
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
@@ -141,7 +139,7 @@ fn from_anthropic_response(resp: AnthropicResponse) -> Result<GenerateResponseDa
 
     let candidate = CandidateData {
         index: 0,
-        message: genkit_ai::message::MessageData {
+        message: genkit::message::MessageData {
             role: Role::Model,
             content,
             ..Default::default()
@@ -233,13 +231,13 @@ async fn anthropic_runner(
 }
 
 pub fn define_anthropic_model(
-    model_ref: &genkit_ai::model::ModelRef<serde_json::Value>,
+    model_ref: &ModelRef<serde_json::Value>,
     options: &VertexAIPluginOptions,
 ) -> ModelAction {
     let model_id = model_ref.name.split('/').next_back().unwrap().to_string();
     let opts = options.clone();
 
-    let model_options = genkit_ai::model::DefineModelOptions {
+    let model_options = DefineModelOptions {
         name: model_ref.name.clone(),
         label: Some(model_ref.info.label.clone()),
         supports: model_ref.info.supports.clone(),

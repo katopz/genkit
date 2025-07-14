@@ -18,11 +18,20 @@
 //! expose an OpenAI-compatible API, such as various versions of Llama.
 
 use crate::common::VertexAIPluginOptions;
-use genkit_ai::model::{GenerateResponseChunkData, ModelAction, ModelRef};
+use genkit::{
+    common::model::DefineModelOptions, define_model, GenerateResponseChunkData,
+    GenerateResponseData, ModelAction, ModelRef, Registry,
+};
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
-use super::openai_compatibility::OpenAIConfig;
+use super::openai_compatibility::{
+    from_openai_choice,
+    openai_types::{ChatCompletionResponse, CreateChatCompletionRequest},
+    to_openai_messages, to_openai_tool, OpenAIConfig,
+};
+
+use reqwest::header::{HeaderMap, AUTHORIZATION, CONTENT_TYPE};
 
 /// Configuration for Model Garden models that use the OpenAI-compatible API.
 /// This allows overriding the GCP location per request.
@@ -77,15 +86,6 @@ pub fn model_garden_openai_compatible_model(
     options: &VertexAIPluginOptions,
     base_url_template: Option<String>,
 ) -> ModelAction {
-    use super::openai_compatibility::openai_types::{
-        ChatCompletionResponse, CreateChatCompletionRequest,
-    };
-    use super::openai_compatibility::{from_openai_choice, to_openai_messages, to_openai_tool};
-
-    use genkit_ai::model::{define_model, GenerateResponse};
-    use genkit_core::Registry;
-    use reqwest::header::{HeaderMap, AUTHORIZATION, CONTENT_TYPE};
-
     let model_name = model_ref.name.clone();
     let opts = options.clone();
     let template = base_url_template.unwrap_or_else(|| {
@@ -94,7 +94,7 @@ pub fn model_garden_openai_compatible_model(
     });
 
     let runner =
-        move |req: genkit_ai::model::GenerateRequest,
+        move |req: genkit::model::GenerateRequest,
               _cb: Option<Box<dyn Fn(GenerateResponseChunkData) + Send + Sync>>| {
             let model_name = model_name.clone();
             let opts = opts.clone();
@@ -102,7 +102,7 @@ pub fn model_garden_openai_compatible_model(
             async move {
                 let config: ModelGardenModelConfig = if let Some(val) = req.config.as_ref() {
                     serde_json::from_value(val.clone())
-                        .map_err(|e| genkit_core::error::Error::new_internal(e.to_string()))?
+                        .map_err(|e| genkit::error::Error::new_internal(e.to_string()))?
                 } else {
                     // This case seems to imply we should have a base config from the model_ref,
                     // but ModelRef<T> carries PhantomData, not a value.
@@ -112,15 +112,13 @@ pub fn model_garden_openai_compatible_model(
                 };
                 let params = crate::common::get_derived_params(&opts)
                     .await
-                    .map_err(|e| genkit_core::error::Error::new_internal(e.to_string()))?;
+                    .map_err(|e| genkit::error::Error::new_internal(e.to_string()))?;
                 let location = config
                     .location
                     .as_ref()
                     .or(Some(&params.location))
                     .ok_or_else(|| {
-                        genkit_core::error::Error::new_internal(
-                            "Model Garden location is required.",
-                        )
+                        genkit::error::Error::new_internal("Model Garden location is required.")
                     })?
                     .clone();
                 let base_url = template
@@ -131,7 +129,7 @@ pub fn model_garden_openai_compatible_model(
                     .token_provider
                     .token(&["https://www.googleapis.com/auth/cloud-platform"])
                     .await
-                    .map_err(|e| genkit_core::error::Error::new_internal(e.to_string()))?;
+                    .map_err(|e| genkit::error::Error::new_internal(e.to_string()))?;
                 let mut headers = HeaderMap::new();
                 headers.insert(CONTENT_TYPE, "application/json".parse().unwrap());
                 headers.insert(
@@ -155,11 +153,11 @@ pub fn model_garden_openai_compatible_model(
                     .json(&openai_req)
                     .send()
                     .await
-                    .map_err(|e| genkit_core::error::Error::new_internal(e.to_string()))?;
+                    .map_err(|e| genkit::error::Error::new_internal(e.to_string()))?;
                 if !response.status().is_success() {
                     let status = response.status();
                     let err_text = response.text().await.unwrap_or_else(|e| e.to_string());
-                    return Err(genkit_core::error::Error::new_internal(format!(
+                    return Err(genkit::error::Error::new_internal(format!(
                         "API request failed with status {}: {}",
                         status, err_text
                     )));
@@ -167,8 +165,8 @@ pub fn model_garden_openai_compatible_model(
                 let response_data = response
                     .json::<ChatCompletionResponse>()
                     .await
-                    .map_err(|e| genkit_core::error::Error::new_internal(e.to_string()))?;
-                Ok(GenerateResponse {
+                    .map_err(|e| genkit::error::Error::new_internal(e.to_string()))?;
+                Ok(GenerateResponseData {
                     candidates: response_data
                         .choices
                         .into_iter()
@@ -181,7 +179,7 @@ pub fn model_garden_openai_compatible_model(
     let registry = Registry::default();
     define_model(
         &registry,
-        genkit_ai::model::DefineModelOptions {
+        DefineModelOptions {
             name: model_ref.name.clone(),
             label: Some(model_ref.info.label.clone()),
             supports: model_ref.info.supports.clone(),

@@ -17,16 +17,19 @@
 //! This crate provides a simple, file-based vector store for local development.
 
 use async_trait::async_trait;
-use genkit_ai::{
+use genkit::{
+    common::retriever::{
+        CommonRetrieverOptions, IndexerRequest, RetrieverRequest, RetrieverResponse,
+    },
     document::Document,
     embedder::EmbedRequest,
     retriever::{
-        define_indexer, define_retriever, indexer_ref, retriever_ref, CommonRetrieverOptions,
-        IndexerInfo, IndexerRef, RetrieverInfo, RetrieverRef, RetrieverRequest,
+        define_indexer, define_retriever, indexer_ref, retriever_ref, IndexerInfo, IndexerRef,
+        RetrieverInfo, RetrieverRef,
     },
     EmbedResponse,
 };
-use genkit_core::{error::Error, plugin::Plugin, registry::Registry, Result};
+use genkit::{error::Error, plugin::Plugin, registry::Registry, Result};
 use semanticsimilarity_rs::cosine_similarity;
 use serde::{Deserialize, Serialize};
 use std::{collections::HashMap, fs, path::Path, sync::Arc};
@@ -158,7 +161,7 @@ impl Plugin for DevLocalVectorStorePlugin {
                         let k = req.options.as_ref().and_then(|o| o.k).unwrap_or(3);
                         let docs = get_closest_documents(query_embedding, &db, k as usize);
 
-                        Ok(genkit_ai::retriever::RetrieverResponse { documents: docs })
+                        Ok(RetrieverResponse { documents: docs })
                     }
                 },
             );
@@ -166,10 +169,8 @@ impl Plugin for DevLocalVectorStorePlugin {
 
             let indexer_data_path = data_path.clone();
             let indexer_embedder_action = embedder_action.clone();
-            let indexer_action = define_indexer(
-                registry,
-                action_name,
-                move |req: genkit_ai::retriever::IndexerRequest<()>, _| {
+            let indexer_action =
+                define_indexer(registry, action_name, move |req: IndexerRequest<()>, _| {
                     let path = indexer_data_path.clone();
                     let embedder = indexer_embedder_action.clone();
                     async move {
@@ -202,8 +203,7 @@ impl Plugin for DevLocalVectorStorePlugin {
                         }
                         save_filestore(&path, &db)
                     }
-                },
-            );
+                });
             registry.register_action(indexer_action.meta.action_type, indexer_action)?;
         }
         Ok(())

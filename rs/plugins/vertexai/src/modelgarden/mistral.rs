@@ -24,10 +24,12 @@ use crate::modelgarden::openai_compatibility::{
     from_openai_choice, to_openai_messages, to_openai_tool, OpenAIConfig,
 };
 use crate::Result;
-use genkit_ai::model::{
-    define_model, GenerateResponse, ModelAction, ModelInfo, ModelInfoSupports, ModelRef,
+use genkit::{
+    common::model::{DefineModelOptions, ModelInfoSupports},
+    define_model,
+    model::ModelInfo,
+    GenerateRequest, GenerateResponseData, ModelAction, ModelRef, Registry,
 };
-use genkit_core::Registry;
 use reqwest::header::{HeaderMap, AUTHORIZATION, CONTENT_TYPE};
 
 // Model references
@@ -62,11 +64,11 @@ pub fn codestral() -> ModelRef<OpenAIConfig> {
 }
 
 async fn mistral_runner(
-    req: genkit_ai::model::GenerateRequest,
+    req: GenerateRequest,
     model_name: String,
     options: VertexAIPluginOptions,
     base_url_template: String,
-) -> Result<genkit_ai::model::GenerateResponse> {
+) -> Result<GenerateResponseData> {
     let params = crate::common::get_derived_params(&options).await?;
 
     // Allow overriding location per-request, similar to other models
@@ -134,7 +136,7 @@ async fn mistral_runner(
 
     let response_data = response.json::<ChatCompletionResponse>().await?;
 
-    Ok(GenerateResponse {
+    Ok(GenerateResponseData {
         candidates: response_data
             .choices
             .into_iter()
@@ -199,7 +201,7 @@ pub fn define_mistral_model(
         _ => panic!("Unsupported Mistral model: {}", model_name),
     };
 
-    let model_options = genkit_ai::model::DefineModelOptions {
+    let model_options = DefineModelOptions {
         name: model_name.clone(),
         label: Some(info.label),
         supports: info.supports,
@@ -215,7 +217,7 @@ pub fn define_mistral_model(
         Box::pin(async move {
             mistral_runner(req, model_name, opts, base_url_template)
                 .await
-                .map_err(|e| genkit_core::error::Error::new_internal(e.to_string()))
+                .map_err(|e| genkit::error::Error::new_internal(e.to_string()))
         })
     })
 }

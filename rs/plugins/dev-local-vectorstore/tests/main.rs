@@ -12,22 +12,28 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use genkit_ai::document::Document;
-use genkit_ai::embedder::{define_embedder, EmbedRequest, EmbedResponse, Embedding};
-use genkit_ai::generate::{generate, GenerateOptions};
-use genkit_ai::model::{
-    define_model, CandidateData, FinishReason, GenerateRequest, GenerateResponseData, Model,
+use genkit::{
+    common::{
+        model::{DefineModelOptions, ModelInfoSupports},
+        retriever::CommonRetrieverOptions,
+    },
+    define_model,
+    document::Document,
+    embedder::{define_embedder, EmbedRequest, EmbedResponse, Embedding},
+    generate::{generate, GenerateOptions},
+    model::{FinishReason, GenerateRequest, Model},
+    plugin::Plugin,
+    registry::{ActionType, Registry},
+    retriever::{index, retrieve},
+    CandidateData, GenerateResponseData, ModelAction,
 };
-use genkit_ai::retriever::{index, retrieve, CommonRetrieverOptions};
-use genkit_core::plugin::Plugin;
-use genkit_core::registry::{ActionType, Registry};
 use genkit_plugins_dev_local_vectorstore::{
     local_indexer_ref, local_retriever_ref, DevLocalVectorStorePlugin, LocalVectorStoreConfig,
 };
 use std::sync::Arc;
 
 // A simple mock embedder that returns predefined vectors for specific texts.
-fn mock_embedder() -> genkit_ai::embedder::EmbedderAction {
+fn mock_embedder() -> genkit::embedder::EmbedderAction {
     let registry = Registry::new();
     define_embedder(
         &registry,
@@ -58,14 +64,14 @@ fn mock_embedder() -> genkit_ai::embedder::EmbedderAction {
 }
 
 // A simple mock model that just returns the content of the first document it receives.
-fn mock_model() -> genkit_ai::model::ModelAction {
+fn mock_model() -> ModelAction {
     let registry = Registry::new();
     define_model(
         &registry,
-        genkit_ai::model::DefineModelOptions {
+        DefineModelOptions {
             name: "mock-model".to_string(),
             label: Some("Mock Context Model".to_string()),
-            supports: Some(genkit_ai::model::ModelInfoSupports {
+            supports: Some(ModelInfoSupports {
                 context: Some(true), // We need to signal that this model supports docs
                 ..Default::default()
             }),
@@ -79,9 +85,9 @@ fn mock_model() -> genkit_ai::model::ModelAction {
                 .map(|d| d.text().clone())
                 .unwrap_or_else(|| "No context provided.".to_string());
 
-            let response_message = genkit_ai::message::MessageData {
-                role: genkit_ai::message::Role::Model,
-                content: vec![genkit_ai::document::Part {
+            let response_message = genkit::message::MessageData {
+                role: genkit::message::Role::Model,
+                content: vec![genkit::document::Part {
                     text: Some(context_text),
                     ..Default::default()
                 }],
@@ -138,8 +144,8 @@ async fn test_dev_local_vectorstore_e2e() {
 
     index(
         &arc_registry,
-        genkit_ai::retriever::IndexerParams {
-            indexer: genkit_ai::retriever::IndexerArgument::<()>::Name(indexer.name),
+        genkit::retriever::IndexerParams {
+            indexer: genkit::retriever::IndexerArgument::<()>::Name(indexer.name),
             documents: documents_to_index,
             options: None,
         },
@@ -154,8 +160,8 @@ async fn test_dev_local_vectorstore_e2e() {
 
     let retrieved_docs = retrieve(
         &arc_registry,
-        genkit_ai::retriever::RetrieverParams {
-            retriever: genkit_ai::retriever::RetrieverArgument::<CommonRetrieverOptions>::Name(
+        genkit::retriever::RetrieverParams {
+            retriever: genkit::retriever::RetrieverArgument::<CommonRetrieverOptions>::Name(
                 retriever.name,
             ),
             query: Document::from_text(question.to_string(), None),
@@ -173,7 +179,7 @@ async fn test_dev_local_vectorstore_e2e() {
         &arc_registry,
         GenerateOptions::<()> {
             model: Some(Model::Name("mock-model".to_string())),
-            prompt: Some(vec![genkit_ai::document::Part {
+            prompt: Some(vec![genkit::document::Part {
                 text: Some(format!(
                     "Use the provided context to answer this query: {}",
                     question

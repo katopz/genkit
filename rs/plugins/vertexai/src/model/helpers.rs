@@ -19,16 +19,16 @@
 
 use crate::{Error, Result};
 
-use genkit_ai::{
+use genkit::{
     message::Role,
-    model::{CandidateData, FinishReason, GenerateRequest, GenerateResponseData, GenerationUsage},
-    ToolRequest,
+    model::{FinishReason, GenerateRequest},
+    CandidateData, GenerateResponseData, GenerationUsage, ToolRequest,
 };
 
 // Configuration structs for the Gemini model, aligned with the API.
 use super::types::*;
 
-pub(crate) fn to_vertex_part(part: &genkit_ai::document::Part) -> Result<VertexPart> {
+pub(crate) fn to_vertex_part(part: &genkit::document::Part) -> Result<VertexPart> {
     if let Some(media) = &part.media {
         let (mime_type, data) = media.url.split_once(";base64,").ok_or_else(|| {
             Error::VertexAI("Media URL is not a valid base64 data URI.".to_string())
@@ -168,8 +168,8 @@ pub(crate) fn to_vertex_request(req: &GenerateRequest) -> Result<VertexGeminiReq
 
 /// Calculates basic usage statistics like character and media counts.
 pub(crate) fn get_genkit_usage_stats(
-    request_messages: &[genkit_ai::message::MessageData],
-    candidate_messages: &[genkit_ai::message::MessageData],
+    request_messages: &[genkit::message::MessageData],
+    candidate_messages: &[genkit::message::MessageData],
 ) -> GenerationUsage {
     let mut input_characters = 0;
     let mut input_images = 0;
@@ -248,7 +248,7 @@ pub(crate) fn to_genkit_response(
                 .into_iter()
                 .map(|part| {
                     if let Some(fc) = part.function_call {
-                        Ok(genkit_ai::document::Part {
+                        Ok(genkit::document::Part {
                             tool_request: Some(ToolRequest {
                                 name: fc.name,
                                 input: Some(fc.args),
@@ -257,15 +257,15 @@ pub(crate) fn to_genkit_response(
                             ..Default::default()
                         })
                     } else {
-                        Ok(genkit_ai::document::Part {
+                        Ok(genkit::document::Part {
                             text: part.text,
                             ..Default::default()
                         })
                     }
                 })
-                .collect::<Result<Vec<genkit_ai::document::Part>>>()?;
+                .collect::<Result<Vec<genkit::document::Part>>>()?;
 
-            let message = genkit_ai::message::MessageData {
+            let message = genkit::message::MessageData {
                 role: Role::Model,
                 content,
                 metadata: None,
@@ -287,7 +287,7 @@ pub(crate) fn to_genkit_response(
         .collect::<Result<Vec<CandidateData>>>()?;
 
     let usage = resp.usage_metadata.map(|u| {
-        let candidate_messages: Vec<genkit_ai::message::MessageData> =
+        let candidate_messages: Vec<genkit::message::MessageData> =
             candidates.iter().map(|c| c.message.clone()).collect();
         let mut usage_stats = get_genkit_usage_stats(&req.messages, &candidate_messages);
         usage_stats.input_tokens = Some(u.prompt_token_count);

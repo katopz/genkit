@@ -23,7 +23,7 @@ use crate::context_caching::utils::{
 };
 use crate::model::gemini::VertexContent;
 use crate::{Error, Result};
-use genkit_ai::model::GenerateRequest;
+use genkit::model::GenerateRequest;
 use reqwest::header::{HeaderMap, AUTHORIZATION, CONTENT_TYPE};
 use serde::{Deserialize, Serialize};
 

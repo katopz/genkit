@@ -34,8 +34,7 @@ use self::model::gemini::define_gemini_model;
 use self::model::imagen::define_imagen_model;
 use self::model::SUPPORTED_EMBEDDER_MODELS;
 use async_trait::async_trait;
-use genkit::{plugin::Plugin, registry::Registry};
-use genkit_ai::{embedder_ref, EmbedderRef, ModelRef};
+use genkit::{embedder_ref, plugin::Plugin, registry::Registry, EmbedderRef, ModelRef};
 use serde_json::Value;
 use std::sync::Arc;
 use thiserror::Error;
@@ -43,7 +42,7 @@ use thiserror::Error;
 #[derive(Error, Debug)]
 pub enum Error {
     #[error("Genkit core error: {0}")]
-    GenkitCore(#[from] genkit_core::error::Error),
+    GenkitCore(#[from] genkit::error::Error),
     #[error("GCP auth error: {0}")]
     GcpAuth(String),
     #[error("Request error: {0}")]
@@ -56,9 +55,9 @@ pub enum Error {
 
 pub type Result<T> = std::result::Result<T, Error>;
 
-impl From<Error> for genkit_core::error::Error {
+impl From<Error> for genkit::error::Error {
     fn from(e: Error) -> Self {
-        genkit_core::error::Error::new_internal(e.to_string())
+        genkit::error::Error::new_internal(e.to_string())
     }
 }
 
@@ -117,7 +116,7 @@ impl Plugin for VertexAIPlugin {
         "vertexai"
     }
 
-    async fn initialize(&self, registry: &Registry) -> genkit_core::error::Result<()> {
+    async fn initialize(&self, registry: &Registry) -> genkit::error::Result<()> {
         self.register_models(registry).await.map_err(|e| e.into())
     }
 }

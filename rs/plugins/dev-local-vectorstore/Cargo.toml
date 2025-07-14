@@ -8,8 +8,7 @@ repository.workspace = true
 version.workspace    = true
 
 [dependencies]
-genkit-ai   = { path = "../../ai", version = "0.1.0" }
-genkit-core = { path = "../../core", version = "0.1.0" }
+genkit = { path = "../../genkit", version = "0.1.0" }
 
 async-trait.workspace = true
 log.workspace         = true

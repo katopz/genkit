@@ -19,10 +19,8 @@
 use super::types::VertexAIEvaluationMetricType;
 use crate::common::DerivedParams;
 use crate::{Error, Result};
-use genkit_ai::evaluator::{
-    define_evaluator, BaseEvalDataPoint, EvalResponse, EvaluatorAction, Score,
-};
-use genkit_core::Registry;
+use genkit::evaluator::{define_evaluator, EvaluatorAction};
+use genkit::{BaseEvalDataPoint, EvalResponse, Registry, Score};
 use reqwest::header::{HeaderMap, AUTHORIZATION, CONTENT_TYPE};
 use serde::{de::DeserializeOwned, Serialize};
 use std::sync::Arc;

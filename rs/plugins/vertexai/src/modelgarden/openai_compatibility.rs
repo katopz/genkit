@@ -17,12 +17,13 @@
 //! This module provides a compatibility layer to allow Genkit to interact
 //! with models in the Vertex AI Model Garden that expose an OpenAI-compatible API.
 
-use genkit_ai::model::{
-    define_model, CandidateData, FinishReason, GenerateRequest, GenerateResponse, ModelAction,
-    ModelRef,
+use genkit::{
+    common::model::DefineModelOptions,
+    define_model,
+    model::{FinishReason, GenerateRequest},
+    tool::ToolDefinition,
+    CandidateData, GenerateResponseData, MessageData, ModelAction, ModelRef, Part, Registry, Role,
 };
-use genkit_ai::{tool::ToolDefinition, MessageData, Part, Role};
-use genkit_core::Registry;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
@@ -189,7 +190,7 @@ pub fn from_openai_choice(choice: openai_types::ChatCompletionChoice) -> Candida
 
     CandidateData {
         index: choice.index,
-        message: genkit_ai::MessageData {
+        message: genkit::MessageData {
             role: Role::Model,
             content,
             metadata: None,
@@ -251,7 +252,7 @@ pub fn openai_compatible_model(
                 }
             }"#;
             let response: ChatCompletionResponse = serde_json::from_str(mock_response_json)
-                .map_err(|e| genkit_core::error::Error::new_internal(e.to_string()))?;
+                .map_err(|e| genkit::error::Error::new_internal(e.to_string()))?;
 
             // 4. Convert OpenAI response to Genkit response.
             let candidates = response
@@ -260,7 +261,7 @@ pub fn openai_compatible_model(
                 .map(from_openai_choice)
                 .collect();
 
-            Ok(GenerateResponse {
+            Ok(GenerateResponseData {
                 candidates,
                 usage: None, // Would be mapped from response.usage
                 ..Default::default()
@@ -271,7 +272,7 @@ pub fn openai_compatible_model(
     let registry = Registry::default();
     define_model(
         &registry,
-        genkit_ai::model::DefineModelOptions {
+        DefineModelOptions {
             name: model_ref.name.clone(),
             ..Default::default()
         },

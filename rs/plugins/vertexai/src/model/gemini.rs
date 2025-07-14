@@ -19,10 +19,10 @@
 
 use crate::common::get_derived_params;
 use crate::{context_caching, Error, Result, VertexAIPluginOptions};
+use genkit::common::model::DefineModelOptions;
 use log;
 
-use genkit_ai::model::{define_model, GenerateRequest, GenerateResponseData, ModelAction};
-use genkit_core::Registry;
+use genkit::{define_model, model::GenerateRequest, GenerateResponseData, ModelAction, Registry};
 use reqwest::header::{HeaderMap, AUTHORIZATION, CONTENT_TYPE};
 
 // Configuration structs for the Gemini model, aligned with the API.
@@ -112,7 +112,7 @@ pub fn define_gemini_model(model_name: &str, options: &VertexAIPluginOptions) ->
     let model_id = model_name.to_string();
     let opts = options.clone();
 
-    let model_options = genkit_ai::model::DefineModelOptions {
+    let model_options = DefineModelOptions {
         name: format!("vertexai/{}", model_name),
         ..Default::default()
     };

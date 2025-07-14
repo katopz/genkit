@@ -19,7 +19,8 @@
 
 use super::evaluator_factory::EvaluatorFactory;
 use super::types::{VertexAIEvaluationMetric, VertexAIEvaluationMetricType};
-use genkit_ai::evaluator::{BaseEvalDataPoint, EvaluatorAction, Score};
+use genkit::EvalStatusEnum;
+use genkit::{evaluator::EvaluatorAction, BaseEvalDataPoint, Score};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
@@ -142,7 +143,7 @@ fn create_bleu_evaluator(
                 response.bleu_results.bleu_metric_values[0].score
             )),
             details: None,
-            status: Some(genkit_ai::evaluator::EvalStatusEnum::Pass),
+            status: Some(EvalStatusEnum::Pass),
             error: None,
         },
     )
@@ -200,7 +201,7 @@ fn create_rouge_evaluator(
                 response.rouge_results.rouge_metric_values[0].score
             )),
             details: None,
-            status: Some(genkit_ai::evaluator::EvalStatusEnum::Pass),
+            status: Some(EvalStatusEnum::Pass),
             error: None,
         },
     )
@@ -244,7 +245,7 @@ fn create_fluency_evaluator(
         |response: FluencyResponse| Score {
             score: Some(serde_json::json!(response.fluency_result.score)),
             details: Some(serde_json::json!({ "reasoning": response.fluency_result.explanation })),
-            status: Some(genkit_ai::evaluator::EvalStatusEnum::Pass),
+            status: Some(EvalStatusEnum::Pass),
             error: None,
         },
     )
@@ -288,7 +289,7 @@ fn create_safety_evaluator(
         |response: SafetyResponse| Score {
             score: Some(serde_json::json!(response.safety_result.score)),
             details: Some(serde_json::json!({ "reasoning": response.safety_result.explanation })),
-            status: Some(genkit_ai::evaluator::EvalStatusEnum::Pass),
+            status: Some(EvalStatusEnum::Pass),
             error: None,
         },
     )
@@ -339,7 +340,7 @@ fn create_groundedness_evaluator(
             details: Some(
                 serde_json::json!({ "reasoning": response.groundedness_result.explanation }),
             ),
-            status: Some(genkit_ai::evaluator::EvalStatusEnum::Pass),
+            status: Some(EvalStatusEnum::Pass),
             error: None,
         },
     )
@@ -387,7 +388,7 @@ fn create_summarization_quality_evaluator(
                 response.summarization_quality_result.score
             )),
             details: Some(serde_json::json!({ "reasoning": response.summarization_quality_result.explanation })),
-            status: Some(genkit_ai::evaluator::EvalStatusEnum::Pass),
+            status: Some(EvalStatusEnum::Pass),
             error: None,
         },
     )
@@ -435,7 +436,7 @@ fn create_summarization_helpfulness_evaluator(
                 response.summarization_helpfulness_result.score
             )),
             details: Some(serde_json::json!({ "reasoning": response.summarization_helpfulness_result.explanation })),
-            status: Some(genkit_ai::evaluator::EvalStatusEnum::Pass),
+            status: Some(EvalStatusEnum::Pass),
             error: None,
         },
     )
@@ -483,7 +484,7 @@ fn create_summarization_verbosity_evaluator(
                 response.summarization_verbosity_result.score
             )),
             details: Some(serde_json::json!({ "reasoning": response.summarization_verbosity_result.explanation })),
-            status: Some(genkit_ai::evaluator::EvalStatusEnum::Pass),
+            status: Some(EvalStatusEnum::Pass),
             error: None,
         },
     )

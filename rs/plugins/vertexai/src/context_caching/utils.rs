@@ -20,9 +20,7 @@ use super::constants::{invalid_argument_messages, CONTEXT_CACHE_SUPPORTED_MODELS
 use super::types::{CacheConfig, CacheConfigDetails};
 use crate::model::gemini::VertexContent;
 use crate::{Error, Result};
-use genkit_ai::model::GenerateRequest;
-use genkit_ai::MessageData;
-use genkit_core::error::Error as CoreError;
+use genkit::{error::Error as CoreError, model::GenerateRequest, status::StatusCode, MessageData};
 use serde::Serialize;
 use sha2::{Digest, Sha256};
 
@@ -113,14 +111,14 @@ pub fn validate_context_cache_request(
 ) -> Result<()> {
     if !CONTEXT_CACHE_SUPPORTED_MODELS.contains(&model_version) {
         return Err(Error::from(CoreError::new_user_facing(
-            genkit_core::status::StatusCode::InvalidArgument,
+            StatusCode::InvalidArgument,
             invalid_argument_messages::MODEL_VERSION,
             None,
         )));
     }
     if request.tools.is_some() && !request.tools.as_ref().unwrap().is_empty() {
         return Err(Error::from(CoreError::new_user_facing(
-            genkit_core::status::StatusCode::InvalidArgument,
+            StatusCode::InvalidArgument,
             invalid_argument_messages::TOOLS,
             None,
         )));

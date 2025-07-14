@@ -19,7 +19,7 @@
 
 use super::{anthropic, mistral, model_garden, types::ModelGardenPluginOptions};
 use async_trait::async_trait;
-use genkit_core::{plugin::Plugin, registry::Registry, Result};
+use genkit::{plugin::Plugin, registry::Registry, Result};
 use std::sync::Arc;
 
 fn is_anthropic_model(name: &str) -> bool {
@@ -76,7 +76,7 @@ impl Plugin for VertexAIModelGardenPlugin {
                     model_garden_options.open_ai_base_url_template.clone(),
                 )
             } else {
-                return Err(genkit_core::error::Error::new_internal(format!(
+                return Err(genkit::error::Error::new_internal(format!(
                     "Unsupported Model Garden model: {}",
                     model_ref.name
                 )));

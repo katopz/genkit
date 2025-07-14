@@ -20,13 +20,14 @@
 use crate::common::VertexAIPluginOptions;
 use crate::predict::predict_model;
 use crate::Result;
-use genkit_ai::{
-    model::{
-        define_model, CandidateData, FinishReason, GenerateRequest, GenerateResponse, ModelAction,
-    },
+use genkit::common::model::{DefineModelOptions, ModelInfoSupports};
+use genkit::model::ModelInfo;
+use genkit::{define_model, CandidateData, GenerateResponseData, ModelAction};
+use genkit::{error::Error as CoreError, Registry};
+use genkit::{
+    model::{FinishReason, GenerateRequest},
     Part,
 };
-use genkit_core::{error::Error as CoreError, Registry};
 use schemars::{schema_for, JsonSchema};
 use serde::{Deserialize, Serialize};
 
@@ -63,7 +64,7 @@ async fn imagen_runner(
     req: GenerateRequest,
     model_id: String,
     options: VertexAIPluginOptions,
-) -> std::result::Result<GenerateResponse, CoreError> {
+) -> std::result::Result<GenerateResponseData, CoreError> {
     let prompt = req
         .messages
         .last()
@@ -96,7 +97,7 @@ async fn imagen_runner(
         .into_iter()
         .map(|pred| {
             Ok(Part {
-                media: Some(genkit_ai::Media {
+                media: Some(genkit::Media {
                     content_type: Some(pred.mime_type.clone()),
                     url: format!(
                         "data:{};base64,{}",
@@ -110,8 +111,8 @@ async fn imagen_runner(
 
     let candidate = CandidateData {
         index: 0,
-        message: genkit_ai::message::MessageData {
-            role: genkit_ai::message::Role::Model,
+        message: genkit::message::MessageData {
+            role: genkit::message::Role::Model,
             content,
             metadata: None,
         },
@@ -119,7 +120,7 @@ async fn imagen_runner(
         finish_message: None,
     };
 
-    Ok(GenerateResponse {
+    Ok(GenerateResponseData {
         candidates: vec![candidate],
         ..Default::default()
     })
@@ -130,9 +131,9 @@ pub fn define_imagen_model(model_name: &str, options: &VertexAIPluginOptions) ->
     let model_id = model_name.to_string();
     let opts = options.clone();
 
-    let info = genkit_ai::model::ModelInfo {
+    let info = ModelInfo {
         label: format!("Vertex AI - {}", model_name),
-        supports: Some(genkit_ai::model::ModelInfoSupports {
+        supports: Some(ModelInfoSupports {
             media: Some(true),
             multiturn: Some(false), // Imagen is not a chat model
             tools: Some(false),
@@ -142,7 +143,7 @@ pub fn define_imagen_model(model_name: &str, options: &VertexAIPluginOptions) ->
         ..Default::default()
     };
 
-    let model_options = genkit_ai::model::DefineModelOptions {
+    let model_options = DefineModelOptions {
         name: format!("vertexai/{}", model_name),
         label: Some(info.label),
         supports: info.supports,

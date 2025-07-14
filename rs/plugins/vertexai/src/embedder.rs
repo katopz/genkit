@@ -17,8 +17,8 @@
 //! This module provides the implementation for Vertex AI text embedding models.
 
 use crate::{common::VertexAIPluginOptions, predict::predict_model, Error};
-use genkit_ai::embedder::{define_embedder, EmbedRequest, EmbedResponse, Embedding};
-use genkit_core::Registry;
+use genkit::embedder::{define_embedder, EmbedRequest, EmbedResponse, Embedding};
+use genkit::Registry;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
@@ -51,7 +51,7 @@ struct VertexEmbeddings {
 pub fn define_vertex_ai_embedder(
     model_name: &str,
     options: &VertexAIPluginOptions,
-) -> genkit_ai::embedder::EmbedderAction<VertexEmbeddingConfig> {
+) -> genkit::embedder::EmbedderAction<VertexEmbeddingConfig> {
     let model_id = model_name.to_string();
     let opts = options.clone();
     let regitry = Registry::new();

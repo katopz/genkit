@@ -17,7 +17,7 @@
 //! This module defines the data structures for configuring the Model Garden plugin.
 
 use crate::common::VertexAIPluginOptions;
-use genkit_ai::ModelRef;
+use genkit::ModelRef;
 use serde::Deserialize;
 
 /// Options specific to Model Garden configuration.
