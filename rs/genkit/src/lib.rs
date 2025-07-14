@@ -84,23 +84,12 @@ use genkit_ai::formats::{define_format, FormatterConfig};
 pub use genkit_ai::generate::GenerateOptions;
 use genkit_ai::generate::{generate as _generate, generate_stream as _generate_stream};
 // Re-export key types directly from the underlying crates for a flat, convenient API.
-pub use genkit_ai::chat::Chat;
+
+pub use common::*;
 use genkit_ai::model::{BackgroundModelAction, DefineBackgroundModelOptions, DefineModelOptions};
 use genkit_ai::reranker::{RerankerRequest, RerankerResponse};
 use genkit_ai::retriever::{IndexerRequest, RetrieverRequest, RetrieverResponse};
-pub use genkit_ai::session::{Session, SessionStore};
-use genkit_ai::tool::{dynamic_tool_without_runner, InterruptConfig, ToolFnOptions};
-pub use genkit_ai::GenerateStreamResponse;
-use genkit_ai::{
-    check_operation, define_background_model, define_model, define_resource, dynamic_tool,
-    generate_operation, BaseEvalDataPoint, EmbedRequest, EmbedResponse, EvalResponse,
-    GenerateResponseChunkData, GenerateResponseData, ModelAction, ResourceAction, ResourceInput,
-    ResourceOptions, ResourceOutput,
-};
-use genkit_core::background_action::Operation;
 pub use genkit_core::context::ActionContext;
-pub use genkit_core::registry::Registry;
-use genkit_core::{Action, ActionFnArg};
 use schemars::JsonSchema;
 use serde::Deserialize;
 #[cfg(feature = "beta")]
@@ -432,7 +421,10 @@ impl Genkit {
         _generate_stream(&self.registry, options).await
     }
 
-    pub async fn check_operation(&self, operation: &Operation<Value>) -> Result<Operation<Value>> {
+    pub async fn check_operation(
+        &self,
+        operation: &background_action::Operation<Value>,
+    ) -> Result<background_action::Operation<Value>> {
         check_operation(&self.registry, operation).await
     }
 
