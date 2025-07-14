@@ -35,6 +35,9 @@ async fn genkit_instance() -> Arc<Genkit> {
 #[cfg(test)]
 /// 'chat'
 mod chat_test {
+    use genkit::model::Model;
+    use genkit_ai::generate::BaseGenerateOptions;
+
     use super::*;
 
     #[rstest]
@@ -49,8 +52,8 @@ mod chat_test {
 
         let chat = Arc::new(session)
             .chat::<()>(Some(ChatOptions {
-                base_options: Some(genkit_ai::generate::BaseGenerateOptions {
-                    model: Some(genkit::model::Model::Name("echoModel".to_string())),
+                base_options: Some(BaseGenerateOptions {
+                    model: Some(Model::Name("echoModel".to_string())),
                     ..Default::default()
                 }),
                 ..Default::default()
@@ -104,8 +107,8 @@ mod chat_test {
 
         let chat = Arc::new(session)
             .chat::<()>(Some(ChatOptions {
-                base_options: Some(genkit_ai::generate::BaseGenerateOptions {
-                    model: Some(genkit::model::Model::Name("echoModel".to_string())),
+                base_options: Some(BaseGenerateOptions {
+                    model: Some(Model::Name("echoModel".to_string())),
                     ..Default::default()
                 }),
                 ..Default::default()
@@ -202,7 +205,7 @@ mod chat_test {
 
         let chat = Arc::new(session)
             .chat::<()>(Some(ChatOptions {
-                base_options: Some(genkit_ai::generate::BaseGenerateOptions {
+                base_options: Some(BaseGenerateOptions {
                     model: rendered.model,
                     docs: rendered.docs,
                     messages: rendered.messages.unwrap_or_default(),
@@ -362,8 +365,8 @@ mod chat_test {
 
         let chat = Arc::new(session)
             .chat::<()>(Some(ChatOptions {
-                base_options: Some(genkit_ai::generate::BaseGenerateOptions {
-                    model: Some(genkit::model::Model::Name("echoModel".to_string())),
+                base_options: Some(BaseGenerateOptions {
+                    model: Some(Model::Name("echoModel".to_string())),
                     ..Default::default()
                 }),
                 ..Default::default()
