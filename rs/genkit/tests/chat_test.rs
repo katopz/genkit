@@ -442,7 +442,7 @@ mod preamble_test {
     async fn test_swaps_preamble_on_prompt_tool_invocation() -> Result<()> {
         let (genkit, pm) = helpers::genkit_with_programmable_model().await;
 
-        let agent_b_prompt = genkit.define_prompt(PromptConfig::<(), (), Value> {
+        let _agent_b_prompt = genkit.define_prompt(PromptConfig::<(), (), Value> {
             name: "agentB".to_string(),
             tools: Some(vec![ToolArgument::Name("agentA".to_string())]),
             tool_choice: Some(ToolChoice::Required),
