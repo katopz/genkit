@@ -16,7 +16,7 @@ mod helpers;
 
 use async_trait::async_trait;
 use futures_util::StreamExt;
-use genkit::Genkit;
+use genkit::{CreateSessionOptions, Genkit};
 use genkit_ai::document::Part;
 use genkit_ai::generate::BaseGenerateOptions;
 use genkit_ai::message::{MessageData, Role};
@@ -386,4 +386,57 @@ async fn test_stores_state_and_messages_in_the_store(#[future] genkit_instance: 
             }
         })
     );
+}
+
+#[rstest]
+#[tokio::test]
+/// 'can start chat from a prompt'
+async fn test_can_start_chat_from_a_prompt(#[future] genkit_instance: Arc<Genkit>) {
+    let genkit = genkit_instance.await;
+
+    let agent = genkit.define_prompt::<(), Value, Value>(genkit::prompt::PromptConfig {
+        name: "agent".to_string(),
+        description: Some("Agent description".to_string()),
+        config: Some(json!({ "temperature": 1 })),
+        messages: Some(vec![MessageData {
+            role: Role::System,
+            content: vec![Part::text("hello from template")],
+            ..Default::default()
+        }]),
+        ..Default::default()
+    });
+
+    let session = genkit
+        .create_session(CreateSessionOptions::<Value>::default())
+        .await
+        .unwrap();
+
+    let chat = session
+        .chat(Some(ChatOptions {
+            preamble: Some(&agent),
+            ..Default::default()
+        }))
+        .await
+        .unwrap();
+
+    let response = chat.send("hi").await.unwrap();
+
+    let expected_messages = json!([
+        {
+            "role": "system",
+            "content": [{ "text": "hello from template" }],
+            "metadata": { "preamble": true }
+        },
+        { "role": "user", "content": [{ "text": "hi" }] },
+        {
+            "role": "model",
+            "content": [
+                { "text": "Echo: system: hello from template,hi" },
+                { "text": "; config: {\"temperature\":1}" },
+            ],
+        },
+    ]);
+
+    let actual_messages = to_value(response.messages().unwrap()).unwrap();
+    assert_eq!(actual_messages, expected_messages);
 }
