@@ -470,7 +470,6 @@ pub async fn resolve_resume_option<O: Default + Clone + Send + Sync + 'static>(
                 message: messages[last_message_index].clone(),
                 finish_reason: Some(crate::model::FinishReason::Interrupted),
                 finish_message: Some("One or more tools triggered interrupts while resuming generation. The model was not called.".to_string()),
-                ..Default::default()
             }],
             ..Default::default()
         };

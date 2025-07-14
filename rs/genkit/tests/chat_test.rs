@@ -716,7 +716,7 @@ mod preamble_test {
             MessageData {
                 role: Role::Model,
                 content: vec![
-                    Part::text("Echo: SYSTEM INSTRUCTIONS:\ngreet Pavel,Understood.,hi"),
+                    Part::text("Echo: system:  greet Pavel,hi"),
                     Part::text("; config: {\"temperature\":2}"),
                 ],
                 ..Default::default()
@@ -769,7 +769,7 @@ mod preamble_test {
         expected_messages2.push(MessageData {
             role: Role::Model,
             content: vec![
-                Part::text("Echo: SYSTEM INSTRUCTIONS:\ngreet Michael,Understood.,hi,Echo: SYSTEM INSTRUCTIONS:\ngreet Pavel,Understood.,hi,; config: {\"temperature\":2},hi"),
+                Part::text("Echo: system:  greet Michael,hi,Echo: system:  greet Pavel,hi,; config: {\"temperature\":2},hi"),
                 Part::text("; config: {\"temperature\":2}"),
             ],
             ..Default::default()
@@ -838,9 +838,7 @@ mod preamble_test {
         expected_messages.push(MessageData {
             role: Role::Model,
             content: vec![
-                Part::text(
-                    "Echo: SYSTEM INSTRUCTIONS:\nsystem instructions,Understood.,hi,bye,hi again",
-                ),
+                Part::text("Echo: system: system instructions,hi,bye,hi again"),
                 Part::text("; config: {}"),
             ],
             ..Default::default()
