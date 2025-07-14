@@ -113,62 +113,56 @@ mod chat_test {
             .await
             .unwrap();
 
-        let stream_response = chat.send_stream("hi").await.unwrap();
-        let mut response_handle = stream_response.response;
-        let mut stream = stream_response.stream;
+        // First message
+        let stream_response_1 = chat.send_stream("hi").await.unwrap();
+        let mut response_handle = stream_response_1.response;
+        let mut stream = stream_response_1.stream;
 
         let mut chunks: Vec<String> = Vec::new();
         while let Some(chunk_result) = stream.next().await {
-            let chunk = chunk_result.unwrap();
-            chunks.push(chunk.text());
+            chunks.push(chunk_result.unwrap().text());
         }
         let mut final_response = response_handle.await.unwrap().unwrap();
         assert_eq!(final_response.text().unwrap(), "Echo: hi; config: {}");
         assert_eq!(chunks, vec!["3", "2", "1"]);
 
+        // Second message
         let stream_response_2 = chat.send_stream("bye").await.unwrap();
         response_handle = stream_response_2.response;
         stream = stream_response_2.stream;
 
         chunks.clear();
         while let Some(chunk_result) = stream.next().await {
-            let chunk = chunk_result.unwrap();
-            chunks.push(chunk.text());
+            chunks.push(chunk_result.unwrap().text());
         }
         final_response = response_handle.await.unwrap().unwrap();
 
         assert_eq!(chunks, vec!["3", "2", "1"]);
         assert_eq!(
             final_response.text().unwrap(),
-            "Echo: hi,Echo: hi; config: {},bye; config: {}"
+            "Echo: hi,Echo: hi,; config: {},bye; config: {}"
         );
 
-        let expected_messages = vec![
-            MessageData {
-                role: Role::User,
-                content: vec![Part::text("hi")],
-                ..Default::default()
+        // Assert final message history using json! for a deep comparison.
+        let expected_messages = json!([
+            { "role": "user", "content": [{ "text": "hi" }] },
+            {
+                "role": "model",
+                "content": [{ "text": "Echo: hi" }, { "text": "; config: {}" }],
             },
-            MessageData {
-                role: Role::Model,
-                content: vec![Part::text("Echo: hi"), Part::text("; config: {}")],
-                ..Default::default()
-            },
-            MessageData {
-                role: Role::User,
-                content: vec![Part::text("bye")],
-                ..Default::default()
-            },
-            MessageData {
-                role: Role::Model,
-                content: vec![
-                    Part::text("Echo: hi,Echo: hi; config: {},bye"),
-                    Part::text("; config: {}"),
+            { "role": "user", "content": [{ "text": "bye" }] },
+            {
+                "role": "model",
+                "content": [
+                  { "text": "Echo: hi,Echo: hi,; config: {},bye" },
+                  { "text": "; config: {}" },
                 ],
-                ..Default::default()
             },
-        ];
-        assert_eq!(final_response.messages().unwrap(), expected_messages);
+        ]);
+
+        let actual_messages_value =
+            serde_json::to_value(final_response.messages().unwrap()).unwrap();
+        assert_eq!(actual_messages_value, expected_messages);
     }
 
     #[derive(Serialize, Deserialize, JsonSchema, Debug, PartialEq, Clone, Default)]
