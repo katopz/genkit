@@ -181,12 +181,39 @@ impl<S: Serialize + DeserializeOwned + Clone + Send + Sync + 'static> Chat<S> {
                     let mut state = self.state.lock().await;
 
                     let mut generate_options_base = state.request_base.clone();
+
                     if let Some(prompt_parts) = resolved_options.prompt {
+                        // This is the case for a simple string or Part[] input.
                         generate_options_base.messages.push(MessageData {
                             role: Role::User,
                             content: prompt_parts,
                             metadata: None,
                         });
+                    } else {
+                        // This is the case for a rendered prompt (GenerateOptions).
+                        // We need to merge its properties with the chat's base state.
+                        if let Some(mut messages) = resolved_options.messages {
+                            generate_options_base.messages.append(&mut messages);
+                        }
+                        if resolved_options.model.is_some() {
+                            generate_options_base.model = resolved_options.model;
+                        }
+                        if resolved_options.tools.is_some() {
+                            generate_options_base.tools = resolved_options.tools;
+                        }
+                        if resolved_options.tool_choice.is_some() {
+                            generate_options_base.tool_choice = resolved_options.tool_choice;
+                        }
+                        if let Some(new_config) = resolved_options.config {
+                            let base_config = generate_options_base
+                                .config
+                                .get_or_insert_with(|| serde_json::json!({}));
+                            if let (Some(base), Some(new)) =
+                                (base_config.as_object_mut(), new_config.as_object())
+                            {
+                                base.extend(new.clone());
+                            }
+                        }
                     }
 
                     // TODO: Wire up streaming callback from resolved_options.
