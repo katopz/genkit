@@ -42,6 +42,7 @@ async fn test_request(req: GenerateRequest) -> GenerateRequest {
 
 #[rstest]
 #[tokio::test]
+/// 'does not modify a request with no system prompt'
 async fn test_does_not_modify_request_with_no_system_prompt() {
     let req: GenerateRequest = from_value(json!({
         "messages": [{ "role": "user", "content": [{ "text": "hello" }] }],
@@ -54,6 +55,7 @@ async fn test_does_not_modify_request_with_no_system_prompt() {
 
 #[rstest]
 #[tokio::test]
+/// 'keeps other messages in place'
 async fn test_keeps_other_messages_in_place() {
     let req: GenerateRequest = from_value(json!({
         "messages": [

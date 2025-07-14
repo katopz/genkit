@@ -171,6 +171,7 @@ pub struct SystemPromptSimulateOptions {
 }
 
 /// Provide a simulated system prompt for models that don't support it natively.
+/// Provide a simulated system prompt for models that don't support it natively.
 pub fn simulate_system_prompt(options: Option<SystemPromptSimulateOptions>) -> ModelMiddleware {
     let opts = options.unwrap_or_default();
     let preface = opts
@@ -191,16 +192,12 @@ pub fn simulate_system_prompt(options: Option<SystemPromptSimulateOptions>) -> M
                     .position(|m| m.role == crate::model::Role::System)
                 {
                     let system_message = req.messages.remove(pos);
-                    let system_text = system_message
-                        .content
-                        .iter()
-                        .filter_map(|p| p.text.as_deref())
-                        .collect::<String>();
-                    let combined_text = format!("{}{}", preface, system_text);
+                    let mut user_content: Vec<Part> = vec![Part::text(preface)];
+                    user_content.extend(system_message.content);
 
                     let user_message = MessageData {
                         role: crate::model::Role::User,
-                        content: vec![Part::text(combined_text)],
+                        content: user_content,
                         metadata: None,
                     };
                     let model_message = MessageData {
