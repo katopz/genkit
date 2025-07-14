@@ -429,8 +429,11 @@ mod preamble_test {
     use futures::lock::Mutex;
     use genkit::common::ToolChoice;
     use genkit::CreateSessionOptions;
+    use genkit::GenerateOptions;
+    use genkit::Model;
     use genkit::Result;
     use genkit::ToolArgument;
+    use genkit_ai::generate::BaseGenerateOptions;
     use genkit_ai::{CandidateData, GenerateResponseData};
 
     #[tokio::test]
@@ -764,13 +767,13 @@ mod preamble_test {
         expected_messages2.push(MessageData::user(vec![Part::text("hi")]));
         // Add the final model response for the second turn.
         expected_messages2.push(MessageData {
-        role: Role::Model,
-        content: vec![
-            Part::text("Echo: SYSTEM INSTRUCTIONS:\ngreet Michael,Understood.,hi,Echo: SYSTEM INSTRUCTIONS:\ngreet Pavel,Understood.,hi,; config: {\"temperature\":2},hi"),
-            Part::text("; config: {\"temperature\":2}"),
-        ],
-        ..Default::default()
-    });
+            role: Role::Model,
+            content: vec![
+                Part::text("Echo: SYSTEM INSTRUCTIONS:\ngreet Michael,Understood.,hi,Echo: SYSTEM INSTRUCTIONS:\ngreet Pavel,Understood.,hi,; config: {\"temperature\":2},hi"),
+                Part::text("; config: {\"temperature\":2}"),
+            ],
+            ..Default::default()
+        });
 
         assert_eq!(
             serde_json::to_value(response2.messages().unwrap()).unwrap(),
@@ -850,5 +853,119 @@ mod preamble_test {
         assert_eq!(actual_json, expected_json);
     }
 
-    // TODO: 'initializes chat with history in preamble'
+    #[tokio::test]
+    #[ignore = "Ignoring until history can be provided as part of the preamble during chat creation."]
+    async fn test_initializes_chat_with_history_in_preamble() -> Result<()> {
+        let (genkit, _last_request) = helpers::genkit_instance_for_test().await;
+
+        #[derive(Serialize, Deserialize, JsonSchema, Debug, Clone, Default)]
+        struct NameInput {
+            name: String,
+        }
+
+        let hi_prompt = genkit.define_prompt::<NameInput, Value, Value>(PromptConfig {
+            name: "hi".to_string(),
+            model: Some(Model::Name("echoModel".to_string())),
+            system: Some("system instructions".to_string()),
+            prompt: Some("hi {{name}}".to_string()),
+            input: Some(NameInput::default()),
+            ..Default::default()
+        });
+
+        let history = vec![
+            MessageData {
+                role: Role::User,
+                content: vec![Part::text("hi")],
+                metadata: Some([("preamble".to_string(), json!(true))].into()),
+            },
+            MessageData {
+                role: Role::Model,
+                content: vec![Part::text("bye")],
+                metadata: Some([("preamble".to_string(), json!(true))].into()),
+            },
+        ];
+
+        // Manually simulate what the TS ai.chat(prompt, {messages}) does:
+        // 1. Render the prompt.
+        let rendered_opts: GenerateOptions = hi_prompt
+            .render(
+                NameInput {
+                    name: "Genkit".to_string(),
+                },
+                None,
+            )
+            .await?;
+
+        // 2. Combine history and the rendered prompt messages.
+        let mut combined_messages = history.clone();
+        // Mark the rendered prompt message as part of the preamble.
+        let mut rendered_user_message = rendered_opts.messages.unwrap().pop().unwrap();
+        rendered_user_message.metadata = Some([("preamble".to_string(), json!(true))].into());
+        combined_messages.push(rendered_user_message);
+
+        // 3. The system message from the prompt is also part of the preamble.
+        combined_messages.insert(
+            0,
+            MessageData {
+                role: Role::System,
+                content: vec![Part::text("system instructions")],
+                metadata: Some([("preamble".to_string(), json!(true))].into()),
+            },
+        );
+
+        let chat_opts: ChatOptions<'_, Value, Value> = ChatOptions {
+            base_options: Some(BaseGenerateOptions {
+                model: rendered_opts.model,
+                messages: combined_messages,
+                ..Default::default()
+            }),
+            ..Default::default()
+        };
+
+        let session = genkit.create_session(Default::default()).await?;
+        let chat = session.chat(Some(chat_opts)).await?;
+
+        let response = chat.send("hi again").await?;
+
+        // Now, construct the expected final message list for assertion.
+        let expected_messages = vec![
+            MessageData {
+                role: Role::System,
+                content: vec![Part::text("system instructions")],
+                metadata: Some([("preamble".to_string(), json!(true))].into()),
+            },
+            MessageData {
+                role: Role::User,
+                content: vec![Part::text("hi")],
+                metadata: Some([("preamble".to_string(), json!(true))].into()),
+            },
+            MessageData {
+                role: Role::Model,
+                content: vec![Part::text("bye")],
+                metadata: Some([("preamble".to_string(), json!(true))].into()),
+            },
+            MessageData {
+                role: Role::User,
+                content: vec![Part::text("hi Genkit")],
+                metadata: Some([("preamble".to_string(), json!(true))].into()),
+            },
+            MessageData {
+                role: Role::User,
+                content: vec![Part::text("hi again")],
+                ..Default::default()
+            },
+            MessageData {
+                role: Role::Model,
+                content: vec![
+                    Part::text("Echo: system: system instructions,hi,bye,hi Genkit,hi again"),
+                    Part::text("; config: {}"),
+                ],
+                ..Default::default()
+            },
+        ];
+
+        assert_eq!(response.messages()?, expected_messages);
+
+        Ok(())
+    }
 }
