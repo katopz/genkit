@@ -102,7 +102,7 @@ pub fn define_echo_model(registry: &mut Registry, constrained_support: &str) {
             })
             .filter_map(|p| p.text.as_deref())
             .collect::<Vec<&str>>()
-            .join("");
+            .join(",");
 
         // Both streaming and non-streaming calls return a final response.
         let text = format!("Echo: {}", filtered_text);
@@ -283,7 +283,7 @@ impl Plugin for EchoModelPlugin {
                             .iter()
                             .filter_map(|p| p.text.as_deref())
                             .collect::<Vec<_>>()
-                            .join(",");
+                            .join("");
                         format!("{}{}", prefix, content)
                     })
                     .collect::<Vec<_>>()
@@ -394,7 +394,7 @@ impl Plugin for TsEchoModelPlugin {
                                 .iter()
                                 .filter_map(|p| p.text.as_deref())
                                 .collect::<Vec<_>>()
-                                .join(",");
+                                .join("");
                             format!("{}{}", prefix, content)
                         })
                         .collect::<Vec<_>>()

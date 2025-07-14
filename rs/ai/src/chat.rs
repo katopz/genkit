@@ -113,9 +113,11 @@ impl<S: Serialize + DeserializeOwned + Clone + Send + Sync + 'static> Chat<S> {
         thread_name: String,
         history: Vec<MessageData>,
     ) -> Self {
-        // Mark all incoming messages as part of the preamble for this chat instance.
-        let marked_incoming_messages: Vec<MessageData> = request_base
-            .messages
+        // Take the new messages for this instance.
+        let new_messages = std::mem::take(&mut request_base.messages);
+
+        // Mark them all as preamble for this chat instance.
+        let new_preamble_messages: Vec<MessageData> = new_messages
             .into_iter()
             .map(|mut msg| {
                 msg.metadata
@@ -125,41 +127,22 @@ impl<S: Serialize + DeserializeOwned + Clone + Send + Sync + 'static> Chat<S> {
             })
             .collect();
 
-        // This logic merges messages from options (request_base) with persisted history.
-        let (new_preamble, other_new_messages): (Vec<_>, Vec<_>) =
-            marked_incoming_messages.into_iter().partition(|m| {
-                m.role == Role::System
-                    // The 'preamble' check is now technically redundant since we just added it,
-                    // but it's kept for logical clarity and to handle potential edge cases.
-                    || m.metadata
-                        .as_ref()
-                        .and_then(|meta| meta.get("preamble"))
-                        .and_then(|v| v.as_bool())
-                        .unwrap_or(false)
-            });
+        // Check if a new system prompt is being provided.
+        let has_new_system_prompt = new_preamble_messages.iter().any(|m| m.role == Role::System);
 
-        let mut final_messages;
+        // Start the final message list with the new preamble.
+        let mut final_messages = new_preamble_messages;
 
-        if !new_preamble.is_empty() {
-            // If a new preamble is provided, it replaces any old one from history.
-            final_messages = new_preamble;
-            // Then, add the historical messages, filtering out any that were preambles from old sessions.
-            final_messages.extend(history.into_iter().filter(|m| {
-                m.role != Role::System
-                    && !m
-                        .metadata
-                        .as_ref()
-                        .and_then(|meta| meta.get("preamble"))
-                        .and_then(|v| v.as_bool())
-                        .unwrap_or(false)
-            }));
-        } else {
-            // If no new preamble, use the existing history as is.
-            final_messages = history;
-        }
+        // Append historical messages, filtering out any old system prompts if a new one was provided.
+        final_messages.extend(history.into_iter().filter(|historical_msg| {
+            if has_new_system_prompt {
+                historical_msg.role != Role::System
+            } else {
+                true
+            }
+        }));
 
-        // Finally, append any other non-preamble messages that were passed in during chat creation.
-        final_messages.extend(other_new_messages);
+        // Set the combined list back on the request.
         request_base.messages = final_messages;
 
         let state = ChatState {

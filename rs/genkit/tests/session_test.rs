@@ -37,6 +37,7 @@ async fn genkit_instance_for_test() -> (Arc<Genkit>, Arc<Mutex<Option<GenerateRe
 
 #[rstest]
 #[tokio::test]
+/// 'maintains history in the session'
 async fn test_maintains_history_in_the_session(
     #[future] genkit_instance_for_test: (Arc<Genkit>, Arc<Mutex<Option<GenerateRequest>>>),
 ) {
@@ -111,6 +112,7 @@ impl<S: Clone + Send + Sync + 'static> SessionStore<S> for CapturingStore<S> {
 
 #[rstest]
 #[tokio::test]
+/// 'sends ready-to-serialize data to the session store'
 async fn test_sends_ready_to_serialize_data_to_session_store(
     #[future] genkit_instance_for_test: (Arc<Genkit>, Arc<Mutex<Option<GenerateRequest>>>),
 ) {
@@ -154,6 +156,7 @@ async fn test_sends_ready_to_serialize_data_to_session_store(
 
 #[rstest]
 #[tokio::test]
+/// 'maintains multithreaded history in the session'
 async fn test_maintains_multithreaded_history_in_the_session(
     #[future] genkit_instance_for_test: (Arc<Genkit>, Arc<Mutex<Option<GenerateRequest>>>),
 ) {
@@ -277,6 +280,7 @@ async fn test_maintains_multithreaded_history_in_the_session(
 
 #[rstest]
 #[tokio::test]
+/// 'maintains history in the session with streaming'
 async fn test_maintains_history_in_the_session_with_streaming(
     #[future] genkit_instance_for_test: (Arc<Genkit>, Arc<Mutex<Option<GenerateRequest>>>),
 ) {
@@ -336,6 +340,7 @@ async fn test_maintains_history_in_the_session_with_streaming(
 
 #[rstest]
 #[tokio::test]
+/// 'stores state and messages in the store'
 async fn test_stores_state_and_messages_in_the_store(
     #[future] genkit_instance_for_test: (Arc<Genkit>, Arc<Mutex<Option<GenerateRequest>>>),
 ) {
