@@ -26,7 +26,7 @@ use crate::message::MessageData;
 use crate::model::{middleware::ModelMiddleware, GenerateRequest, Model};
 
 use crate::tool::ToolArgument;
-use crate::{Document, Part};
+use crate::{Document, Part, ToolChoice};
 use genkit_core::action::{Action, ActionBuilder};
 use genkit_core::context::{get_context, ActionContext};
 use genkit_core::error::{Error, Result};
@@ -127,6 +127,8 @@ pub struct PromptConfig<I = Value, O = Value, C = Value> {
     #[schemars(skip)]
     pub r#use: Option<Vec<ModelMiddleware>>,
     #[serde(skip_serializing_if = "Option::is_none")]
+    pub tool_choice: Option<ToolChoice>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub _marker: Option<std::marker::PhantomData<O>>,
 }
 
@@ -219,8 +221,8 @@ pub struct PromptRef {
 /// A prompt that can be executed as a function.
 #[derive(Clone)]
 pub struct ExecutablePrompt<I = Value, O = Value, C = Value> {
-    config: Arc<PromptConfig<I, O, C>>,
-    registry: Registry,
+    pub config: Arc<PromptConfig<I, O, C>>,
+    pub registry: Registry,
     pub r#ref: Option<PromptRef>,
 }
 
