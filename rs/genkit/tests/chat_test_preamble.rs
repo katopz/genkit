@@ -23,8 +23,6 @@ use rstest::{fixture, rstest};
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
-
-use genkit_ai::session::SessionUpdater;
 use std::sync::Arc;
 
 #[fixture]
@@ -394,12 +392,22 @@ mod preamble_test {
     #[rstest]
     #[tokio::test]
     /// 'initializes chat with history'
-    async fn test_initializes_chat_with_history(#[future] genkit_instance: Arc<Genkit>) {
-        let genkit = genkit_instance.await;
+    async fn test_initializes_chat_with_history() {
+        let genkit = genkit_instance().await;
 
-        // 1. Define the history that should already be in the session.
-        let history = vec![
-            MessageData::user(vec![Part::text("hi")]),
+        // In the Rust implementation, the `system` prompt is provided as the first
+        // message in the initial message list.
+        let initial_messages = vec![
+            MessageData {
+                role: Role::System,
+                content: vec![Part::text("system instructions")],
+                ..Default::default()
+            },
+            MessageData {
+                role: Role::User,
+                content: vec![Part::text("hi")],
+                ..Default::default()
+            },
             MessageData {
                 role: Role::Model,
                 content: vec![Part::text("bye")],
@@ -407,62 +415,56 @@ mod preamble_test {
             },
         ];
 
-        // 2. Create a session and manually save the history to its store.
-        let session =
-            genkit_ai::Session::<()>::new(Arc::new(genkit.registry().clone()), None, None, None)
-                .await
-                .unwrap();
-        session
-            .update_messages(genkit_ai::chat::MAIN_THREAD, &history)
-            .await
-            .unwrap();
-
-        // 3. Define the new system prompt for this chat instance.
-        let system_prompt = MessageData {
-            role: Role::System,
-            content: vec![Part::text("system instructions")],
-            metadata: Some([("preamble".to_string(), json!(true))].into()),
-        };
-
-        // 4. Create a new chat. It will load the history from the session store
-        //    and prepend the new system prompt.
-        let chat = Arc::new(session)
-            .chat::<()>(Some(ChatOptions {
-                base_options: Some(genkit_ai::generate::BaseGenerateOptions {
-                    model: Some(genkit::model::Model::Name("echoModel".to_string())),
-                    messages: vec![system_prompt.clone()],
-                    ..Default::default()
-                }),
+        let chat_opts: ChatOptions<'_, Value, Value> = ChatOptions {
+            base_options: Some(BaseGenerateOptions {
+                model: Some(Model::Name("echoModel".to_string())),
+                messages: initial_messages,
                 ..Default::default()
-            }))
-            .await
-            .unwrap();
+            }),
+            ..Default::default()
+        };
+        let session = genkit.create_session(Default::default()).await.unwrap();
+        let chat = session.chat(Some(chat_opts)).await.unwrap();
 
-        // 5. Send a new message.
         let response = chat.send("hi again").await.unwrap();
 
-        // 6. Construct the expected final history.
-        let mut expected_messages = vec![system_prompt];
-        expected_messages.extend(history);
-        expected_messages.push(MessageData::user(vec![Part::text("hi again")]));
-        expected_messages.push(MessageData {
-            role: Role::Model,
-            content: vec![
-                Part::text("Echo: system: system instructions,hi,bye,hi again"),
-                Part::text("; config: {}"),
+        // The expected final message history, formatted as a JSON value for a deep comparison.
+        let expected_messages = json!([
+          {
+            "role": "system",
+            "content": [{ "text": "system instructions" }],
+            "metadata": { "preamble": true },
+          },
+          {
+            "role": "user",
+            "content": [{ "text": "hi" }],
+            "metadata": { "preamble": true },
+          },
+          {
+            "role": "model",
+            "content": [{ "text": "bye" }],
+            "metadata": { "preamble": true },
+          },
+          {
+            "role": "user",
+            "content": [{ "text": "hi again" }],
+          },
+          {
+            "role": "model",
+            "content": [
+              { "text": "Echo: system: system instructions,hi,bye,hi again" },
+              { "text": "; config: {}" },
             ],
-            ..Default::default()
-        });
+          },
+        ]);
 
-        // 7. Compare the JSON Value representation for a robust test.
-        let actual_json = serde_json::to_value(response.messages().unwrap()).unwrap();
-        let expected_json = serde_json::to_value(expected_messages).unwrap();
-
-        assert_eq!(actual_json, expected_json);
+        let actual_messages_value = serde_json::to_value(response.messages().unwrap()).unwrap();
+        assert_eq!(actual_messages_value, expected_messages);
     }
 
     #[tokio::test]
     #[ignore = "Ignoring until history can be provided as part of the preamble during chat creation."]
+    // 'initializes chat with history in preamble'
     async fn test_initializes_chat_with_history_in_preamble() -> Result<()> {
         let (genkit, _last_request) = helpers::genkit_instance_for_test().await;
 
