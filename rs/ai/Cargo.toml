@@ -44,30 +44,25 @@ uuid.workspace          = true
 [dev-dependencies]
 tokio-test.workspace = true
 
+[[test]]
+name = "formats_test"
+path = "tests/formats/formats_test.rs"
 
 [[test]]
-name = "document_test"
-path = "tests/document_test.rs"
-
-[[test]]
-name = "extract_test"
-path = "tests/extract_test.rs"
-
-[[test]]
-name = "tool_test"
-path = "tests/tool_test.rs"
+name = "generate_test"
+path = "tests/generate/generate_test.rs"
 
 [[test]]
 name = "chunk_test"
 path = "tests/generate/chunk_test.rs"
 
 [[test]]
-name = "formats_test"
-path = "tests/formats/formats_test.rs"
-
-[[test]]
 name = "message_test"
 path = "tests/message/message_test.rs"
+
+[[test]]
+name = "model"
+path = "tests/model/middleware_test.rs"
 
 [[test]]
 name = "prompt_test"
@@ -76,14 +71,6 @@ path = "tests/prompt/prompt_test.rs"
 [[test]]
 name = "resource_test"
 path = "tests/resource/resource_test.rs"
-
-[[test]]
-name = "model"
-path = "tests/model/middleware_test.rs"
-
-[[test]]
-name = "generate_test"
-path = "tests/generate/generate_test.rs"
 
 [[test]]
 name = "reranker_test"
