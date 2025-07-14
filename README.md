@@ -6,6 +6,7 @@
 - **JavaScript/TypeScript (Stable)**: Production-ready with full feature support
 - **Go (Beta)**: Feature-complete but may have breaking changes
 - **Python (Alpha)**: Early development with core functionality
+- **Rust (Alpha)**: Early development with core functionality, except [dotprompt](https://github.com/google/dotprompt/issues/310)
 
 It offers a unified interface for integrating AI models from providers like [Google](https://genkit.dev/docs/plugins/google-genai), [OpenAI](https://thefireco.github.io/genkit-plugins/docs/plugins/genkitx-openai), [Anthropic](https://thefireco.github.io/genkit-plugins/docs/plugins/genkitx-anthropic), [Ollama](https://genkit.dev/docs/plugins/ollama/), and more. Rapidly build and deploy production-ready chatbots, automations, and recommendation systems using streamlined APIs for multimodal content, structured outputs, tool calling, and agentic workflows.
 
@@ -155,7 +156,7 @@ Want to skip the local setup? Click below to try out Genkit using [Firebase Stud
 
 - [**Join us on Discord**](https://discord.gg/qXt5zzQKpc) – Get help, share
 ideas, and chat with other developers.
-- [**Contribute on GitHub**](https://github.com/firebase/genkit/issues) – Report 
+- [**Contribute on GitHub**](https://github.com/firebase/genkit/issues) – Report
 bugs, suggest features, or explore the source code.
 
 ## Contributing
