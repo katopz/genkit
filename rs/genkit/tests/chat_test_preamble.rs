@@ -33,6 +33,8 @@ async fn genkit_instance() -> Arc<Genkit> {
 #[cfg(test)]
 /// 'preamble'
 mod preamble_test {
+    use crate::helpers::genkit_instance_for_test;
+
     use super::*;
     use futures::lock::Mutex;
     use genkit::common::ToolChoice;
@@ -262,80 +264,77 @@ mod preamble_test {
         Ok(())
     }
 
-    #[rstest]
     #[tokio::test]
-    /// 'updates the preamble on fresh chat instance'
-    async fn test_updates_preamble_on_fresh_chat_instance(#[future] genkit_instance: Arc<Genkit>) {
-        #[derive(Serialize, Deserialize, JsonSchema, Debug, PartialEq, Clone, Default)]
+    async fn test_updates_preamble_on_fresh_chat_instance() {
+        let (genkit, _last_request) = genkit_instance_for_test().await;
+
+        #[derive(Serialize, Deserialize, Default, Debug, JsonSchema, Clone)]
         struct MyState {
             name: String,
         }
 
-        let genkit = genkit_instance.await;
-
-        // The agent prompt definition is the same.
-        let agent = genkit.define_prompt::<(), Value, Value>(PromptConfig {
+        // 1. Define the prompt that uses session state in its template.
+        let agent = genkit.define_prompt::<Value, Value, Value>(PromptConfig {
             name: "agent".to_string(),
-            config: Some(json!({ "temperature": 2 })),
+            // Note: The Handlebars template uses `state.name` to access the session state.
             messages: Some(vec![MessageData {
                 role: Role::System,
-                content: vec![Part::text("greet {{ @state.name }}")],
-                metadata: Some([("preamble".to_string(), json!(true))].into()),
+                content: vec![Part::text(" greet {{state.name}}")],
+                ..Default::default()
             }]),
+            config: Some(json!({"temperature": 2})),
+            description: Some("Agent A description".to_string()),
             ..Default::default()
         });
 
-        // Create the session with initial state.
-        let session = genkit_ai::Session::new(
-            Arc::new(genkit.registry().clone()),
-            None,
-            None,
-            Some(MyState {
-                name: "Pavel".to_string(),
-            }),
-        )
-        .await
-        .unwrap();
-        let session = Arc::new(session);
-
-        // === First Turn ===
-        let chat = session
-            .chat(Some(ChatOptions {
-                preamble: Some(&agent),
-                base_options: Some(genkit_ai::generate::BaseGenerateOptions {
-                    model: Some(genkit::model::Model::Name("echoModel".to_string())),
-                    ..Default::default()
+        // 2. Create a session with an initial state.
+        let session = genkit
+            .create_session(CreateSessionOptions {
+                initial_state: Some(MyState {
+                    name: "Pavel".to_string(),
                 }),
                 ..Default::default()
-            }))
+            })
             .await
             .unwrap();
 
-        let response1 = chat.send("hi").await.unwrap();
-
-        // Assertion 1: Matches the first assertion in the TS test.
-        let expected_messages1 = vec![
-            MessageData {
-                role: Role::System,
-                content: vec![Part::text("greet Pavel")],
-                metadata: Some([("preamble".to_string(), json!(true))].into()),
-            },
-            MessageData::user(vec![Part::text("hi")]),
-            MessageData {
-                role: Role::Model,
-                content: vec![
-                    Part::text("Echo: system:  greet Pavel,hi"),
-                    Part::text("; config: {\"temperature\":2}"),
-                ],
+        // 3. Create the first chat instance, which will render the preamble with "Pavel".
+        let chat_opts = ChatOptions {
+            preamble: Some(&agent),
+            base_options: Some(BaseGenerateOptions {
+                model: Some(Model::Name("echoModel".into())),
                 ..Default::default()
-            },
-        ];
+            }),
+            ..Default::default()
+        };
+        let chat = session.chat(Some(chat_opts.clone())).await.unwrap();
+        let response = chat.send("hi").await.unwrap();
+
+        // 4. Assert the first response is correct.
+        let expected_first_messages = json!([
+          {
+            "role": "system",
+            "content": [{ "text": " greet Pavel" }],
+            "metadata": { "preamble": true },
+          },
+          {
+            "role": "user",
+            "content": [{ "text": "hi" }],
+          },
+          {
+            "role": "model",
+            "content": [
+              { "text": "Echo: system:  greet Pavel,hi" },
+              { "text": "; config: {\"temperature\":2}" },
+            ],
+          },
+        ]);
         assert_eq!(
-            serde_json::to_value(response1.messages().unwrap()).unwrap(),
-            serde_json::to_value(expected_messages1.clone()).unwrap()
+            serde_json::to_value(response.messages().unwrap()).unwrap(),
+            expected_first_messages
         );
 
-        // Update the session state.
+        // 5. Update the session state.
         session
             .update_state(MyState {
                 name: "Michael".to_string(),
@@ -343,49 +342,48 @@ mod preamble_test {
             .await
             .unwrap();
 
-        // === Second Turn ===
-        let fresh_chat = session
-            .chat(Some(ChatOptions {
-                preamble: Some(&agent),
-                base_options: Some(genkit_ai::generate::BaseGenerateOptions {
-                    model: Some(genkit::model::Model::Name("echoModel".to_string())),
-                    ..Default::default()
-                }),
-                ..Default::default()
-            }))
-            .await
-            .unwrap();
+        // 6. Create a *fresh* chat instance from the same session. It will re-render
+        //    the preamble with the new state "Michael".
+        let fresh_chat = session.chat(Some(chat_opts)).await.unwrap();
+        let second_response = fresh_chat.send("hi").await.unwrap();
 
-        // The TS test sends "hi" again.
-        let response2 = fresh_chat.send("hi").await.unwrap();
-
-        // Assertion 2: This is the cumulative history, matching the second TS assertion.
-        let mut expected_messages2 = vec![MessageData {
-            role: Role::System,
-            content: vec![Part::text("greet Michael")], // New preamble
-            metadata: Some([("preamble".to_string(), json!(true))].into()),
-        }];
-        // Add the history from the first response, but without its old preamble.
-        expected_messages2.extend(
-            expected_messages1
-                .into_iter()
-                .filter(|m| m.role != Role::System),
-        );
-        // Add the new user message for the second turn.
-        expected_messages2.push(MessageData::user(vec![Part::text("hi")]));
-        // Add the final model response for the second turn.
-        expected_messages2.push(MessageData {
-            role: Role::Model,
-            content: vec![
-                Part::text("Echo: system:  greet Michael,hi,Echo: system:  greet Pavel,hi,; config: {\"temperature\":2},hi"),
-                Part::text("; config: {\"temperature\":2}"),
-            ],
-            ..Default::default()
-        });
+        // 7. Assert the final message history is correct, containing the history from
+        //    the first interaction and the new interaction with the updated preamble.
+        let expected_second_messages = json!([
+            {
+                "role": "system",
+                "content": [{"text": " greet Michael"}],
+                "metadata": {"preamble": true}
+            },
+            {
+                "role": "user",
+                "content": [{"text": "hi"}]
+            },
+            {
+                "role": "model",
+                "content": [
+                    {"text": "Echo: system:  greet Pavel,hi"},
+                    {"text": "; config: {\"temperature\":2}"}
+                ]
+            },
+            {
+                "role": "user",
+                "content": [{"text": "hi"}]
+            },
+            {
+                "role": "model",
+                "content": [
+                    {
+                        "text": "Echo: system:  greet Michael,hi,Echo: system:  greet Pavel,hi; config: {\"temperature\":2},hi"
+                    },
+                    {"text": "; config: {\"temperature\":2}"}
+                ]
+            }
+        ]);
 
         assert_eq!(
-            serde_json::to_value(response2.messages().unwrap()).unwrap(),
-            serde_json::to_value(expected_messages2).unwrap()
+            serde_json::to_value(second_response.messages().unwrap()).unwrap(),
+            expected_second_messages
         );
     }
 

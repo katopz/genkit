@@ -113,10 +113,24 @@ impl<S: Serialize + DeserializeOwned + Clone + Send + Sync + 'static> Chat<S> {
         thread_name: String,
         history: Vec<MessageData>,
     ) -> Self {
+        // Mark all incoming messages as part of the preamble for this chat instance.
+        let marked_incoming_messages: Vec<MessageData> = request_base
+            .messages
+            .into_iter()
+            .map(|mut msg| {
+                msg.metadata
+                    .get_or_insert_with(Default::default)
+                    .insert("preamble".to_string(), Value::Bool(true));
+                msg
+            })
+            .collect();
+
         // This logic merges messages from options (request_base) with persisted history.
         let (new_preamble, other_new_messages): (Vec<_>, Vec<_>) =
-            request_base.messages.into_iter().partition(|m| {
+            marked_incoming_messages.into_iter().partition(|m| {
                 m.role == Role::System
+                    // The 'preamble' check is now technically redundant since we just added it,
+                    // but it's kept for logical clarity and to handle potential edge cases.
                     || m.metadata
                         .as_ref()
                         .and_then(|meta| meta.get("preamble"))
@@ -127,9 +141,9 @@ impl<S: Serialize + DeserializeOwned + Clone + Send + Sync + 'static> Chat<S> {
         let mut final_messages;
 
         if !new_preamble.is_empty() {
-            // If a new preamble is provided, it replaces any old one.
+            // If a new preamble is provided, it replaces any old one from history.
             final_messages = new_preamble;
-            // Then, add the historical messages, filtering out any that were preambles.
+            // Then, add the historical messages, filtering out any that were preambles from old sessions.
             final_messages.extend(history.into_iter().filter(|m| {
                 m.role != Role::System
                     && !m
@@ -146,12 +160,6 @@ impl<S: Serialize + DeserializeOwned + Clone + Send + Sync + 'static> Chat<S> {
 
         // Finally, append any other non-preamble messages that were passed in during chat creation.
         final_messages.extend(other_new_messages);
-
-        // And mark everything currently as preamble.
-        for m in &mut final_messages {
-            let metadata = m.metadata.get_or_insert_with(Default::default);
-            metadata.insert("preamble".to_string(), Value::Bool(true));
-        }
         request_base.messages = final_messages;
 
         let state = ChatState {
@@ -391,8 +399,23 @@ impl<S: Serialize + DeserializeOwned + Clone + Send + Sync + 'static> Chat<S> {
     async fn update_messages(&self, messages: &[MessageData]) -> Result<()> {
         let mut state = self.state.lock().await;
         state.messages = messages.to_vec();
+
+        // Strip transient preamble metadata before persisting.
+        let messages_to_persist: Vec<MessageData> = messages
+            .iter()
+            .map(|m| {
+                let mut new_m = m.clone();
+                if let Some(metadata) = new_m.metadata.as_mut() {
+                    if metadata.remove("preamble").is_some() && metadata.is_empty() {
+                        new_m.metadata = None;
+                    }
+                }
+                new_m
+            })
+            .collect();
+
         self.session
-            .update_messages(&state.thread_name, messages)
+            .update_messages(&state.thread_name, &messages_to_persist)
             .await
     }
 }

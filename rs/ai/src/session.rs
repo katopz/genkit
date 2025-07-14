@@ -104,6 +104,7 @@ pub struct Session<S = Value> {
 }
 
 /// Options for creating a new chat session.
+#[derive(Clone)]
 pub struct ChatOptions<'a, I, S> {
     pub thread_name: Option<String>,
     pub preamble: Option<&'a ExecutablePrompt<I>>,
