@@ -218,10 +218,12 @@ where
     let registry_for_response = registry.clone();
 
     // The span is now created by the caller (e.g., `generate::generate`)
-    let (response_data, request) = generate_internal(registry, options).await?;
+    let original_request =
+        to_generate_request(&registry_for_response, &raw_request_for_response).await?;
+    let (response_data, _request_sent_to_model) = generate_internal(registry, options).await?;
 
     let final_request = reconstruct_user_facing_request(
-        &request,
+        &original_request,
         &raw_request_for_response,
         &registry_for_response,
     )

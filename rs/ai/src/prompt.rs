@@ -293,8 +293,12 @@ where
         let mut render_data = serde_json::to_value(input.clone())
             .map_err(|e| Error::new_internal(format!("Failed to serialize input: {}", e)))?;
 
+        if !render_data.is_object() {
+            render_data = json!({ "input": render_data });
+        }
+
         let session = crate::session::get_current_session().ok();
-        let state = if let Some(s) = &session {
+        let state = if let Some(s) = session {
             s.state().await
         } else {
             None
@@ -318,8 +322,7 @@ where
 
         if let Some(data_obj) = render_data.as_object_mut() {
             if let Some(state_val) = state.clone() {
-                data_obj.insert("state".to_string(), state_val.clone());
-                data_obj.insert("@state".to_string(), state_val);
+                data_obj.insert("state".to_string(), state_val);
             }
             if let Some(context) = &resolver_context {
                 if let Some(Value::Object(auth_map)) = &context.auth {
@@ -333,26 +336,18 @@ where
             serde_json::to_string_pretty(&render_data).unwrap_or_default()
         );
 
-        let resolved_input: I = serde_json::from_value(render_data.clone()).map_err(|e| {
-            Error::new_internal(format!("Failed to deserialize resolved input: {}", e))
-        })?;
-
         // 2. Build the message list in the correct order
         let mut messages = Vec::new();
 
         // System Prompt
         if let Some(resolver) = &self.config.system_fn {
-            let text = resolver(
-                resolved_input.clone(),
-                state.clone(),
-                resolver_context.clone(),
-            )
-            .await?;
+            let text = resolver(input.clone(), state.clone(), resolver_context.clone()).await?;
             messages.push(MessageData::system(vec![Part::text(text)]));
         } else if let Some(system_template) = &self.config.system {
             println!("[LOG] Rendering system_template: '{}'", system_template);
+            let template = system_template.replace("@state", "state");
             let system_text = handlebars
-                .render_template(system_template, &render_data)
+                .render_template(&template, &render_data)
                 .map_err(|e| {
                     Error::new_internal(format!("Failed to render system template: {}", e))
                 })?;
@@ -364,12 +359,8 @@ where
             messages.extend(opts_messages.clone());
         }
         if let Some(resolver) = &self.config.messages_fn {
-            let resolved_messages = resolver(
-                resolved_input.clone(),
-                state.clone(),
-                resolver_context.clone(),
-            )
-            .await?;
+            let resolved_messages =
+                resolver(input.clone(), state.clone(), resolver_context.clone()).await?;
             messages.extend(resolved_messages);
         } else if let Some(config_messages) = &self.config.messages {
             let mut rendered_messages = Vec::new();
@@ -380,8 +371,9 @@ where
                     let mut new_part = part_template.clone();
                     if let Some(text_template) = &part_template.text {
                         println!("[LOG] Rendering message part template: '{}'", text_template);
+                        let template = text_template.replace("@state", "state");
                         let rendered_text = handlebars
-                            .render_template(text_template, &render_data)
+                            .render_template(&template, &render_data)
                             .map_err(|e| {
                                 Error::new_internal(format!(
                                     "Failed to render message template: {}",
@@ -400,20 +392,16 @@ where
 
         // Main User Prompt
         if let Some(resolver) = &self.config.prompt_fn {
-            let text = resolver(
-                resolved_input.clone(),
-                state.clone(),
-                resolver_context.clone(),
-            )
-            .await?;
+            let text = resolver(input.clone(), state.clone(), resolver_context.clone()).await?;
             messages.push(MessageData::user(vec![Part::text(text)]));
         } else if let Some(prompt_template) = &self.config.prompt {
             println!(
                 "[LOG] Rendering main prompt template: '{}'",
                 prompt_template
             );
+            let template = prompt_template.replace("@state", "state");
             let prompt_text = handlebars
-                .render_template(prompt_template, &render_data)
+                .render_template(&template, &render_data)
                 .map_err(|e| {
                     Error::new_internal(format!("Failed to render prompt template: {}", e))
                 })?;
@@ -422,7 +410,7 @@ where
 
         // 3. Resolve docs
         let docs = if let Some(docs_fn) = &self.config.docs_fn {
-            docs_fn(resolved_input, state, resolver_context.clone()).await?
+            docs_fn(input.clone(), state, resolver_context.clone()).await?
         } else {
             self.config.docs.clone().unwrap_or_default()
         };

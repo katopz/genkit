@@ -496,21 +496,23 @@ struct MyState {
 async fn test_updates_preamble_on_fresh_chat_instance(#[future] genkit_instance: Arc<Genkit>) {
     let genkit = genkit_instance.await;
 
+    // The agent prompt definition is the same.
     let agent = genkit.define_prompt::<(), Value, Value>(PromptConfig {
         name: "agent".to_string(),
+        config: Some(json!({ "temperature": 2 })),
         messages: Some(vec![MessageData {
             role: Role::System,
             content: vec![Part::text("greet {{ @state.name }}")],
-            ..Default::default()
+            metadata: Some([("preamble".to_string(), json!(true))].into()),
         }]),
-        config: Some(json!({ "temperature": 2 })),
         ..Default::default()
     });
 
+    // Create the session with initial state.
     let session = genkit_ai::Session::new(
         Arc::new(genkit.registry().clone()),
-        None, // use in-memory store
-        None, // new session id
+        None,
+        None,
         Some(MyState {
             name: "Pavel".to_string(),
         }),
@@ -519,6 +521,7 @@ async fn test_updates_preamble_on_fresh_chat_instance(#[future] genkit_instance:
     .unwrap();
     let session = Arc::new(session);
 
+    // === First Turn ===
     let chat = session
         .chat(Some(ChatOptions {
             preamble: Some(&agent),
@@ -533,16 +536,12 @@ async fn test_updates_preamble_on_fresh_chat_instance(#[future] genkit_instance:
 
     let response1 = chat.send("hi").await.unwrap();
 
-    // Middleware simulates the system prompt
+    // Assertion 1: Matches the first assertion in the TS test.
     let expected_messages1 = vec![
-        MessageData::user(vec![
-            Part::text("SYSTEM INSTRUCTIONS:\n"),
-            Part::text("greet Pavel"),
-        ]),
         MessageData {
-            role: Role::Model,
-            content: vec![Part::text("Understood.")],
-            ..Default::default()
+            role: Role::System,
+            content: vec![Part::text("greet Pavel")],
+            metadata: Some([("preamble".to_string(), json!(true))].into()),
         },
         MessageData::user(vec![Part::text("hi")]),
         MessageData {
@@ -554,8 +553,12 @@ async fn test_updates_preamble_on_fresh_chat_instance(#[future] genkit_instance:
             ..Default::default()
         },
     ];
-    assert_eq!(response1.messages().unwrap(), expected_messages1);
+    assert_eq!(
+        serde_json::to_value(response1.messages().unwrap()).unwrap(),
+        serde_json::to_value(expected_messages1.clone()).unwrap()
+    );
 
+    // Update the session state.
     session
         .update_state(MyState {
             name: "Michael".to_string(),
@@ -563,7 +566,7 @@ async fn test_updates_preamble_on_fresh_chat_instance(#[future] genkit_instance:
         .await
         .unwrap();
 
-    // Create a new chat from the same session to pick up the state change.
+    // === Second Turn ===
     let fresh_chat = session
         .chat(Some(ChatOptions {
             preamble: Some(&agent),
@@ -576,30 +579,35 @@ async fn test_updates_preamble_on_fresh_chat_instance(#[future] genkit_instance:
         .await
         .unwrap();
 
-    let response2 = fresh_chat.send("hi again").await.unwrap();
+    // The TS test sends "hi" again.
+    let response2 = fresh_chat.send("hi").await.unwrap();
 
-    let mut expected_messages2 = vec![
-        MessageData::user(vec![
-            Part::text("SYSTEM INSTRUCTIONS:\n"),
-            Part::text("greet Michael"), // Preamble is updated
-        ]),
-        MessageData {
-            role: Role::Model,
-            content: vec![Part::text("Understood.")],
-            ..Default::default()
-        },
-    ];
-    // History from the first chat is preserved
-    expected_messages2.extend(response1.messages().unwrap());
-    expected_messages2.push(MessageData::user(vec![Part::text("hi again")]));
+    // Assertion 2: This is the cumulative history, matching the second TS assertion.
+    let mut expected_messages2 = vec![MessageData {
+        role: Role::System,
+        content: vec![Part::text("greet Michael")], // New preamble
+        metadata: Some([("preamble".to_string(), json!(true))].into()),
+    }];
+    // Add the history from the first response, but without its old preamble.
+    expected_messages2.extend(
+        expected_messages1
+            .into_iter()
+            .filter(|m| m.role != Role::System),
+    );
+    // Add the new user message for the second turn.
+    expected_messages2.push(MessageData::user(vec![Part::text("hi")]));
+    // Add the final model response for the second turn.
     expected_messages2.push(MessageData {
         role: Role::Model,
         content: vec![
-            Part::text("Echo: SYSTEM INSTRUCTIONS:\ngreet Michael,Understood.,SYSTEM INSTRUCTIONS:\ngreet Pavel,Understood.,hi,Echo: SYSTEM INSTRUCTIONS:\ngreet Pavel,Understood.,hi; config: {\"temperature\":2},hi again"),
+            Part::text("Echo: SYSTEM INSTRUCTIONS:\ngreet Michael,Understood.,hi,Echo: SYSTEM INSTRUCTIONS:\ngreet Pavel,Understood.,hi,; config: {\"temperature\":2},hi"),
             Part::text("; config: {\"temperature\":2}"),
         ],
         ..Default::default()
     });
 
-    assert_eq!(response2.messages().unwrap(), expected_messages2);
+    assert_eq!(
+        serde_json::to_value(response2.messages().unwrap()).unwrap(),
+        serde_json::to_value(expected_messages2).unwrap()
+    );
 }

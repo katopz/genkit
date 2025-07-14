@@ -116,11 +116,12 @@ impl<S: Serialize + DeserializeOwned + Clone + Send + Sync + 'static> Chat<S> {
         // This logic merges messages from options (request_base) with persisted history.
         let (new_preamble, other_new_messages): (Vec<_>, Vec<_>) =
             request_base.messages.into_iter().partition(|m| {
-                m.metadata
-                    .as_ref()
-                    .and_then(|meta| meta.get("preamble"))
-                    .and_then(|v| v.as_bool())
-                    .unwrap_or(false)
+                m.role == Role::System
+                    || m.metadata
+                        .as_ref()
+                        .and_then(|meta| meta.get("preamble"))
+                        .and_then(|v| v.as_bool())
+                        .unwrap_or(false)
             });
 
         let mut final_messages;
@@ -130,11 +131,13 @@ impl<S: Serialize + DeserializeOwned + Clone + Send + Sync + 'static> Chat<S> {
             final_messages = new_preamble;
             // Then, add the historical messages, filtering out any that were preambles.
             final_messages.extend(history.into_iter().filter(|m| {
-                !m.metadata
-                    .as_ref()
-                    .and_then(|meta| meta.get("preamble"))
-                    .and_then(|v| v.as_bool())
-                    .unwrap_or(false)
+                m.role != Role::System
+                    && !m
+                        .metadata
+                        .as_ref()
+                        .and_then(|meta| meta.get("preamble"))
+                        .and_then(|v| v.as_bool())
+                        .unwrap_or(false)
             }));
         } else {
             // If no new preamble, use the existing history as is.

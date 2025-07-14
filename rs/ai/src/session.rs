@@ -32,12 +32,14 @@ use std::sync::Arc;
 use tokio::sync::Mutex;
 use uuid::Uuid;
 
+#[async_trait]
+pub trait ErasedSession: Send + Sync {
+    async fn state(&self) -> Option<Value>;
+}
+
 tokio::task_local! {
     /// Task-local storage for the current `Session`.
-    ///
-    /// The state type `S` is fixed to `Value` here to accommodate different
-    /// state types across the application, similar to how TypeScript's `any` works.
-    pub static CURRENT_SESSION: Arc<Session<Value>>;
+    pub static CURRENT_SESSION: Arc<dyn ErasedSession>;
 }
 
 /// A data structure representing the persisted state of a session.
@@ -173,54 +175,58 @@ where
     where
         I: Serialize + DeserializeOwned + JsonSchema + Default + Send + Sync + Clone + 'static,
     {
-        let options = options.unwrap_or_default();
-        let thread_name = options
-            .thread_name
-            .unwrap_or_else(|| MAIN_THREAD.to_string());
+        run_with_session(self.clone(), async move {
+            let options = options.unwrap_or_default();
+            let thread_name = options
+                .thread_name
+                .unwrap_or_else(|| MAIN_THREAD.to_string());
 
-        let base_options = if let Some(preamble) = options.preamble {
-            preamble
-                .render(options.prompt_render_input.unwrap_or_default(), None)
-                .await?
-        } else {
-            let base = options.base_options.unwrap_or_default();
-            GenerateOptions {
-                model: base.model,
-                messages: Some(base.messages),
-                docs: base.docs,
-                tools: base.tools,
-                tool_choice: base.tool_choice,
-                config: base.config,
-                output: base.output,
-                ..Default::default()
-            }
-        };
+            let base_options = if let Some(preamble) = options.preamble {
+                preamble
+                    .render(options.prompt_render_input.unwrap_or_default(), None)
+                    .await?
+            } else {
+                let base = options.base_options.unwrap_or_default();
+                GenerateOptions {
+                    model: base.model,
+                    messages: Some(base.messages),
+                    docs: base.docs,
+                    tools: base.tools,
+                    tool_choice: base.tool_choice,
+                    config: base.config,
+                    output: base.output,
+                    ..Default::default()
+                }
+            };
 
-        let history = self
-            .data
-            .lock()
-            .await
-            .threads
-            .get(&thread_name)
-            .cloned()
-            .unwrap_or_default();
+            // Correctly load history from the session store for the given thread.
+            let history = self
+                .data
+                .lock()
+                .await
+                .threads
+                .get(&thread_name)
+                .cloned()
+                .unwrap_or_default();
 
-        let chat_base_options = BaseGenerateOptions {
-            model: base_options.model,
-            docs: base_options.docs,
-            messages: base_options.messages.unwrap_or_default(),
-            tools: base_options.tools,
-            tool_choice: base_options.tool_choice,
-            config: base_options.config,
-            output: base_options.output,
-        };
+            let chat_base_options = BaseGenerateOptions {
+                model: base_options.model,
+                docs: base_options.docs,
+                messages: base_options.messages.unwrap_or_default(),
+                tools: base_options.tools,
+                tool_choice: base_options.tool_choice,
+                config: base_options.config,
+                output: base_options.output,
+            };
 
-        Ok(Chat::new(
-            self.clone(),
-            chat_base_options,
-            thread_name,
-            history,
-        ))
+            Ok(Chat::new(
+                self.clone(),
+                chat_base_options,
+                thread_name,
+                history,
+            ))
+        })
+        .await
     }
 
     /// Executes a future within the context of this session.
@@ -246,22 +252,29 @@ where
     }
 }
 
+#[async_trait]
+impl<S> ErasedSession for Session<S>
+where
+    S: Serialize + DeserializeOwned + Clone + Send + Sync + 'static,
+{
+    async fn state(&self) -> Option<Value> {
+        let state = self.data.lock().await.state.clone()?;
+        serde_json::to_value(state).ok()
+    }
+}
+
 /// Executes a future with a given session set as the current task-local session.
 pub async fn run_with_session<S, F, R>(session: Arc<Session<S>>, fut: F) -> R
 where
-    S: Send + Sync + 'static,
+    S: Serialize + DeserializeOwned + Clone + Send + Sync + 'static,
     F: std::future::Future<Output = R>,
 {
-    // Transmute to `Session<Value>` to store in the task-local.
-    // This is a trade-off for ergonomic session management without complex generics
-    // in the task-local variable itself.
-    let session_for_context =
-        unsafe { std::mem::transmute::<Arc<Session<S>>, Arc<Session<Value>>>(session) };
-    CURRENT_SESSION.scope(session_for_context, fut).await
+    let erased_session: Arc<dyn ErasedSession> = session;
+    CURRENT_SESSION.scope(erased_session, fut).await
 }
 
 /// Returns the current session from task-local storage, if one is set.
-pub fn get_current_session() -> Result<Arc<Session<Value>>> {
+pub fn get_current_session() -> Result<Arc<dyn ErasedSession>> {
     CURRENT_SESSION
         .try_with(|session| session.clone())
         .map_err(|_| {
