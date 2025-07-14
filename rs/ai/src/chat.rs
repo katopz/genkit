@@ -146,6 +146,12 @@ impl<S: Serialize + DeserializeOwned + Clone + Send + Sync + 'static> Chat<S> {
 
         // Finally, append any other non-preamble messages that were passed in during chat creation.
         final_messages.extend(other_new_messages);
+
+        // And mark everything currently as preamble.
+        for m in &mut final_messages {
+            let metadata = m.metadata.get_or_insert_with(Default::default);
+            metadata.insert("preamble".to_string(), Value::Bool(true));
+        }
         request_base.messages = final_messages;
 
         let state = ChatState {

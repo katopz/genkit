@@ -238,6 +238,10 @@ impl Plugin for EchoModelPlugin {
             registry,
             DefineModelOptions {
                 name: "echoModel".to_string(),
+                supports: Some(ModelInfoSupports {
+                    system_role: Some(true),
+                    ..Default::default()
+                }),
                 ..Default::default()
             },
             |req: GenerateRequest, streaming_callback| async move {
