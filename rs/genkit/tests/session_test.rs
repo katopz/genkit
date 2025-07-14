@@ -20,7 +20,6 @@ use genkit::Genkit;
 use genkit_ai::document::Part;
 use genkit_ai::generate::BaseGenerateOptions;
 use genkit_ai::message::{MessageData, Role};
-use genkit_ai::model::GenerateRequest;
 use genkit_ai::session::{
     ChatOptions, InMemorySessionStore, Session, SessionData, SessionStore, SessionUpdater,
 };
@@ -31,17 +30,15 @@ use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
 
 #[fixture]
-async fn genkit_instance_for_test() -> (Arc<Genkit>, Arc<Mutex<Option<GenerateRequest>>>) {
-    helpers::genkit_instance_for_test().await
+async fn genkit_instance() -> Arc<Genkit> {
+    helpers::genkit_instance_with_echo_model().await
 }
 
 #[rstest]
 #[tokio::test]
 /// 'maintains history in the session'
-async fn test_maintains_history_in_the_session(
-    #[future] genkit_instance_for_test: (Arc<Genkit>, Arc<Mutex<Option<GenerateRequest>>>),
-) {
-    let (genkit, _) = genkit_instance_for_test.await;
+async fn test_maintains_history_in_the_session(#[future] genkit_instance: Arc<Genkit>) {
+    let genkit = genkit_instance.await;
     let session = Arc::new(
         Session::<Value>::new(genkit.registry().clone().into(), None, None, None)
             .await
@@ -114,9 +111,9 @@ impl<S: Clone + Send + Sync + 'static> SessionStore<S> for CapturingStore<S> {
 #[tokio::test]
 /// 'sends ready-to-serialize data to the session store'
 async fn test_sends_ready_to_serialize_data_to_session_store(
-    #[future] genkit_instance_for_test: (Arc<Genkit>, Arc<Mutex<Option<GenerateRequest>>>),
+    #[future] genkit_instance: Arc<Genkit>,
 ) {
-    let (genkit, _) = genkit_instance_for_test.await;
+    let genkit = genkit_instance.await;
 
     let saved_data = Arc::new(Mutex::new(None));
     let store = Arc::new(CapturingStore::new(saved_data.clone()));
@@ -158,9 +155,9 @@ async fn test_sends_ready_to_serialize_data_to_session_store(
 #[tokio::test]
 /// 'maintains multithreaded history in the session'
 async fn test_maintains_multithreaded_history_in_the_session(
-    #[future] genkit_instance_for_test: (Arc<Genkit>, Arc<Mutex<Option<GenerateRequest>>>),
+    #[future] genkit_instance: Arc<Genkit>,
 ) {
-    let (genkit, _) = genkit_instance_for_test.await;
+    let genkit = genkit_instance.await;
     let store = Arc::new(InMemorySessionStore::<Value>::new());
     let session = Arc::new(
         Session::new(
@@ -282,9 +279,9 @@ async fn test_maintains_multithreaded_history_in_the_session(
 #[tokio::test]
 /// 'maintains history in the session with streaming'
 async fn test_maintains_history_in_the_session_with_streaming(
-    #[future] genkit_instance_for_test: (Arc<Genkit>, Arc<Mutex<Option<GenerateRequest>>>),
+    #[future] genkit_instance: Arc<Genkit>,
 ) {
-    let (genkit, _) = genkit_instance_for_test.await;
+    let genkit = genkit_instance.await;
     let session = Arc::new(
         Session::<Value>::new(genkit.registry().clone().into(), None, None, None)
             .await
@@ -341,10 +338,8 @@ async fn test_maintains_history_in_the_session_with_streaming(
 #[rstest]
 #[tokio::test]
 /// 'stores state and messages in the store'
-async fn test_stores_state_and_messages_in_the_store(
-    #[future] genkit_instance_for_test: (Arc<Genkit>, Arc<Mutex<Option<GenerateRequest>>>),
-) {
-    let (genkit, _) = genkit_instance_for_test.await;
+async fn test_stores_state_and_messages_in_the_store(#[future] genkit_instance: Arc<Genkit>) {
+    let genkit = genkit_instance.await;
     let store = Arc::new(InMemorySessionStore::<Value>::new());
 
     let session = Arc::new(
