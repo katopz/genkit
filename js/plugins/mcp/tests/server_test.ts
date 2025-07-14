@@ -19,7 +19,11 @@ import { SSEClientTransport } from '@modelcontextprotocol/sdk/client/sse.js';
 import { SSEServerTransport } from '@modelcontextprotocol/sdk/server/sse.js';
 import * as assert from 'assert';
 import express from 'express';
+<<<<<<< HEAD
 import { Genkit, genkit, z } from 'genkit';
+=======
+import { GenkitBeta, genkit, z } from 'genkit/beta';
+>>>>>>> d7b8469fbe15479b80b3b99c0f154aa7a45fc884
 import { logger } from 'genkit/logging';
 import getPort from 'get-port';
 import * as http from 'http';
@@ -31,7 +35,11 @@ import { defineEchoModel } from './fakes.js';
 logger.setLogLevel('debug');
 
 describe('createMcpServer', async () => {
+<<<<<<< HEAD
   let ai: Genkit;
+=======
+  let ai: GenkitBeta;
+>>>>>>> d7b8469fbe15479b80b3b99c0f154aa7a45fc884
   let mcpServer: GenkitMcpServer;
   let mcpHttpServer: http.Server;
   let port: number;
@@ -55,6 +63,40 @@ describe('createMcpServer', async () => {
       },
       async (input) => `yep ${JSON.stringify(input)}`
     );
+<<<<<<< HEAD
+=======
+    ai.defineResource(
+      {
+        name: 'testResouces',
+        uri: 'my://resource',
+      },
+      async () => {
+        return {
+          content: [
+            {
+              text: 'my resource',
+            },
+          ],
+        };
+      }
+    );
+
+    ai.defineResource(
+      {
+        name: 'testTmpl',
+        template: 'file://{path}',
+      },
+      async ({ uri }) => {
+        return {
+          content: [
+            {
+              text: `file contents for ${uri}`,
+            },
+          ],
+        };
+      }
+    );
+>>>>>>> d7b8469fbe15479b80b3b99c0f154aa7a45fc884
 
     mcpServer = createMcpServer(ai, { name: 'test-server', version: '0.0.1' });
     await mcpServer.setup();
@@ -162,4 +204,43 @@ describe('createMcpServer', async () => {
       ]);
     });
   });
+<<<<<<< HEAD
+=======
+
+  describe('resources', () => {
+    it('should list resources', async () => {
+      const r = await client.listResources();
+      assert.deepStrictEqual(r.resources, [
+        {
+          name: 'testResouces',
+          uri: 'my://resource',
+        },
+      ]);
+    });
+    it('should list templates', async () => {
+      const r = await client.listResourceTemplates();
+      assert.deepStrictEqual(r.resourceTemplates, [
+        {
+          name: 'testTmpl',
+          uriTemplate: 'file://{path}',
+        },
+      ]);
+    });
+
+    it('should read resource', async () => {
+      const resource = await client.readResource({
+        uri: 'my://resource',
+      });
+
+      assert.deepStrictEqual(resource, {
+        contents: [
+          {
+            text: 'my resource',
+            uri: 'my://resource',
+          },
+        ],
+      });
+    });
+  });
+>>>>>>> d7b8469fbe15479b80b3b99c0f154aa7a45fc884
 });

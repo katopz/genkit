@@ -21,11 +21,19 @@ import {
   ResourceTemplate,
 } from '@modelcontextprotocol/sdk/types.js';
 import {
+<<<<<<< HEAD
   DynamicResourceAction,
   Genkit,
   GenkitError,
   Part,
   dynamicResource,
+=======
+  GenkitError,
+  dynamicResource,
+  type DynamicResourceAction,
+  type Genkit,
+  type Part,
+>>>>>>> d7b8469fbe15479b80b3b99c0f154aa7a45fc884
 } from 'genkit';
 import { logger } from 'genkit/logging';
 

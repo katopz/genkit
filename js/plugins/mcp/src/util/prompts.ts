@@ -17,6 +17,7 @@
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import type { Prompt } from '@modelcontextprotocol/sdk/types.js';
 import {
+<<<<<<< HEAD
   ExecutablePrompt,
   GenerateOptions,
   GenerateResponse,
@@ -27,6 +28,18 @@ import {
   ToolAction,
   z,
   type PromptGenerateOptions,
+=======
+  GenkitError,
+  z,
+  type ExecutablePrompt,
+  type GenerateOptions,
+  type GenerateResponse,
+  type GenerateStreamResponse,
+  type Genkit,
+  type JSONSchema,
+  type PromptGenerateOptions,
+  type ToolAction,
+>>>>>>> d7b8469fbe15479b80b3b99c0f154aa7a45fc884
 } from 'genkit';
 import { logger } from 'genkit/logging';
 import { fromMcpPromptMessage } from './message.js';

@@ -16,11 +16,19 @@
 
 import { Root } from '@modelcontextprotocol/sdk/types.js';
 import {
+<<<<<<< HEAD
   DynamicResourceAction,
   ExecutablePrompt,
   Genkit,
   PromptGenerateOptions,
   ToolAction,
+=======
+  type DynamicResourceAction,
+  type ExecutablePrompt,
+  type Genkit,
+  type PromptGenerateOptions,
+  type ToolAction,
+>>>>>>> d7b8469fbe15479b80b3b99c0f154aa7a45fc884
 } from 'genkit';
 import { logger } from 'genkit/logging';
 import { GenkitMcpClient, McpServerConfig } from './client.js';
