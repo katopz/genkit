@@ -389,12 +389,16 @@ impl Plugin for TsEchoModelPlugin {
                                 Role::User | Role::Model => "".to_string(),
                                 _ => format!("{}: ", m.role.to_string().to_lowercase()),
                             };
+                            // The separator for text parts *within* a single message depends on the role,
+                            // which is the nuanced behavior required by the TS tests.
+                            let intra_message_separator =
+                                if m.role == Role::Model { "" } else { "," };
                             let content = m
                                 .content
                                 .iter()
                                 .filter_map(|p| p.text.as_deref())
                                 .collect::<Vec<_>>()
-                                .join(",");
+                                .join(intra_message_separator);
                             format!("{}{}", prefix, content)
                         })
                         .collect::<Vec<_>>()
