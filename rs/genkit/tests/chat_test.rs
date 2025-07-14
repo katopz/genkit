@@ -69,32 +69,25 @@ mod chat_test {
             "Echo: hi,Echo: hi,; config: {},bye; config: {}"
         );
 
-        let expected_messages = vec![
-            MessageData {
-                role: Role::User,
-                content: vec![Part::text("hi")],
-                ..Default::default()
+        // Define the expected message history using the json! macro for a deep, value-based comparison.
+        let expected_messages = json!([
+            { "role": "user", "content": [{ "text": "hi" }] },
+            {
+                "role": "model",
+                "content": [{ "text": "Echo: hi" }, { "text": "; config: {}" }],
             },
-            MessageData {
-                role: Role::Model,
-                content: vec![Part::text("Echo: hi"), Part::text("; config: {}")],
-                ..Default::default()
-            },
-            MessageData {
-                role: Role::User,
-                content: vec![Part::text("bye")],
-                ..Default::default()
-            },
-            MessageData {
-                role: Role::Model,
-                content: vec![
-                    Part::text("Echo: hi,Echo: hi,; config: {},bye"),
-                    Part::text("; config: {}"),
+            { "role": "user", "content": [{ "text": "bye" }] },
+            {
+                "role": "model",
+                "content": [
+                  { "text": "Echo: hi,Echo: hi,; config: {},bye" },
+                  { "text": "; config: {}" },
                 ],
-                ..Default::default()
             },
-        ];
-        assert_eq!(response.messages().unwrap(), expected_messages);
+        ]);
+
+        let actual_messages_value = serde_json::to_value(response.messages().unwrap()).unwrap();
+        assert_eq!(actual_messages_value, expected_messages);
     }
 
     #[rstest]
@@ -147,7 +140,7 @@ mod chat_test {
         assert_eq!(chunks, vec!["3", "2", "1"]);
         assert_eq!(
             final_response.text().unwrap(),
-            "Echo: hi,Echo: hi,; config: {},bye; config: {}"
+            "Echo: hi,Echo: hi; config: {},bye; config: {}"
         );
 
         let expected_messages = vec![
@@ -169,7 +162,7 @@ mod chat_test {
             MessageData {
                 role: Role::Model,
                 content: vec![
-                    Part::text("Echo: hi,Echo: hi,; config: {},bye"),
+                    Part::text("Echo: hi,Echo: hi; config: {},bye"),
                     Part::text("; config: {}"),
                 ],
                 ..Default::default()
