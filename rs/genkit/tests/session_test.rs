@@ -23,6 +23,7 @@ use genkit_ai::message::{MessageData, Role};
 use genkit_ai::session::{
     ChatOptions, InMemorySessionStore, Session, SessionData, SessionStore, SessionUpdater,
 };
+use genkit_core::ActionFnArg;
 use rstest::{fixture, rstest};
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
@@ -582,4 +583,47 @@ async fn test_can_start_chat_thread_from_a_prompt_with_input(
         got_threads_value.get("mythread"),
         expected_messages.get("mythread")
     );
+}
+
+#[rstest]
+#[tokio::test]
+/// 'can run arbitrary code within the session context'
+async fn test_can_run_arbitrary_code_within_session_context(
+    #[future] genkit_instance: Arc<Genkit>,
+) {
+    let genkit = genkit_instance.await;
+
+    // Define a flow that attempts to access the current session's state.
+    let test_flow = genkit.define_flow("text", |_: (), _: ActionFnArg<()>| async {
+        let session = genkit_ai::session::get_current_session()?;
+        let state = session
+            .state()
+            .await
+            .ok_or_else(|| genkit_core::error::Error::new_internal("Session has no state"))?;
+        Ok(state)
+    });
+
+    // Create a session with some initial state.
+    let session = genkit
+        .create_session(CreateSessionOptions {
+            initial_state: Some(json!({ "foo": "bar" })),
+            ..Default::default()
+        })
+        .await
+        .unwrap();
+
+    // Running the flow directly should fail because it's outside a session context.
+    let rejection_result = test_flow.run((), None).await;
+    assert!(rejection_result.is_err());
+    if let Err(e) = rejection_result {
+        assert!(e
+            .to_string()
+            .contains("Not currently running within a session context"));
+    }
+
+    // Running the flow within the session context should succeed.
+    let response = session.run(|| test_flow.run((), None)).await.unwrap();
+
+    // The flow should return the initial state.
+    assert_eq!(response.result, json!({ "foo": "bar" }));
 }
