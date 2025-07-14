@@ -455,32 +455,49 @@ async fn test_calls_the_dynamic_resource() {
         .await
         .unwrap();
 
+    // First, assert the high-level text output, just like the TS test.
     assert_eq!(
         response.text().unwrap(),
         "Echo: some text,dynamic text,regular text; config: {}"
     );
 
-    let last_req = last_request.lock().unwrap();
-    let message = &last_req.as_ref().unwrap().messages[0];
-    assert_eq!(message.role, Role::User);
+    // Now, perform a deep comparison of the entire message structure sent to the model.
+    let last_req_messages = last_request
+        .lock()
+        .unwrap()
+        .as_ref()
+        .unwrap()
+        .messages
+        .clone();
+    let actual_messages_value = serde_json::to_value(last_req_messages).unwrap();
 
-    // Assuming the framework replaces resource parts with text parts with metadata.
-    // The following assertions depend on Part having a `metadata` field.
-    let content = &message.content;
-    assert_eq!(content.len(), 3);
-    assert_eq!(content[0].text.as_deref(), Some("some text"));
+    let expected_messages_value = json!([
+        {
+          "role": "user",
+          "content": [
+            { "text": "some text" },
+            {
+              "text": "dynamic text",
+              "metadata": {
+                "resource": {
+                  "uri": "foo://foo"
+                }
+              }
+            },
+            {
+              "text": "regular text",
+              "metadata": {
+                "resource": {
+                  "uri": "bar://bar",
+                  "template": "bar://{value}"
+                }
+              }
+            }
+          ]
+        }
+    ]);
 
-    assert_eq!(content[1].text.as_deref(), Some("dynamic text"));
-    assert_eq!(
-        serde_json::to_value(content[1].metadata.as_ref().unwrap()).unwrap(),
-        serde_json::json!({ "resource": { "uri": "foo://foo" } })
-    );
-
-    assert_eq!(content[2].text.as_deref(), Some("regular text"));
-    assert_eq!(
-        serde_json::to_value(content[2].metadata.as_ref().unwrap()).unwrap(),
-        serde_json::json!({ "resource": { "template": "bar://{value}", "uri": "bar://bar" } })
-    );
+    assert_eq!(actual_messages_value, expected_messages_value);
 }
 
 #[rstest]

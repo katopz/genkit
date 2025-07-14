@@ -394,7 +394,7 @@ impl Plugin for TsEchoModelPlugin {
                                 .iter()
                                 .filter_map(|p| p.text.as_deref())
                                 .collect::<Vec<_>>()
-                                .join("");
+                                .join(",");
                             format!("{}{}", prefix, content)
                         })
                         .collect::<Vec<_>>()
