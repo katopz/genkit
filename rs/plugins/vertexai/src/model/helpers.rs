@@ -280,10 +280,10 @@ pub fn to_genkit_response(
                 metadata: None,
             };
             let finish_reason = match candidate.finish_reason.as_deref() {
-                Some("STOP") => FinishReason::Stop,
+                Some("STOP") | Some("TOOL_CALL") => FinishReason::Stop,
                 Some("MAX_TOKENS") => FinishReason::Length,
                 Some("SAFETY") => FinishReason::Blocked,
-                Some("TOOL_CALL") => FinishReason::Stop, // Maps to stop as per some conventions
+                Some("RECITATION") | Some("OTHER") => FinishReason::Other,
                 _ => FinishReason::Unknown,
             };
             Ok(CandidateData {

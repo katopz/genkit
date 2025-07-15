@@ -19,7 +19,7 @@
 
 use genkit::{
     model::GenerateRequest,
-    {Media, MessageData, Part, ToolRequest, ToolResponse},
+    {Media, MessageData, Part, ToolResponse},
 };
 use genkit_vertexai::model::gemini::{
     VertexCandidate, VertexContent, VertexGeminiResponse, VertexPart,
@@ -52,14 +52,11 @@ mod to_gemini_message_tests {
         "should transform genkit message (tool request content) correctly",
         // A tool request is sent from the model to the client.
         GenerateRequest {
-            messages: vec![MessageData::model(vec![Part {
-                tool_request: Some(ToolRequest {
-                    name: "tellAFunnyJoke".to_string(),
-                    input: Some(json!({"topic": "dogs"})),
-                    ..Default::default()
-                }),
-                ..Default::default()
-            }])],
+            messages: vec![MessageData::model(vec![Part::tool_request(
+                "tellAFunnyJoke",
+                Some(json!({"topic": "dogs"})),
+                None
+            )])],
             ..Default::default()
         },
         json!({
@@ -75,17 +72,16 @@ mod to_gemini_message_tests {
         })
     )]
     #[case(
-        "should transform genkit message (single tool response) correctly",
+        "should transform genkit message (single tool response content) correctly",
         // A tool response is sent from the client (as role 'tool') to the model.
         GenerateRequest {
-            messages: vec![MessageData::tool(vec![Part {
-                tool_response: Some(ToolResponse {
-                    name: "tellAFunnyJoke".to_string(),
-                    output: Some(json!("Why did the dogs cross the road?")),
-                    ..Default::default()
-                }),
-                ..Default::default()
-            }])],
+            messages: vec![MessageData::tool(vec![
+                Part::tool_response(
+                    "tellAFunnyJoke",
+                    Some(json!("Why did the dogs cross the road?")),
+                    None,
+                ),
+            ])],
             ..Default::default()
         },
         json!({
