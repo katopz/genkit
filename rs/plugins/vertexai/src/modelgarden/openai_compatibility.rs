@@ -197,6 +197,7 @@ pub fn from_openai_choice(choice: openai_types::ChatCompletionChoice) -> Candida
         },
         finish_reason: Some(finish_reason),
         finish_message: None,
+        ..Default::default()
     }
 }
 

@@ -24,6 +24,6 @@ pub use genkit_ai::generate::generate;
 pub use genkit_ai::document::Part;
 pub use genkit_ai::generate::GenerateResponse;
 pub use genkit_ai::message::{Message, Role};
-pub use genkit_ai::model::{
-    CandidateData as Candidate, FinishReason, GenerateRequest, Model, ModelInfo,
-};
+pub use genkit_ai::model::{CandidateData, FinishReason, GenerateRequest, Model, ModelInfo};
+
+pub type Candidate = CandidateData;

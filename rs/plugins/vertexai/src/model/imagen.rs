@@ -118,6 +118,7 @@ async fn imagen_runner(
         },
         finish_reason: Some(FinishReason::Stop),
         finish_message: None,
+        ..Default::default()
     };
 
     Ok(GenerateResponseData {

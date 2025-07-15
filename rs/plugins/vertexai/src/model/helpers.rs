@@ -24,6 +24,7 @@ use genkit::{
     model::{FinishReason, GenerateRequest},
     CandidateData, GenerateResponseData, GenerationUsage, ToolRequest,
 };
+use serde_json::Value;
 
 // Configuration structs for the Gemini model, aligned with the API.
 use super::types::*;
@@ -136,7 +137,7 @@ pub fn to_vertex_request(req: &GenerateRequest) -> Result<VertexGeminiRequest> {
                 .iter()
                 .map(|def| {
                     let mut params = def.input_schema.clone();
-                    if let Some(serde_json::Value::Object(map)) = params.as_mut() {
+                    if let Some(Value::Object(map)) = params.as_mut() {
                         map.remove("$schema");
                     }
                     VertexFunctionDeclaration {
@@ -269,6 +270,17 @@ pub fn to_genkit_response(
                             }),
                             ..Default::default()
                         })
+                    } else if part.thought.is_some() {
+                        let metadata = part.thought_signature.map(|signature| {
+                            let mut map = std::collections::HashMap::new();
+                            map.insert("thoughtSignature".to_string(), signature.into());
+                            map
+                        });
+                        Ok(genkit::document::Part {
+                            reasoning: part.text,
+                            metadata,
+                            ..Default::default()
+                        })
                     } else {
                         Ok(genkit::document::Part {
                             text: part.text,
@@ -290,11 +302,31 @@ pub fn to_genkit_response(
                 Some("RECITATION") | Some("OTHER") => FinishReason::Other,
                 _ => FinishReason::Unknown,
             };
+
+            let mut custom = serde_json::Map::new();
+            if let Some(safety_ratings) = candidate.safety_ratings {
+                custom.insert(
+                    "safetyRatings".to_string(),
+                    serde_json::to_value(safety_ratings)?,
+                );
+            }
+            if let Some(citation_metadata) = candidate.citation_metadata {
+                custom.insert(
+                    "citationMetadata".to_string(),
+                    serde_json::to_value(citation_metadata)?,
+                );
+            }
+
             Ok(CandidateData {
                 index: i as u32,
                 message,
                 finish_reason: Some(finish_reason),
                 finish_message: None,
+                custom: if custom.is_empty() {
+                    None
+                } else {
+                    Some(Value::Object(custom))
+                },
             })
         })
         .collect::<Result<Vec<CandidateData>>>()?;

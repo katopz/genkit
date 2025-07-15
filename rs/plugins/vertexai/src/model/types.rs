@@ -128,12 +128,44 @@ pub struct VertexGeminiRequest {
     pub cached_content: Option<String>,
 }
 
-#[derive(Deserialize)]
+#[derive(Debug, Serialize, Deserialize, Clone)]
+#[serde(rename_all = "camelCase")]
+pub struct SafetyRating {
+    pub category: String,
+    pub probability: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub probability_score: Option<f32>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub severity: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub severity_score: Option<f32>,
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone)]
+#[serde(rename_all = "camelCase")]
+pub struct CitationMetadata {
+    pub citations: Vec<Citation>,
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone)]
+#[serde(rename_all = "camelCase")]
+pub struct Citation {
+    pub start_index: u32,
+    pub end_index: u32,
+    pub uri: String,
+    pub license: String,
+}
+
+#[derive(Deserialize, Debug, Clone)]
 #[serde(rename_all = "camelCase")]
 pub struct VertexCandidate {
     pub content: VertexContent,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub finish_reason: Option<String>,
-    // Other fields like index, safetyRatings, citationMetadata are ignored for now.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub safety_ratings: Option<Vec<SafetyRating>>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub citation_metadata: Option<CitationMetadata>,
 }
 
 #[derive(Deserialize)]

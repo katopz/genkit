@@ -16,6 +16,7 @@ use crate::document::ToolRequest;
 use crate::generate::{GenerationBlockedError, GenerationResponseError};
 use crate::message::{Message, MessageData, MessageParser};
 use crate::model::{FinishReason, GenerateRequest, GenerateResponseData, GenerationUsage};
+use crate::CandidateData;
 use genkit_core::error::{Error, Result};
 
 use schemars::JsonSchema;
@@ -242,20 +243,22 @@ where
     /// Converts the response to its serializable data representation.
     pub fn to_json_data(&self) -> Result<GenerateResponseData> {
         let candidates = if let Some(msg) = &self.message {
-            vec![crate::model::CandidateData {
+            vec![CandidateData {
                 index: 0,
                 message: msg.to_json(),
                 finish_reason: self.finish_reason.clone(),
                 finish_message: self.finish_message.clone(),
+                ..Default::default()
             }]
         } else if self.finish_reason.is_some() {
             // If there's no message, we might still have a finish reason (e.g., Blocked)
             // So we construct a candidate with an empty message.
-            vec![crate::model::CandidateData {
+            vec![CandidateData {
                 index: 0,
                 message: MessageData::default(),
                 finish_reason: self.finish_reason.clone(),
                 finish_message: self.finish_message.clone(),
+                ..Default::default()
             }]
         } else {
             vec![]

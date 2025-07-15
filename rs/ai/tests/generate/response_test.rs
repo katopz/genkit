@@ -52,6 +52,7 @@ fn test_to_json_data_serialization() {
             },
             finish_reason: Some(FinishReason::Stop),
             finish_message: None,
+            ..Default::default()
         }],
         usage: None,
         custom: None,

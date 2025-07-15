@@ -18,24 +18,22 @@
 //! on Vertex AI.
 
 use genkit::{
-    model::{FinishReason, GenerateRequest},
-    {Media, MessageData, Part, ToolResponse},
+    model::{CandidateData, FinishReason, GenerateRequest},
+    Media, MessageData, Part, ToolResponse,
 };
-use genkit_vertexai::model::gemini::{
-    VertexCandidate, VertexContent, VertexGeminiResponse, VertexPart,
+use genkit_vertexai::model::{
+    gemini::{SafetyRating, VertexCandidate, VertexContent, VertexGeminiResponse, VertexPart},
+    helpers::{to_genkit_response, to_vertex_request},
+    types::VertexFunctionCall,
 };
-use genkit_vertexai::model::helpers::{to_genkit_response, to_vertex_request};
 use rstest::rstest;
 use serde::Serialize;
-use serde_json::json;
+use serde_json::{json, Value};
+use std::collections::HashMap;
 
 #[cfg(test)]
 /// toGeminiMessages
 mod to_gemini_message_tests {
-    use std::collections::HashMap;
-
-    use serde_json::Value;
-
     use super::*;
 
     #[rstest]
@@ -112,7 +110,6 @@ mod to_gemini_message_tests {
                         name: "tellAFunnyJoke".to_string(),
                         output: Some(json!("Why did the dogs cross the road?")),
                         ref_id: Some("1".to_string()),
-                        ..Default::default()
                     }),
                     ..Default::default()
                 },
@@ -121,7 +118,6 @@ mod to_gemini_message_tests {
                         name: "tellAnotherFunnyJoke".to_string(),
                         output: Some(json!("To get to the other side.")),
                         ref_id: Some("0".to_string()),
-                        ..Default::default()
                     }),
                     ..Default::default()
                 }
@@ -226,9 +222,6 @@ mod to_gemini_message_tests {
 /// toGeminiSystemInstruction
 mod to_gemini_system_instruction_tests {
     use super::*;
-    use genkit::model::GenerateRequest;
-    use genkit::{MessageData, Part};
-    use serde_json::json;
 
     #[rstest]
     #[case(
@@ -304,9 +297,8 @@ mod to_gemini_system_instruction_tests {
     }
 }
 
-// TODO
 #[cfg(test)]
-mod to_genkit_response_tests {
+mod from_gemini_candidate_tests {
     use super::*;
 
     // A temporary struct to help with comparing the finishReason as a lowercase string,
@@ -317,43 +309,15 @@ mod to_genkit_response_tests {
         index: u32,
         message: MessageData,
         finish_reason: String,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        finish_message: Option<String>,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        custom: Option<serde_json::Value>,
     }
 
-    #[rstest]
-    #[case(
-        "should transform from system to user",
-        vec![VertexCandidate {
-            content: VertexContent {
-                role: "model".to_string(),
-                parts: vec![VertexPart { text: Some("A funny joke.".to_string()), ..Default::default() }],
-            },
-            finish_reason: Some("STOP".to_string()),
-        }],
-        json!([{
-            "index": 0,
-            "message": {
-                "role": "model",
-                "content": [{"text": "A funny joke."}]
-            },
-            "finishReason": "stop"
-        }])
-    )]
-    fn test_to_genkit_response(
-        #[case] description: &str,
-        #[case] candidates: Vec<VertexCandidate>,
-        #[case] expected_candidates: serde_json::Value,
-    ) {
-        let vertex_response = VertexGeminiResponse {
-            candidates,
-            usage_metadata: None,
-        };
-        let genkit_response =
-            to_genkit_response(&GenerateRequest::default(), vertex_response).unwrap();
-
-        let comparable_result: Vec<ComparableCandidate> = genkit_response
-            .candidates
-            .into_iter()
-            .map(|c| ComparableCandidate {
+    impl From<CandidateData> for ComparableCandidate {
+        fn from(c: CandidateData) -> Self {
+            ComparableCandidate {
                 index: c.index,
                 message: c.message,
                 finish_reason: c
@@ -361,29 +325,297 @@ mod to_genkit_response_tests {
                     .unwrap_or(FinishReason::Unknown)
                     .to_string()
                     .to_lowercase(),
-            })
-            .collect();
+                finish_message: c.finish_message,
+                custom: c.custom,
+            }
+        }
+    }
 
-        let mut result_json = serde_json::to_value(comparable_result).unwrap();
+    #[rstest]
+    #[case(
+        "should transform gemini candidate to genkit candidate (text parts) correctly",
+        VertexCandidate {
+            content: VertexContent {
+                role: "model".to_string(),
+                parts: vec![
+                    VertexPart {
+                        text: Some("Why did the dog go to the bank?\n\nTo get his bones cashed!".to_string()),
+                        ..Default::default()
+                    }
+                ],
+            },
+            finish_reason: Some("STOP".to_string()),
+            safety_ratings: Some(vec![
+                SafetyRating {
+                    category: "HARM_CATEGORY_HATE_SPEECH".to_string(),
+                    probability: "NEGLIGIBLE".to_string(),
+                    probability_score: Some(0.12074952),
+                    severity: Some("HARM_SEVERITY_NEGLIGIBLE".to_string()),
+                    severity_score: Some(0.18388656),
+                },
+                SafetyRating {
+                    category: "HARM_CATEGORY_DANGEROUS_CONTENT".to_string(),
+                    probability: "NEGLIGIBLE".to_string(),
+                    probability_score: Some(0.37874627),
+                    severity: Some("HARM_SEVERITY_LOW".to_string()),
+                    severity_score: Some(0.37227696),
+                },
+                SafetyRating {
+                    category: "HARM_CATEGORY_HARASSMENT".to_string(),
+                    probability: "NEGLIGIBLE".to_string(),
+                    probability_score: Some(0.3983479),
+                    severity: Some("HARM_SEVERITY_LOW".to_string()),
+                    severity_score: Some(0.22270013),
+                },
+                SafetyRating {
+                    category: "HARM_CATEGORY_SEXUALLY_EXPLICIT".to_string(),
+                    probability: "NEGLIGIBLE".to_string(),
+                    probability_score: None,
+                    severity: None,
+                    severity_score: None,
+                },
+            ]),
+            citation_metadata: None,
+        },
+        json!({
+            "index": 0,
+            "message": {
+                "role": "model",
+                "content": [
+                    {
+                        "text": "Why did the dog go to the bank?\n\nTo get his bones cashed!"
+                    }
+                ]
+            },
+            "finishReason": "stop",
+            "custom": {
+                "safetyRatings": [
+                    {
+                        "category": "HARM_CATEGORY_HATE_SPEECH",
+                        "probability": "NEGLIGIBLE",
+                        "probabilityScore": 0.12074952,
+                        "severity": "HARM_SEVERITY_NEGLIGIBLE",
+                        "severityScore": 0.18388656
+                    },
+                    {
+                        "category": "HARM_CATEGORY_DANGEROUS_CONTENT",
+                        "probability": "NEGLIGIBLE",
+                        "probabilityScore": 0.37874627,
+                        "severity": "HARM_SEVERITY_LOW",
+                        "severityScore": 0.37227696
+                    },
+                    {
+                        "category": "HARM_CATEGORY_HARASSMENT",
+                        "probability": "NEGLIGIBLE",
+                        "probabilityScore": 0.3983479,
+                        "severity": "HARM_SEVERITY_LOW",
+                        "severityScore": 0.22270013
+                    },
+                    {
+                        "category": "HARM_CATEGORY_SEXUALLY_EXPLICIT",
+                        "probability": "NEGLIGIBLE"
+                    }
+                ]
+            }
+        })
+    )]
+    #[case(
+        "should transform gemini candidate to genkit candidate (function call parts) correctly",
+        VertexCandidate {
+            content: VertexContent {
+                role: "model".to_string(),
+                parts: vec![
+                    VertexPart {
+                        function_call: Some(VertexFunctionCall {
+                            name: "tellAFunnyJoke".to_string(),
+                            args: json!({"topic": "dog"}),
+                        }),
+                        ..Default::default()
+                    }
+                ],
+            },
+            finish_reason: Some("STOP".to_string()),
+            safety_ratings: Some(vec![
+                SafetyRating {
+                    category: "HARM_CATEGORY_HATE_SPEECH".to_string(),
+                    probability: "NEGLIGIBLE".to_string(),
+                    probability_score: Some(0.11858909),
+                    severity: Some("HARM_SEVERITY_NEGLIGIBLE".to_string()),
+                    severity_score: Some(0.11456649),
+                },
+                SafetyRating {
+                    category: "HARM_CATEGORY_DANGEROUS_CONTENT".to_string(),
+                    probability: "NEGLIGIBLE".to_string(),
+                    probability_score: Some(0.13857833),
+                    severity: Some("HARM_SEVERITY_NEGLIGIBLE".to_string()),
+                    severity_score: Some(0.11417085),
+                },
+                SafetyRating {
+                    category: "HARM_CATEGORY_HARASSMENT".to_string(),
+                    probability: "NEGLIGIBLE".to_string(),
+                    probability_score: Some(0.28012377),
+                    severity: Some("HARM_SEVERITY_NEGLIGIBLE".to_string()),
+                    severity_score: Some(0.112405084),
+                },
+                SafetyRating {
+                    category: "HARM_CATEGORY_SEXUALLY_EXPLICIT".to_string(),
+                    probability: "NEGLIGIBLE".to_string(),
+                    probability_score: None,
+                    severity: None,
+                    severity_score: None,
+                },
+            ]),
+            citation_metadata: None,
+        },
+        json!({
+            "index": 0,
+            "message": {
+                "role": "model",
+                "content": [
+                    {
+                        "toolRequest": {
+                            "name": "tellAFunnyJoke",
+                            "input": {
+                                "topic": "dog"
+                            },
+                            "ref_id": "0"
+                        }
+                    }
+                ]
+            },
+            "finishReason": "stop",
+            "custom": {
+                "safetyRatings": [
+                     {
+                        "category": "HARM_CATEGORY_HATE_SPEECH",
+                        "probability": "NEGLIGIBLE",
+                        "probabilityScore": 0.11858909,
+                        "severity": "HARM_SEVERITY_NEGLIGIBLE",
+                        "severityScore": 0.11456649
+                    },
+                    {
+                        "category": "HARM_CATEGORY_DANGEROUS_CONTENT",
+                        "probability": "NEGLIGIBLE",
+                        "probabilityScore": 0.13857833,
+                        "severity": "HARM_SEVERITY_NEGLIGIBLE",
+                        "severityScore": 0.11417085
+                    },
+                    {
+                        "category": "HARM_CATEGORY_HARASSMENT",
+                        "probability": "NEGLIGIBLE",
+                        "probabilityScore": 0.28012377,
+                        "severity": "HARM_SEVERITY_NEGLIGIBLE",
+                        "severityScore": 0.112405084
+                    },
+                    {
+                        "category": "HARM_CATEGORY_SEXUALLY_EXPLICIT",
+                        "probability": "NEGLIGIBLE"
+                    }
+                ]
+            }
+        })
+    )]
+    #[case(
+        "should transform gemini candidate to genkit candidate (thought parts) correctly",
+        VertexCandidate {
+            content: VertexContent {
+                role: "model".to_string(),
+                parts: vec![
+                    VertexPart {
+                        thought: Some(true),
+                        thought_signature: Some("abc123".to_string()),
+                        ..Default::default()
+                    },
+                    VertexPart {
+                        thought: Some(true),
+                        text: Some("thought with text".to_string()),
+                        thought_signature: Some("def456".to_string()),
+                        ..Default::default()
+                    },
+                ],
+            },
+            finish_reason: Some("STOP".to_string()),
+            safety_ratings: Some(vec![
+                SafetyRating {
+                    category: "HARM_CATEGORY_HATE_SPEECH".to_string(),
+                    probability: "NEGLIGIBLE".to_string(),
+                    probability_score: Some(0.11858909),
+                    severity: Some("HARM_SEVERITY_NEGLIGIBLE".to_string()),
+                    severity_score: Some(0.11456649),
+                },
+            ]),
+            citation_metadata: None,
+        },
+        json!({
+            "index": 0,
+            "message": {
+                "role": "model",
+                "content": [
+                    {
+                        "reasoning": "",
+                        "metadata": {
+                            "thoughtSignature": "abc123"
+                        }
+                    },
+                    {
+                        "reasoning": "thought with text",
+                        "metadata": {
+                            "thoughtSignature": "def456"
+                        }
+                    }
+                ]
+            },
+            "finishReason": "stop",
+            "custom": {
+                "safetyRatings": [
+                    {
+                        "category": "HARM_CATEGORY_HATE_SPEECH",
+                        "probability": "NEGLIGIBLE",
+                        "probabilityScore": 0.11858909,
+                        "severity": "HARM_SEVERITY_NEGLIGIBLE",
+                        "severityScore": 0.11456649
+                    }
+                ]
+            }
+        })
+    )]
+    fn test_from_gemini_candidate(
+        #[case] description: &str,
+        #[case] gemini_candidate: VertexCandidate,
+        #[case] expected_output: serde_json::Value,
+    ) {
+        let response = to_genkit_response(
+            &GenerateRequest::default(),
+            VertexGeminiResponse {
+                candidates: vec![gemini_candidate],
+                usage_metadata: None,
+            },
+        )
+        .unwrap();
 
-        // Strip fields that are not relevant for this comparison or are non-deterministic.
-        if let Some(candidates_arr) = result_json.as_array_mut() {
-            for candidate in candidates_arr {
-                if let Some(c_obj) = candidate.as_object_mut() {
-                    c_obj.remove("finishMessage");
-                    if let Some(msg) = c_obj.get_mut("message") {
-                        if let Some(msg_obj) = msg.as_object_mut() {
-                            msg_obj.remove("metadata");
+        let genkit_candidate = response.candidates.into_iter().next().unwrap();
+        let comparable_candidate: ComparableCandidate = genkit_candidate.into();
+
+        let mut result_json = serde_json::to_value(comparable_candidate).unwrap();
+
+        // The 'ref' field for tool requests is added during conversion and is non-deterministic
+        // in this test setup, so we remove it for comparison.
+        if let Some(msg) = result_json.get_mut("message") {
+            if let Some(content) = msg.get_mut("content") {
+                if let Some(content_arr) = content.as_array_mut() {
+                    for item in content_arr {
+                        if let Some(item_obj) = item.as_object_mut() {
+                            if let Some(tr) = item_obj.get_mut("toolRequest") {
+                                if let Some(tr_obj) = tr.as_object_mut() {
+                                    tr_obj.remove("ref_id");
+                                }
+                            }
                         }
                     }
                 }
             }
         }
 
-        assert_eq!(
-            result_json, expected_candidates,
-            "Failed test: {}",
-            description
-        );
+        assert_eq!(result_json, expected_output, "Failed test: {}", description);
     }
 }

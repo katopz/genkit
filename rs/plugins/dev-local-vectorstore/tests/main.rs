@@ -99,6 +99,7 @@ fn mock_model() -> ModelAction {
                     message: response_message,
                     finish_reason: Some(FinishReason::Stop),
                     finish_message: None,
+                    ..Default::default()
                 }],
                 ..Default::default()
             })

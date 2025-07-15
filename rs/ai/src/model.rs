@@ -221,6 +221,8 @@ pub struct CandidateData {
     pub finish_reason: Option<FinishReason>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub finish_message: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub custom: Option<serde_json::Value>,
 }
 
 /// A response from a generative model.
