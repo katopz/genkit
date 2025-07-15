@@ -40,7 +40,7 @@ pub struct Media {
 pub struct ToolRequest {
     /// An identifier for a specific tool call, used to match a `ToolResponse`.
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub ref_id: Option<String>,
+    pub r#ref: Option<String>,
     /// The name of the tool to be called.
     pub name: String,
     /// The input parameters for the tool, typically a JSON object.
@@ -54,7 +54,7 @@ pub struct ToolRequest {
 pub struct ToolResponse {
     /// The identifier of the `ToolRequest` this is a response to.
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub ref_id: Option<String>,
+    pub r#ref: Option<String>,
     /// The name of the tool that was called.
     pub name: String,
     /// The output data from the tool, typically a JSON object.
@@ -130,13 +130,13 @@ impl Part {
     pub fn tool_request(
         name: impl Into<String>,
         input: Option<Value>,
-        ref_id: Option<String>,
+        r#ref: Option<String>,
     ) -> Self {
         Part {
             tool_request: Some(ToolRequest {
                 name: name.into(),
                 input,
-                ref_id,
+                r#ref,
             }),
             ..Default::default()
         }
@@ -146,13 +146,13 @@ impl Part {
     pub fn tool_response(
         name: impl Into<String>,
         output: Option<Value>,
-        ref_id: Option<String>,
+        r#ref: Option<String>,
     ) -> Self {
         Part {
             tool_response: Some(ToolResponse {
                 name: name.into(),
                 output,
-                ref_id,
+                r#ref,
             }),
             ..Default::default()
         }

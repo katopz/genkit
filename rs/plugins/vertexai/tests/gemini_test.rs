@@ -18,13 +18,12 @@
 //! on Vertex AI.
 
 use genkit::{
-    model::{CandidateData, FinishReason, GenerateRequest},
+    model::{FinishReason, GenerateRequest},
     Media, MessageData, Part, ToolResponse,
 };
 use genkit_vertexai::model::{
-    gemini::{SafetyRating, VertexCandidate, VertexContent, VertexGeminiResponse, VertexPart},
+    gemini::VertexGeminiResponse,
     helpers::{to_genkit_response, to_vertex_request},
-    types::VertexFunctionCall,
 };
 use rstest::rstest;
 use serde::Serialize;
@@ -109,7 +108,7 @@ mod to_gemini_message_tests {
                     tool_response: Some(ToolResponse {
                         name: "tellAFunnyJoke".to_string(),
                         output: Some(json!("Why did the dogs cross the road?")),
-                        ref_id: Some("1".to_string()),
+                        r#ref: Some("1".to_string()),
                     }),
                     ..Default::default()
                 },
@@ -117,7 +116,7 @@ mod to_gemini_message_tests {
                     tool_response: Some(ToolResponse {
                         name: "tellAnotherFunnyJoke".to_string(),
                         output: Some(json!("To get to the other side.")),
-                        ref_id: Some("0".to_string()),
+                        r#ref: Some("0".to_string()),
                     }),
                     ..Default::default()
                 }
@@ -439,7 +438,7 @@ mod from_gemini_candidate_tests {
                     {
                         "category": "HARM_CATEGORY_HARASSMENT",
                         "probability": "NEGLIGIBLE",
-                        "probabilityScore": 0.3983479,
+                        "probabilityScore": 0.39834791, // Adjusted for f32 precision
                         "severity": "HARM_SEVERITY_LOW",
                         "severityScore": 0.22270013
                     },
@@ -507,7 +506,7 @@ mod from_gemini_candidate_tests {
                             "input": {
                                 "topic": "dog"
                             },
-                            "ref_id": "0"
+                            "ref": "0"
                         }
                     }
                 ]
@@ -627,36 +626,9 @@ mod from_gemini_candidate_tests {
 
         let mut result_json = serde_json::to_value(comparable_candidate).unwrap();
 
-        // The 'ref' field for tool requests is added during conversion and is non-deterministic
-        // in this test setup, so we remove it for comparison.
-        if let Some(msg) = result_json.get_mut("message") {
-            if let Some(content) = msg.get_mut("content") {
-                if let Some(content_arr) = content.as_array_mut() {
-                    for item in content_arr {
-                        if let Some(item_obj) = item.as_object_mut() {
-                            if item_obj.contains_key("toolRequest") {
-                                if let Some(tr) = item_obj.get_mut("toolRequest") {
-                                    if let Some(tr_obj) = tr.as_object_mut() {
-                                        tr_obj.remove("ref_id");
-                                    }
-                                }
-                                if let Some(expected_tr) = expected_output["message"]["content"][0]
-                                    .as_object_mut()
-                                    .unwrap()
-                                    .get_mut("toolRequest")
-                                {
-                                    expected_tr.as_object_mut().unwrap().remove("ref");
-                                }
-                            }
-                        }
-                    }
-                }
-            }
-        }
-
         // Round floats to handle precision differences.
-        round_floats_in_json(&mut result_json, 7);
-        round_floats_in_json(&mut expected_output, 7);
+        round_floats_in_json(&mut result_json, 8);
+        round_floats_in_json(&mut expected_output, 8);
 
         assert_eq!(result_json, expected_output, "Failed test: {}", description);
     }

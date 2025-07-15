@@ -197,14 +197,14 @@ fn test_assert_valid_schema_success() {
         vec![Part {
             tool_request: Some(ToolRequest {
                 name: "foo".to_string(),
-                ref_id: Some("abc".to_string()),
+                r#ref: Some("abc".to_string()),
                 input: Some(json!("banana")),
             }),
             ..Default::default()
         }],
         vec![ToolRequest {
             name: "foo".to_string(),
-            ref_id: Some("abc".to_string()),
+            r#ref: Some("abc".to_string()),
             input: Some(json!("banana")),
         }]
     )]
@@ -213,7 +213,7 @@ fn test_assert_valid_schema_success() {
             Part {
                 tool_request: Some(ToolRequest {
                     name: "foo".to_string(),
-                    ref_id: Some("abc".to_string()),
+                    r#ref: Some("abc".to_string()),
                     input: Some(json!("banana")),
                 }),
                 ..Default::default()
@@ -221,7 +221,7 @@ fn test_assert_valid_schema_success() {
             Part {
                 tool_request: Some(ToolRequest {
                     name: "bar".to_string(),
-                    ref_id: Some("bcd".to_string()),
+                    r#ref: Some("bcd".to_string()),
                     input: Some(json!("apple")),
                 }),
                 ..Default::default()
@@ -230,12 +230,12 @@ fn test_assert_valid_schema_success() {
         vec![
             ToolRequest {
                 name: "foo".to_string(),
-                ref_id: Some("abc".to_string()),
+                r#ref: Some("abc".to_string()),
                 input: Some(json!("banana")),
             },
             ToolRequest {
                 name: "bar".to_string(),
-                ref_id: Some("bcd".to_string()),
+                r#ref: Some("bcd".to_string()),
                 input: Some(json!("apple")),
             }
         ]

@@ -138,7 +138,7 @@ pub async fn resolve_tool_request<O: Default + Send + Sync + 'static>(
             let response_part = Part {
                 tool_response: Some(ToolResponse {
                     name: tool_request.name.clone(),
-                    ref_id: tool_request.ref_id.clone(),
+                    r#ref: tool_request.r#ref.clone(),
                     output: Some(output),
                 }),
                 ..Default::default()
@@ -258,11 +258,11 @@ fn find_corresponding_tool_request<'a>(
     part: &ToolRequestPart,
 ) -> Option<&'a ToolRequestPart> {
     let name = &part.tool_request.as_ref()?.name;
-    let ref_id = &part.tool_request.as_ref()?.ref_id;
+    let r#ref = &part.tool_request.as_ref()?.r#ref;
     parts.iter().find(|p| {
         p.tool_request
             .as_ref()
-            .is_some_and(|tr| &tr.name == name && &tr.ref_id == ref_id)
+            .is_some_and(|tr| &tr.name == name && &tr.r#ref == r#ref)
     })
 }
 
@@ -271,11 +271,11 @@ fn find_corresponding_tool_response<'a>(
     part: &ToolRequestPart,
 ) -> Option<&'a ToolResponsePart> {
     let name = &part.tool_request.as_ref()?.name;
-    let ref_id = &part.tool_request.as_ref()?.ref_id;
+    let r#ref = &part.tool_request.as_ref()?.r#ref;
     parts.iter().find(|p| {
         p.tool_response
             .as_ref()
-            .is_some_and(|tr| &tr.name == name && &tr.ref_id == ref_id)
+            .is_some_and(|tr| &tr.name == name && &tr.r#ref == r#ref)
     })
 }
 
@@ -298,7 +298,7 @@ async fn resolve_resumed_tool_request<O: Default + Send + Sync + 'static>(
         let response_part = Part {
             tool_response: Some(crate::document::ToolResponse {
                 name: part.tool_request.as_ref().unwrap().name.clone(),
-                ref_id: part.tool_request.as_ref().unwrap().ref_id.clone(),
+                r#ref: part.tool_request.as_ref().unwrap().r#ref.clone(),
                 output: Some(pending_output.clone()),
             }),
             metadata: Some(
@@ -368,7 +368,7 @@ async fn resolve_resumed_tool_request<O: Default + Send + Sync + 'static>(
         "Unresolved tool request '{}'{} was not handled by the 'resume' argument.",
         tool_req_details.name,
         tool_req_details
-            .ref_id
+            .r#ref
             .as_ref()
             .map(|r| format!("#{}", r))
             .unwrap_or_default()

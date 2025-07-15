@@ -80,7 +80,7 @@ async fn test_tools_call_the_tool() {
                 let tool_request = Some(ToolRequest {
                     name: "testTool".to_string(),
                     input: Some(serde_json::to_value(TestToolInput {}).unwrap()),
-                    ref_id: Some("ref123".to_string()),
+                    r#ref: Some("ref123".to_string()),
                 });
 
                 GenerateResponseData {
@@ -137,7 +137,7 @@ async fn test_tools_call_the_tool() {
     assert_eq!(messages[2].role, Role::Tool);
     let tool_response = messages[2].content[0].tool_response.as_ref().unwrap();
     assert_eq!(tool_response.name, "testTool");
-    assert_eq!(tool_response.ref_id, Some("ref123".to_string()));
+    assert_eq!(tool_response.r#ref, Some("ref123".to_string()));
     assert_eq!(
         tool_response.output,
         Some(serde_json::to_value("tool called").unwrap())
@@ -178,7 +178,7 @@ async fn test_tools_call_the_tool_with_context() {
                 let tool_request = Some(ToolRequest {
                     name: "testTool".to_string(),
                     input: Some(serde_json::to_value(TestToolInput {}).unwrap()),
-                    ref_id: Some("ref123".to_string()),
+                    r#ref: Some("ref123".to_string()),
                 });
                 GenerateResponseData {
                     candidates: vec![CandidateData {
@@ -244,7 +244,7 @@ async fn test_tools_call_the_tool_with_context() {
         content: vec![Part {
             tool_response: Some(genkit_ai::ToolResponse {
                 name: "testTool".to_string(),
-                ref_id: Some("ref123".to_string()),
+                r#ref: Some("ref123".to_string()),
                 output: Some(json!("{\"something\":\"extra\"}")),
             }),
             ..Default::default()
@@ -308,7 +308,7 @@ async fn test_calls_the_dynamic_tool() {
                                     tool_request: Some(ToolRequest {
                                         name: "dynamicTestTool1".to_string(),
                                         input: Some(json!({"foo": "bar"})),
-                                        ref_id: Some("ref123".to_string()),
+                                        r#ref: Some("ref123".to_string()),
                                     }),
                                     ..Default::default()
                                 },
@@ -316,7 +316,7 @@ async fn test_calls_the_dynamic_tool() {
                                     tool_request: Some(ToolRequest {
                                         name: "dynamicTestTool2".to_string(),
                                         input: Some(json!({"foo": "baz"})),
-                                        ref_id: Some("ref234".to_string()),
+                                        r#ref: Some("ref234".to_string()),
                                     }),
                                     ..Default::default()
                                 },
@@ -380,7 +380,7 @@ async fn test_calls_the_dynamic_tool() {
         .as_ref()
         .unwrap();
 
-    assert_eq!(resp1.ref_id, Some("ref123".to_string()));
+    assert_eq!(resp1.r#ref, Some("ref123".to_string()));
     assert_eq!(resp1.output, Some(json!("tool called 1")));
 
     // Find and verify the second tool's response.
@@ -396,7 +396,7 @@ async fn test_calls_the_dynamic_tool() {
         .as_ref()
         .unwrap();
 
-    assert_eq!(resp2.ref_id, Some("ref234".to_string()));
+    assert_eq!(resp2.r#ref, Some("ref234".to_string()));
     assert_eq!(resp2.output, Some(json!("tool called 2")));
 }
 
@@ -538,7 +538,7 @@ async fn test_interrupts_the_dynamic_tool_with_no_impl() {
                                 tool_request: Some(ToolRequest {
                                     name: "dynamicTestTool".to_string(),
                                     input: Some(json!({ "foo": "bar" })),
-                                    ref_id: Some("ref123".to_string()),
+                                    r#ref: Some("ref123".to_string()),
                                 }),
                                 ..Default::default()
                             }],
@@ -585,7 +585,7 @@ async fn test_interrupts_the_dynamic_tool_with_no_impl() {
     let expected_tool_request = json!({
         "name": "dynamicTestTool",
         "input": {"foo": "bar"},
-        "refId": "ref123",
+        "ref": "ref123",
     });
 
     assert_eq!(
@@ -637,7 +637,7 @@ async fn test_call_the_tool_with_output_schema() {
                                 tool_request: Some(ToolRequest {
                                     name: "testTool".to_string(),
                                     input: Some(json!({"foo": "fromTool"})),
-                                    ref_id: Some("ref123".to_string()),
+                                    r#ref: Some("ref123".to_string()),
                                 }),
                                 ..Default::default()
                             }],
@@ -753,7 +753,7 @@ async fn test_should_propagate_context_to_the_tool() {
                                 tool_request: Some(ToolRequest {
                                     name: "testTool".to_string(),
                                     input: Some(json!({"foo": "fromTool"})),
-                                    ref_id: Some("ref123".to_string()),
+                                    r#ref: Some("ref123".to_string()),
                                 }),
                                 ..Default::default()
                             }],
@@ -928,7 +928,7 @@ async fn test_streams_the_tool_responses() {
               "toolRequest": {
                 "input": {},
                 "name": "testTool",
-                "refId": "ref123"
+                "ref": "ref123"
               }
             }
           ],
@@ -941,7 +941,7 @@ async fn test_streams_the_tool_responses() {
               "toolResponse": {
                 "name": "testTool",
                 "output": "tool called",
-                "refId": "ref123"
+                "ref": "ref123"
               }
             }
           ],
@@ -991,7 +991,7 @@ async fn test_throws_when_exceeding_max_tool_call_iterations() {
                             tool_request: Some(ToolRequest {
                                 name: "testTool".to_string(),
                                 input: Some(json!({})),
-                                ref_id: Some("ref123".to_string()),
+                                r#ref: Some("ref123".to_string()),
                             }),
                             ..Default::default()
                         }],
@@ -1097,7 +1097,7 @@ async fn test_interrupts_tool_execution() {
                                 tool_request: Some(ToolRequest {
                                     name: "interruptingTool".to_string(),
                                     input: Some(json!(null)),
-                                    ref_id: Some("ref123".to_string()),
+                                    r#ref: Some("ref123".to_string()),
                                 }),
                                 ..Default::default()
                             },
@@ -1105,7 +1105,7 @@ async fn test_interrupts_tool_execution() {
                                 tool_request: Some(ToolRequest {
                                     name: "simpleTool".to_string(),
                                     input: Some(json!({ "name": "foo" })),
-                                    ref_id: Some("ref456".to_string()),
+                                    r#ref: Some("ref456".to_string()),
                                 }),
                                 ..Default::default()
                             },
@@ -1113,7 +1113,7 @@ async fn test_interrupts_tool_execution() {
                                 tool_request: Some(ToolRequest {
                                     name: "resumableTool".to_string(),
                                     input: Some(json!({ "doIt": true })),
-                                    ref_id: Some("ref789".to_string()),
+                                    r#ref: Some("ref789".to_string()),
                                 }),
                                 ..Default::default()
                             },
@@ -1222,7 +1222,7 @@ async fn test_can_resume_generation() {
                     tool_request: Some(ToolRequest {
                         name: "interrupter".to_string(),
                         input: Some(json!({})),
-                        ref_id: Some("1".to_string()),
+                        r#ref: Some("1".to_string()),
                     }),
                     metadata: Some(serde_json::from_str(r#"{"interrupt":true}"#).unwrap()),
                     ..Default::default()
@@ -1231,7 +1231,7 @@ async fn test_can_resume_generation() {
                     tool_request: Some(ToolRequest {
                         name: "truth".to_string(),
                         input: Some(json!({})),
-                        ref_id: Some("2".to_string()),
+                        r#ref: Some("2".to_string()),
                     }),
                     metadata: Some(serde_json::from_str(r#"{"pendingOutput":true}"#).unwrap()),
                     ..Default::default()
@@ -1240,7 +1240,7 @@ async fn test_can_resume_generation() {
                     tool_request: Some(ToolRequest {
                         name: "resumable".to_string(),
                         input: Some(json!({})),
-                        ref_id: Some("3".to_string()),
+                        r#ref: Some("3".to_string()),
                     }),
                     metadata: Some(serde_json::from_str(r#"{"interrupt":true}"#).unwrap()),
                     ..Default::default()
@@ -1303,7 +1303,7 @@ async fn test_can_resume_generation() {
                         &Part {
                             tool_request: Some(ToolRequest {
                                 name: "interrupter".to_string(),
-                                ref_id: Some("1".to_string()),
+                                r#ref: Some("1".to_string()),
                                 ..Default::default()
                             }),
                             ..Default::default()
@@ -1318,7 +1318,7 @@ async fn test_can_resume_generation() {
                         &Part {
                             tool_request: Some(ToolRequest {
                                 name: "resumable".to_string(),
-                                ref_id: Some("3".to_string()),
+                                r#ref: Some("3".to_string()),
                                 ..Default::default()
                             }),
                             ..Default::default()
@@ -1343,7 +1343,7 @@ async fn test_can_resume_generation() {
             tool_request: Some(ToolRequest {
                 name: "interrupter".to_string(),
                 input: Some(json!({})),
-                ref_id: Some("1".to_string()),
+                r#ref: Some("1".to_string()),
             }),
             metadata: Some(serde_json::from_str(r#"{"resolvedInterrupt":true}"#).unwrap()),
             ..Default::default()
@@ -1352,7 +1352,7 @@ async fn test_can_resume_generation() {
             tool_request: Some(ToolRequest {
                 name: "truth".to_string(),
                 input: Some(json!({})),
-                ref_id: Some("2".to_string()),
+                r#ref: Some("2".to_string()),
             }),
             // NOTE: The TS implementation removes `pendingOutput` metadata here. The Rust
             // implementation currently does not, so a passing test would assert
@@ -1365,7 +1365,7 @@ async fn test_can_resume_generation() {
             tool_request: Some(ToolRequest {
                 name: "resumable".to_string(),
                 input: Some(json!({})),
-                ref_id: Some("3".to_string()),
+                r#ref: Some("3".to_string()),
             }),
             metadata: Some(serde_json::from_str(r#"{"resolvedInterrupt":true}"#).unwrap()),
             ..Default::default()
@@ -1380,7 +1380,7 @@ async fn test_can_resume_generation() {
         Part {
             tool_response: Some(genkit_ai::ToolResponse {
                 name: "interrupter".to_string(),
-                ref_id: Some("1".to_string()),
+                r#ref: Some("1".to_string()),
                 output: Some(json!(23)),
             }),
             metadata: Some(serde_json::from_str(r#"{"interruptResponse":true}"#).unwrap()),
@@ -1389,7 +1389,7 @@ async fn test_can_resume_generation() {
         Part {
             tool_response: Some(genkit_ai::ToolResponse {
                 name: "truth".to_string(),
-                ref_id: Some("2".to_string()),
+                r#ref: Some("2".to_string()),
                 output: Some(json!(true)),
             }),
             metadata: Some(serde_json::from_str(r#"{"source":"pending"}"#).unwrap()),
@@ -1398,7 +1398,7 @@ async fn test_can_resume_generation() {
         Part {
             tool_response: Some(genkit_ai::ToolResponse {
                 name: "resumable".to_string(),
-                ref_id: Some("3".to_string()),
+                r#ref: Some("3".to_string()),
                 output: Some(json!(true)),
             }),
             ..Default::default()

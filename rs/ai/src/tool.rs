@@ -117,7 +117,7 @@ where
         Ok(Part {
             tool_response: Some(crate::document::ToolResponse {
                 name: interrupt.tool_request.as_ref().unwrap().name.clone(),
-                ref_id: interrupt.tool_request.as_ref().unwrap().ref_id.clone(),
+                r#ref: interrupt.tool_request.as_ref().unwrap().r#ref.clone(),
                 output: Some(data_value),
             }),
             metadata: Some(

@@ -115,8 +115,8 @@ pub fn to_vertex_request(req: &GenerateRequest) -> Result<VertexGeminiRequest> {
             let mut content_parts = msg.content.clone();
             if msg.role == Role::Tool {
                 content_parts.sort_by(|a, b| {
-                    let a_ref = a.tool_response.as_ref().and_then(|tr| tr.ref_id.as_deref());
-                    let b_ref = b.tool_response.as_ref().and_then(|tr| tr.ref_id.as_deref());
+                    let a_ref = a.tool_response.as_ref().and_then(|tr| tr.r#ref.as_deref());
+                    let b_ref = b.tool_response.as_ref().and_then(|tr| tr.r#ref.as_deref());
                     a_ref.cmp(&b_ref)
                 });
             }
@@ -266,7 +266,7 @@ pub fn to_genkit_response(
                             tool_request: Some(ToolRequest {
                                 name: fc.name,
                                 input: Some(fc.args),
-                                ..Default::default()
+                                r#ref: Some(i.to_string()),
                             }),
                             ..Default::default()
                         })
