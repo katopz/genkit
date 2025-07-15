@@ -63,6 +63,10 @@ pub struct VertexPart {
     pub function_call: Option<VertexFunctionCall>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub function_response: Option<VertexFunctionResponse>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub thought: Option<bool>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub thought_signature: Option<String>,
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone)]

@@ -32,6 +32,10 @@ use serde_json::json;
 #[cfg(test)]
 /// toGeminiMessages
 mod to_gemini_message_tests {
+    use std::collections::HashMap;
+
+    use serde_json::Value;
+
     use super::*;
 
     #[rstest]
@@ -108,7 +112,7 @@ mod to_gemini_message_tests {
                         name: "tellAFunnyJoke".to_string(),
                         output: Some(json!("Why did the dogs cross the road?")),
                         ref_id: Some("1".to_string()),
-
+                        ..Default::default()
                     }),
                     ..Default::default()
                 },
@@ -117,7 +121,7 @@ mod to_gemini_message_tests {
                         name: "tellAnotherFunnyJoke".to_string(),
                         output: Some(json!("To get to the other side.")),
                         ref_id: Some("0".to_string()),
-
+                        ..Default::default()
                     }),
                     ..Default::default()
                 }
@@ -177,6 +181,30 @@ mod to_gemini_message_tests {
                         }
                     }
                 ]
+            }]
+        })
+    )]
+    #[case(
+        "should re-populate thoughtSignature from reasoning metadata",
+        GenerateRequest {
+            messages: vec![
+                MessageData::model(vec![
+                    Part {
+                        reasoning: Some("".to_string()),
+                        metadata: Some(HashMap::from([(
+                            "thoughtSignature".to_string(),
+                            Value::String("abc123".to_string()),
+                        )])),
+                        ..Default::default()
+                    }
+                ])
+            ],
+            ..Default::default()
+        },
+        json!({
+            "contents": [{
+                "role": "model",
+                "parts": [{"thought": true, "thoughtSignature": "abc123"}]
             }]
         })
     )]
@@ -276,7 +304,7 @@ mod to_gemini_system_instruction_tests {
     }
 }
 
-// what is this?
+// TODO
 #[cfg(test)]
 mod to_genkit_response_tests {
     use super::*;

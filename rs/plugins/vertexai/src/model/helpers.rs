@@ -34,29 +34,22 @@ pub fn to_vertex_part(part: &genkit::document::Part) -> Result<VertexPart> {
             Error::VertexAI("Media URL is not a valid base64 data URI.".to_string())
         })?;
         Ok(VertexPart {
-            text: None,
             inline_data: Some(VertexMedia {
                 mime_type: mime_type.replace("data:", ""),
                 data: data.to_string(),
             }),
-            function_call: None,
-            function_response: None,
+            ..Default::default()
         })
     } else if let Some(tool_req) = &part.tool_request {
         Ok(VertexPart {
-            text: None,
-            inline_data: None,
             function_call: Some(VertexFunctionCall {
                 name: tool_req.name.clone(),
                 args: tool_req.input.clone().unwrap_or_default(),
             }),
-            function_response: None,
+            ..Default::default()
         })
     } else if let Some(tool_resp) = &part.tool_response {
         Ok(VertexPart {
-            text: None,
-            inline_data: None,
-            function_call: None,
             function_response: Some(VertexFunctionResponse {
                 name: tool_resp.name.clone(),
                 response: serde_json::json!({
@@ -64,13 +57,24 @@ pub fn to_vertex_part(part: &genkit::document::Part) -> Result<VertexPart> {
                     "content": tool_resp.output
                 }),
             }),
+            ..Default::default()
+        })
+    } else if part.reasoning.is_some() {
+        let thought_signature = part
+            .metadata
+            .as_ref()
+            .and_then(|m| m.get("thoughtSignature"))
+            .and_then(|v| v.as_str())
+            .map(String::from);
+        Ok(VertexPart {
+            thought: Some(true),
+            thought_signature,
+            ..Default::default()
         })
     } else {
         Ok(VertexPart {
             text: part.text.clone(),
-            inline_data: None,
-            function_call: None,
-            function_response: None,
+            ..Default::default()
         })
     }
 }
