@@ -108,6 +108,7 @@ mod to_gemini_message_tests {
                         name: "tellAFunnyJoke".to_string(),
                         output: Some(json!("Why did the dogs cross the road?")),
                         ref_id: Some("1".to_string()),
+
                     }),
                     ..Default::default()
                 },
@@ -116,6 +117,7 @@ mod to_gemini_message_tests {
                         name: "tellAnotherFunnyJoke".to_string(),
                         output: Some(json!("To get to the other side.")),
                         ref_id: Some("0".to_string()),
+
                     }),
                     ..Default::default()
                 }
@@ -300,19 +302,6 @@ mod to_genkit_response_tests {
                     if let Some(msg) = c_obj.get_mut("message") {
                         if let Some(msg_obj) = msg.as_object_mut() {
                             msg_obj.remove("metadata");
-                            if let Some(content) = msg_obj.get_mut("content") {
-                                if let Some(content_arr) = content.as_array_mut() {
-                                    for item in content_arr {
-                                        if let Some(item_obj) = item.as_object_mut() {
-                                            if let Some(tr) = item_obj.get_mut("toolRequest") {
-                                                if let Some(tr_obj) = tr.as_object_mut() {
-                                                    tr_obj.remove("ref_id");
-                                                }
-                                            }
-                                        }
-                                    }
-                                }
-                            }
                         }
                     }
                 }
