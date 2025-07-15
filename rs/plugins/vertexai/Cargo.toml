@@ -23,6 +23,12 @@ strum_macros.workspace = true
 thiserror.workspace    = true
 
 [dev-dependencies]
-anyhow.workspace     = true
-tokio.workspace      = true
-tokio-test.workspace = true
+anyhow.workspace        = true
+rstest.workspace        = true
+rstest_macros.workspace = true
+tokio.workspace         = true
+tokio-test.workspace    = true
+
+[[test]]
+name = "gemini_test"
+path = "tests/gemini_test.rs"

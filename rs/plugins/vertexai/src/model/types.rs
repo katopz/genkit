@@ -52,7 +52,7 @@ pub struct VertexFunctionResponse {
     pub response: serde_json::Value,
 }
 
-#[derive(Serialize, Deserialize, Debug, Clone)]
+#[derive(Serialize, Deserialize, Debug, Clone, Default)]
 #[serde(rename_all = "camelCase")]
 pub struct VertexPart {
     #[serde(skip_serializing_if = "Option::is_none")]

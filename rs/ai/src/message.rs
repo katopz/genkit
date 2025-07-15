@@ -27,10 +27,13 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::collections::HashMap;
 use std::sync::Arc;
+use strum::EnumString;
 use strum_macros::Display;
 
 /// Represents the role of the entity creating a message.
-#[derive(Default, Debug, Clone, Serialize, Deserialize, JsonSchema, PartialEq, Eq, Display)]
+#[derive(
+    Default, Debug, Clone, Serialize, Deserialize, JsonSchema, PartialEq, Eq, Display, EnumString,
+)]
 #[serde(rename_all = "camelCase")]
 pub enum Role {
     System,
@@ -63,6 +66,24 @@ impl MessageData {
     pub fn system(content: Vec<Part>) -> Self {
         Self {
             role: Role::System,
+            content,
+            ..Default::default()
+        }
+    }
+
+    /// Creates a new `MessageData` with the `Tool` role.
+    pub fn tool(content: Vec<Part>) -> Self {
+        Self {
+            role: Role::Tool,
+            content,
+            ..Default::default()
+        }
+    }
+
+    /// Creates a new `MessageData` with the `Model` role.
+    pub fn model(content: Vec<Part>) -> Self {
+        Self {
+            role: Role::Model,
             content,
             ..Default::default()
         }

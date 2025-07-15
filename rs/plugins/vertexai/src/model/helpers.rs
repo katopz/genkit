@@ -28,7 +28,7 @@ use genkit::{
 // Configuration structs for the Gemini model, aligned with the API.
 use super::types::*;
 
-pub(crate) fn to_vertex_part(part: &genkit::document::Part) -> Result<VertexPart> {
+pub fn to_vertex_part(part: &genkit::document::Part) -> Result<VertexPart> {
     if let Some(media) = &part.media {
         let (mime_type, data) = media.url.split_once(";base64,").ok_or_else(|| {
             Error::VertexAI("Media URL is not a valid base64 data URI.".to_string())
@@ -76,7 +76,7 @@ pub(crate) fn to_vertex_part(part: &genkit::document::Part) -> Result<VertexPart
 }
 
 /// Converts a Genkit `GenerateRequest` into a `VertexGeminiRequest`.
-pub(crate) fn to_vertex_request(req: &GenerateRequest) -> Result<VertexGeminiRequest> {
+pub fn to_vertex_request(req: &GenerateRequest) -> Result<VertexGeminiRequest> {
     let mut messages = req.messages.clone();
 
     // Handle system instructions separately
@@ -167,7 +167,7 @@ pub(crate) fn to_vertex_request(req: &GenerateRequest) -> Result<VertexGeminiReq
 }
 
 /// Calculates basic usage statistics like character and media counts.
-pub(crate) fn get_genkit_usage_stats(
+pub fn get_genkit_usage_stats(
     request_messages: &[genkit::message::MessageData],
     candidate_messages: &[genkit::message::MessageData],
 ) -> GenerationUsage {
@@ -233,7 +233,7 @@ pub(crate) fn get_genkit_usage_stats(
 }
 
 /// Converts a `VertexGeminiResponse` into a Genkit `GenerateResponseData`.
-pub(crate) fn to_genkit_response(
+pub fn to_genkit_response(
     req: &GenerateRequest,
     resp: VertexGeminiResponse,
 ) -> Result<GenerateResponseData> {

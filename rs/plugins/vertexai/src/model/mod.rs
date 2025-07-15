@@ -17,9 +17,9 @@
 //! This module contains the definitions for models supported by the Vertex AI plugin.
 
 pub mod gemini;
-pub(crate) mod helpers;
+pub mod helpers;
 pub mod imagen;
-pub(crate) mod types;
+pub mod types;
 
 // Lists of supported models, similar to the TS implementation.
 pub const SUPPORTED_GEMINI_MODELS: &[&str] = &[
