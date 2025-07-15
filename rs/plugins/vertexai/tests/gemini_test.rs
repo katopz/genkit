@@ -17,8 +17,13 @@
 //! This module provides the implementation for the Gemini family of models
 //! on Vertex AI.
 
-use genkit::{model::GenerateRequest, MessageData, Part};
-use genkit_vertexai::model::gemini::{VertexCandidate, VertexContent, VertexPart};
+use genkit::{
+    model::GenerateRequest,
+    {Media, MessageData, Part, ToolRequest, ToolResponse},
+};
+use genkit_vertexai::model::gemini::{
+    VertexCandidate, VertexContent, VertexGeminiResponse, VertexPart,
+};
 use genkit_vertexai::model::helpers::{to_genkit_response, to_vertex_request};
 use rstest::rstest;
 use serde_json::json;
@@ -45,12 +50,16 @@ mod to_gemini_message_tests {
     )]
     #[case(
         "should transform genkit message (tool request content) correctly",
+        // A tool request is sent from the model to the client.
         GenerateRequest {
-            messages: vec![MessageData::tool(vec![Part::tool_request(
-                "tellAFunnyJoke",
-                Some(json!({"topic": "dogs"})),
-                None
-            )])],
+            messages: vec![MessageData::model(vec![Part {
+                tool_request: Some(ToolRequest {
+                    name: "tellAFunnyJoke".to_string(),
+                    input: Some(json!({"topic": "dogs"})),
+                    ..Default::default()
+                }),
+                ..Default::default()
+            }])],
             ..Default::default()
         },
         json!({
@@ -66,25 +75,22 @@ mod to_gemini_message_tests {
         })
     )]
     #[case(
-        "should transform genkit message (tool response content) correctly",
+        "should transform genkit message (single tool response) correctly",
+        // A tool response is sent from the client (as role 'tool') to the model.
         GenerateRequest {
-            messages: vec![MessageData::tool(vec![
-                Part::tool_response(
-                    "tellAFunnyJoke",
-                    Some(json!("Why did the dogs cross the road?")),
-                    None,
-                ),
-                Part::tool_response(
-                    "tellAnotherFunnyJoke",
-                    Some(json!("To get to the other side.")),
-                    None,
-                )
-            ])],
+            messages: vec![MessageData::tool(vec![Part {
+                tool_response: Some(ToolResponse {
+                    name: "tellAFunnyJoke".to_string(),
+                    output: Some(json!("Why did the dogs cross the road?")),
+                    ..Default::default()
+                }),
+                ..Default::default()
+            }])],
             ..Default::default()
         },
         json!({
             "contents": [{
-                "role": "tool",
+                "role": "function", // 'tool' role maps to 'function' in Vertex API
                 "parts": [
                     {
                         "functionResponse": {
@@ -94,7 +100,38 @@ mod to_gemini_message_tests {
                                 "name": "tellAFunnyJoke"
                             }
                         }
-                    },
+                    }
+                ]
+            }]
+        })
+    )]
+    #[case(
+        "should transform genkit message (tool response content with ref) correctly",
+        GenerateRequest {
+            messages: vec![MessageData::tool(vec![
+                Part {
+                    tool_response: Some(ToolResponse {
+                        name: "tellAFunnyJoke".to_string(),
+                        output: Some(json!("Why did the dogs cross the road?")),
+                        ref_id: Some("1".to_string()),
+                    }),
+                    ..Default::default()
+                },
+                Part {
+                    tool_response: Some(ToolResponse {
+                        name: "tellAnotherFunnyJoke".to_string(),
+                        output: Some(json!("To get to the other side.")),
+                        ref_id: Some("0".to_string()),
+                    }),
+                    ..Default::default()
+                }
+            ])],
+            ..Default::default()
+        },
+        json!({
+            "contents": [{
+                "role": "function",
+                "parts": [
                     {
                         "functionResponse": {
                             "name": "tellAnotherFunnyJoke",
@@ -102,6 +139,45 @@ mod to_gemini_message_tests {
                                 "content": "To get to the other side.",
                                 "name": "tellAnotherFunnyJoke"
                             }
+                        }
+                    },
+                    {
+                        "functionResponse": {
+                            "name": "tellAFunnyJoke",
+                            "response": {
+                                "content": "Why did the dogs cross the road?",
+                                "name": "tellAFunnyJoke"
+                            }
+                        }
+                    }
+                ]
+            }]
+        })
+    )]
+    #[case(
+        "should transform genkit message (inline base64 image content) correctly",
+        GenerateRequest {
+            messages: vec![MessageData::user(vec![
+                Part::text("describe the following image:"),
+                Part {
+                    media: Some(Media {
+                        content_type: Some("image/jpeg".to_string()),
+                        url: "data:image/jpeg;base64,/9j/4QDe/9k=".to_string(),
+                    }),
+                    ..Default::default()
+                },
+            ])],
+            ..Default::default()
+        },
+        json!({
+            "contents": [{
+                "role": "user",
+                "parts": [
+                    {"text": "describe the following image:"},
+                    {
+                        "inlineData": {
+                            "mimeType": "image/jpeg",
+                            "data": "/9j/4QDe/9k="
                         }
                     }
                 ]
@@ -160,10 +236,15 @@ mod to_gemini_system_instruction_tests {
             expected_contents
         );
     }
+}
+
+#[cfg(test)]
+mod to_genkit_response_tests {
+    use super::*;
 
     #[rstest]
     #[case(
-        "should transform from system to user",
+        "should transform simple text response",
         vec![VertexCandidate {
             content: VertexContent {
                 role: "model".to_string(),
@@ -185,8 +266,6 @@ mod to_gemini_system_instruction_tests {
         #[case] candidates: Vec<VertexCandidate>,
         #[case] expected_candidates: serde_json::Value,
     ) {
-        use genkit_vertexai::model::gemini::VertexGeminiResponse;
-
         let vertex_response = VertexGeminiResponse {
             candidates,
             usage_metadata: None,
@@ -196,6 +275,7 @@ mod to_gemini_system_instruction_tests {
 
         let mut result_json = serde_json::to_value(genkit_response.candidates).unwrap();
 
+        // Strip fields that are not relevant for this comparison or are non-deterministic.
         if let Some(candidates_arr) = result_json.as_array_mut() {
             for candidate in candidates_arr {
                 if let Some(c_obj) = candidate.as_object_mut() {

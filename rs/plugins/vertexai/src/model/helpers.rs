@@ -106,8 +106,17 @@ pub fn to_vertex_request(req: &GenerateRequest) -> Result<VertexGeminiRequest> {
                 Role::Tool => "function".to_string(),
                 _ => "user".to_string(), // System (if not handled above) and User
             };
-            let parts = msg
-                .content
+
+            let mut content_parts = msg.content.clone();
+            if msg.role == Role::Tool {
+                content_parts.sort_by(|a, b| {
+                    let a_ref = a.tool_response.as_ref().and_then(|tr| tr.ref_id.as_deref());
+                    let b_ref = b.tool_response.as_ref().and_then(|tr| tr.ref_id.as_deref());
+                    a_ref.cmp(&b_ref)
+                });
+            }
+
+            let parts = content_parts
                 .iter()
                 .map(to_vertex_part)
                 .collect::<Result<Vec<VertexPart>>>()?;
