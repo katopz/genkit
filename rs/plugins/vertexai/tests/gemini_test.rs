@@ -198,41 +198,85 @@ mod to_gemini_message_tests {
 /// toGeminiSystemInstruction
 mod to_gemini_system_instruction_tests {
     use super::*;
+    use genkit::model::GenerateRequest;
+    use genkit::{MessageData, Part};
+    use serde_json::json;
 
-    #[test]
-    fn test_to_vertex_request_with_system_instruction() {
-        let req = GenerateRequest {
+    #[rstest]
+    #[case(
+        "should transform from system to user",
+        GenerateRequest {
             messages: vec![
-                MessageData::system(vec![Part::text("You are a cat expert.")]),
-                MessageData::user(vec![Part::text("Tell me about cats.")]),
+                MessageData::system(vec![Part::text("You are an expert in all things cats.")]),
+                MessageData::user(vec![Part::text("Tell me about cats.")])
             ],
             ..Default::default()
-        };
-
-        let vertex_req = to_vertex_request(&req).unwrap();
-
-        let expected_system_instruction = json!({
+        },
+        json!({
             "role": "user",
-            "parts": [{"text": "You are a cat expert."}]
-        });
-        assert_eq!(
-            serde_json::to_value(&vertex_req.system_instruction).unwrap(),
-            serde_json::to_value(Some(expected_system_instruction)).unwrap()
-        );
-
-        let expected_contents = json!([
+            "parts": [{"text": "You are an expert in all things cats."}]
+        }),
+        json!([
             {
                 "role": "user",
                 "parts": [{"text": "Tell me about cats."}]
             }
-        ]);
+        ])
+    )]
+    #[case(
+        "should transform from system to user with multiple parts",
+        GenerateRequest {
+            messages: vec![
+                MessageData::system(vec![
+                    Part::text("You are an expert in all things animals."),
+                    Part::text("You love cats.")
+                ]),
+                MessageData::user(vec![Part::text("Tell me about dogs.")])
+            ],
+            ..Default::default()
+        },
+        json!({
+            "role": "user",
+            "parts": [
+                {"text": "You are an expert in all things animals."},
+                {"text": "You love cats."}
+            ]
+        }),
+        json!([
+            {
+                "role": "user",
+                "parts": [{"text": "Tell me about dogs."}]
+            }
+        ])
+    )]
+    fn test_system_instruction_transformation(
+        #[case] description: &str,
+        #[case] input_request: GenerateRequest,
+        #[case] expected_system_instruction: serde_json::Value,
+        #[case] expected_contents: serde_json::Value,
+    ) {
+        let vertex_req = to_vertex_request(&input_request).unwrap();
+
+        // Assert that the system instruction is correctly extracted and transformed.
+        let system_instruction_json = serde_json::to_value(vertex_req.system_instruction).unwrap();
+        let expected_si_json = serde_json::to_value(Some(expected_system_instruction)).unwrap();
         assert_eq!(
-            serde_json::to_value(&vertex_req.contents).unwrap(),
-            expected_contents
+            system_instruction_json, expected_si_json,
+            "Failed test (system_instruction): {}",
+            description
+        );
+
+        // Assert that the remaining messages (contents) are correct.
+        let contents_json = serde_json::to_value(vertex_req.contents).unwrap();
+        assert_eq!(
+            contents_json, expected_contents,
+            "Failed test (contents): {}",
+            description
         );
     }
 }
 
+// what is this?
 #[cfg(test)]
 mod to_genkit_response_tests {
     use super::*;
@@ -249,7 +293,7 @@ mod to_genkit_response_tests {
 
     #[rstest]
     #[case(
-        "should transform from system to user", // This description is from the user-provided file.
+        "should transform from system to user",
         vec![VertexCandidate {
             content: VertexContent {
                 role: "model".to_string(),
