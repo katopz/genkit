@@ -254,8 +254,10 @@ mod extract_cache_config_tests {
     use super::*;
     use genkit::model::{GenerateRequest, Role};
     use genkit::MessageData;
-    use genkit_vertexai::context_caching::types::{CacheConfig, CacheConfigDetails};
-    use genkit_vertexai::context_caching::utils::extract_cache_config;
+    use genkit_vertexai::context_caching::{
+        types::{CacheConfig, CacheConfigDetails},
+        utils::extract_cache_config,
+    };
 
     #[rstest]
     #[tokio::test]
@@ -315,5 +317,28 @@ mod extract_cache_config_tests {
             "Error message did not indicate a parsing failure: {}",
             err_string
         );
+    }
+}
+
+#[cfg(test)]
+/// calculateTTL
+mod calculate_ttl_tests {
+    use super::*;
+    use genkit_vertexai::context_caching::{
+        constants::DEFAULT_TTL,
+        types::{CacheConfig, CacheConfigDetails},
+        utils::calculate_ttl,
+    };
+
+    #[rstest]
+    #[tokio::test]
+    /// 'should return the default TTL when cacheConfig is true'
+    async fn test_return_default_ttl_when_cache_config_is_true() {
+        let cache_config_details = CacheConfigDetails {
+            cache_config: CacheConfig::Boolean(true),
+            end_of_cached_contents: 0,
+        };
+        let result = calculate_ttl(&cache_config_details);
+        assert_eq!(result, DEFAULT_TTL);
     }
 }
