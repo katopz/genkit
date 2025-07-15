@@ -47,11 +47,11 @@ pub struct CachedContent {
 }
 
 #[derive(Deserialize)]
-struct ListCachedContentsResponse {
+pub struct ListCachedContentsResponse {
     #[serde(rename = "cachedContents")]
-    cached_contents: Option<Vec<CachedContent>>,
+    pub cached_contents: Option<Vec<CachedContent>>,
     #[serde(rename = "nextPageToken")]
-    next_page_token: Option<String>,
+    pub next_page_token: Option<String>,
 }
 
 async fn create_cached_content(
