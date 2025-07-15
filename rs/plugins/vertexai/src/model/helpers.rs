@@ -354,25 +354,18 @@ pub fn clean_schema(mut schema: Value) -> Value {
         map.remove("additionalProperties");
 
         // Process the 'type' field.
-        if let Some(type_val) = map.get("type") {
+        if let Some(type_val) = map.get_mut("type") {
             if let Value::Array(arr) = type_val.clone() {
-                let was_nullable = arr.iter().any(|v| v.as_str() == Some("null"));
-
-                let mut new_types: Vec<Value> = arr
+                // Filter out "null" and simplify if possible.
+                let new_types: Vec<Value> = arr
                     .into_iter()
                     .filter(|v| v.as_str() != Some("null"))
                     .collect();
 
-                if was_nullable && !new_types.is_empty() {
-                    map.insert("nullable".to_string(), Value::Bool(true));
-                }
-
                 if new_types.len() == 1 {
-                    // Replace array with single string value
-                    map.insert("type".to_string(), new_types.remove(0));
+                    *type_val = new_types.into_iter().next().unwrap();
                 } else {
-                    // Replace array with filtered array
-                    map.insert("type".to_string(), Value::Array(new_types));
+                    *type_val = Value::Array(new_types);
                 }
             }
         }
@@ -383,35 +376,68 @@ pub fn clean_schema(mut schema: Value) -> Value {
                 *prop_schema = clean_schema(prop_schema.clone());
             }
         }
+        if let Some(items_schema) = map.get_mut("items") {
+            *items_schema = clean_schema(items_schema.clone());
+        }
     }
     schema
 }
 
-fn convert_schema_types(schema: &mut Value) {
-    if let Value::Object(obj) = schema {
-        if let Some(Value::String(s)) = obj.get_mut("type") {
+fn convert_schema_for_gemini(mut schema: Value) -> Value {
+    if let Value::Object(map) = &mut schema {
+        // 1. Handle nullable types and simplify the type array.
+        if let Some(Value::Array(arr)) = map.get("type").cloned() {
+            let was_nullable = arr.iter().any(|v| v.as_str() == Some("null"));
+            let mut new_types: Vec<Value> = arr
+                .into_iter()
+                .filter(|v| v.as_str() != Some("null"))
+                .collect();
+
+            if was_nullable && !new_types.is_empty() {
+                map.insert("nullable".to_string(), Value::Bool(true));
+            }
+
+            if new_types.len() == 1 {
+                map.insert("type".to_string(), new_types.remove(0));
+            } else {
+                map.insert("type".to_string(), Value::Array(new_types));
+            }
+        }
+
+        // 2. Uppercase the 'type' field string value.
+        if let Some(Value::String(s)) = map.get_mut("type") {
             *s = s.to_uppercase();
         }
 
-        if let Some(Value::Object(props)) = obj.get_mut("properties") {
-            props.iter_mut().for_each(|(_, prop_schema)| {
-                convert_schema_types(prop_schema);
-            });
+        // 3. Recurse into nested schemas.
+        if let Some(Value::Object(properties)) = map.get_mut("properties") {
+            for (_, prop_schema) in properties {
+                *prop_schema = convert_schema_for_gemini(prop_schema.clone());
+            }
         }
-
-        if let Some(items) = obj.get_mut("items") {
-            convert_schema_types(items);
+        if let Some(items_schema) = map.get_mut("items") {
+            *items_schema = convert_schema_for_gemini(items_schema.clone());
         }
     }
+    schema
 }
 
 /// Converts a Genkit ToolDefinition into a Vertex AI-compatible tool definition.
 pub fn to_gemini_tool(def: &genkit::ToolDefinition) -> Result<VertexFunctionDeclaration> {
-    let mut params = clean_schema(def.input_schema.clone().unwrap_or(Value::Null));
-    convert_schema_types(&mut params);
+    let mut params = def.input_schema.clone().unwrap_or(Value::Null);
+
+    // First, clean the schema to remove non-API properties.
+    if let Value::Object(map) = &mut params {
+        map.remove("$schema");
+        map.remove("additionalProperties");
+    }
+
+    // Then, convert the schema to the Gemini-specific format.
+    let final_params = convert_schema_for_gemini(params);
+
     Ok(VertexFunctionDeclaration {
         name: def.name.clone(),
         description: def.description.clone(),
-        parameters: Some(params),
+        parameters: Some(final_params),
     })
 }
