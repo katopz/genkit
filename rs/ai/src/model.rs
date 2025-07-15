@@ -41,6 +41,7 @@ use std::marker::PhantomData;
 use std::ops::Deref;
 use std::pin::Pin;
 use std::sync::Arc;
+use strum::{Display, EnumString};
 
 use crate::{tool::ToolDefinition, Document, MessageData, Part, Role};
 
@@ -138,7 +139,7 @@ pub struct GenerateRequest {
 }
 
 /// The reason why a model finished generating a response.
-#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, PartialEq)]
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, PartialEq, EnumString, Display)]
 #[serde(rename_all = "SCREAMING_SNAKE_CASE")]
 #[derive(Default)]
 pub enum FinishReason {

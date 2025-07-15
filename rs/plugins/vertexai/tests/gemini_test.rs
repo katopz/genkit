@@ -18,7 +18,7 @@
 //! on Vertex AI.
 
 use genkit::{
-    model::GenerateRequest,
+    model::{FinishReason, GenerateRequest},
     {Media, MessageData, Part, ToolResponse},
 };
 use genkit_vertexai::model::gemini::{
@@ -26,12 +26,12 @@ use genkit_vertexai::model::gemini::{
 };
 use genkit_vertexai::model::helpers::{to_genkit_response, to_vertex_request};
 use rstest::rstest;
+use serde::Serialize;
 use serde_json::json;
 
 #[cfg(test)]
 /// toGeminiMessages
 mod to_gemini_message_tests {
-
     use super::*;
 
     #[rstest]
@@ -50,7 +50,6 @@ mod to_gemini_message_tests {
     )]
     #[case(
         "should transform genkit message (tool request content) correctly",
-        // A tool request is sent from the model to the client.
         GenerateRequest {
             messages: vec![MessageData::model(vec![Part::tool_request(
                 "tellAFunnyJoke",
@@ -72,8 +71,7 @@ mod to_gemini_message_tests {
         })
     )]
     #[case(
-        "should transform genkit message (single tool response content) correctly",
-        // A tool response is sent from the client (as role 'tool') to the model.
+        "should transform genkit message (tool response content) correctly",
         GenerateRequest {
             messages: vec![MessageData::tool(vec![
                 Part::tool_response(
@@ -86,7 +84,7 @@ mod to_gemini_message_tests {
         },
         json!({
             "contents": [{
-                "role": "function", // 'tool' role maps to 'function' in Vertex API
+                "role": "function",
                 "parts": [
                     {
                         "functionResponse": {
@@ -197,7 +195,6 @@ mod to_gemini_message_tests {
 #[cfg(test)]
 /// toGeminiSystemInstruction
 mod to_gemini_system_instruction_tests {
-
     use super::*;
 
     #[test]
@@ -238,9 +235,19 @@ mod to_gemini_system_instruction_tests {
 mod to_genkit_response_tests {
     use super::*;
 
+    // A temporary struct to help with comparing the finishReason as a lowercase string,
+    // which matches the format of the ts test case.
+    #[derive(Serialize, Debug)]
+    #[serde(rename_all = "camelCase")]
+    struct ComparableCandidate {
+        index: u32,
+        message: MessageData,
+        finish_reason: String,
+    }
+
     #[rstest]
     #[case(
-        "should transform simple text response",
+        "should transform from system to user", // This description is from the user-provided file.
         vec![VertexCandidate {
             content: VertexContent {
                 role: "model".to_string(),
@@ -269,7 +276,21 @@ mod to_genkit_response_tests {
         let genkit_response =
             to_genkit_response(&GenerateRequest::default(), vertex_response).unwrap();
 
-        let mut result_json = serde_json::to_value(genkit_response.candidates).unwrap();
+        let comparable_result: Vec<ComparableCandidate> = genkit_response
+            .candidates
+            .into_iter()
+            .map(|c| ComparableCandidate {
+                index: c.index,
+                message: c.message,
+                finish_reason: c
+                    .finish_reason
+                    .unwrap_or(FinishReason::Unknown)
+                    .to_string()
+                    .to_lowercase(),
+            })
+            .collect();
+
+        let mut result_json = serde_json::to_value(comparable_result).unwrap();
 
         // Strip fields that are not relevant for this comparison or are non-deterministic.
         if let Some(candidates_arr) = result_json.as_array_mut() {
@@ -285,7 +306,7 @@ mod to_genkit_response_tests {
                                         if let Some(item_obj) = item.as_object_mut() {
                                             if let Some(tr) = item_obj.get_mut("toolRequest") {
                                                 if let Some(tr_obj) = tr.as_object_mut() {
-                                                    tr_obj.remove("ref");
+                                                    tr_obj.remove("ref_id");
                                                 }
                                             }
                                         }
