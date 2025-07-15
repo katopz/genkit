@@ -354,13 +354,25 @@ pub fn clean_schema(mut schema: Value) -> Value {
         map.remove("additionalProperties");
 
         // Process the 'type' field.
-        if let Some(type_val) = map.get_mut("type") {
-            if let Value::Array(arr) = type_val {
-                // Remove 'null' from the type array.
-                arr.retain(|v| v != "null");
-                // If only one type remains, simplify it to a string.
-                if arr.len() == 1 {
-                    *type_val = arr.pop().unwrap();
+        if let Some(type_val) = map.get("type") {
+            if let Value::Array(arr) = type_val.clone() {
+                let was_nullable = arr.iter().any(|v| v.as_str() == Some("null"));
+
+                let mut new_types: Vec<Value> = arr
+                    .into_iter()
+                    .filter(|v| v.as_str() != Some("null"))
+                    .collect();
+
+                if was_nullable && !new_types.is_empty() {
+                    map.insert("nullable".to_string(), Value::Bool(true));
+                }
+
+                if new_types.len() == 1 {
+                    // Replace array with single string value
+                    map.insert("type".to_string(), new_types.remove(0));
+                } else {
+                    // Replace array with filtered array
+                    map.insert("type".to_string(), Value::Array(new_types));
                 }
             }
         }
@@ -373,4 +385,33 @@ pub fn clean_schema(mut schema: Value) -> Value {
         }
     }
     schema
+}
+
+fn convert_schema_types(schema: &mut Value) {
+    if let Value::Object(obj) = schema {
+        if let Some(Value::String(s)) = obj.get_mut("type") {
+            *s = s.to_uppercase();
+        }
+
+        if let Some(Value::Object(props)) = obj.get_mut("properties") {
+            props.iter_mut().for_each(|(_, prop_schema)| {
+                convert_schema_types(prop_schema);
+            });
+        }
+
+        if let Some(items) = obj.get_mut("items") {
+            convert_schema_types(items);
+        }
+    }
+}
+
+/// Converts a Genkit ToolDefinition into a Vertex AI-compatible tool definition.
+pub fn to_gemini_tool(def: &genkit::ToolDefinition) -> Result<VertexFunctionDeclaration> {
+    let mut params = clean_schema(def.input_schema.clone().unwrap_or(Value::Null));
+    convert_schema_types(&mut params);
+    Ok(VertexFunctionDeclaration {
+        name: def.name.clone(),
+        description: def.description.clone(),
+        parameters: Some(params),
+    })
 }

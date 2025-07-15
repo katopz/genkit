@@ -676,3 +676,117 @@ mod clean_schema_tests {
         assert_eq!(cleaned, expected);
     }
 }
+
+#[cfg(test)]
+/// toGeminiTool
+mod to_gemini_tool_tests {
+    use genkit::ToolDefinition;
+    use genkit_vertexai::model::helpers::to_gemini_tool;
+    use serde_json::json;
+
+    #[test]
+    fn test_converts_schema_correctly() {
+        let tool_def = ToolDefinition {
+            name: "foo".to_string(),
+            description: "tool foo".to_string(),
+            input_schema: Some(json!({
+                "type": "object",
+                "properties": {
+                    "simpleString": {
+                        "type": ["string", "null"],
+                        "description": "a string"
+                    },
+                    "simpleNumber": {
+                        "type": "number",
+                        "description": "a number"
+                    },
+                    "simpleBoolean": {
+                        "type": "boolean",
+                        "description": "a boolean"
+                    },
+                    "simpleArray": {
+                        "type": "array",
+                        "description": "an array",
+                        "items": {
+                            "type": "string"
+                        }
+                    },
+                    "simpleEnum": {
+                        "type": "string",
+                        "description": "an enum",
+                        "enum": ["choice_a", "choice_b"]
+                    }
+                },
+                "required": ["simpleString", "simpleNumber"]
+            })),
+            ..Default::default()
+        };
+
+        let result = to_gemini_tool(&tool_def).unwrap();
+        let result_json = serde_json::to_value(result).unwrap();
+
+        let expected_json = json!({
+            "name": "foo",
+            "description": "tool foo",
+            "parameters": {
+                "type": "OBJECT",
+                "properties": {
+                    "simpleString": {
+                        "type": "STRING",
+                        "description": "a string",
+                        "nullable": true
+                    },
+                    "simpleNumber": {
+                        "type": "NUMBER",
+                        "description": "a number"
+                    },
+                    "simpleBoolean": {
+                        "type": "BOOLEAN",
+                        "description": "a boolean"
+                    },
+                    "simpleArray": {
+                        "type": "ARRAY",
+                        "description": "an array",
+                        "items": {
+                            "type": "STRING"
+                        }
+                    },
+                    "simpleEnum": {
+                        "type": "STRING",
+                        "description": "an enum",
+                        "enum": ["choice_a", "choice_b"]
+                    }
+                },
+                "required": ["simpleString", "simpleNumber"]
+            }
+        });
+
+        // The properties can be in a different order, so we need to compare them carefully.
+        let result_props = result_json["parameters"]["properties"].as_object().unwrap();
+        let expected_props = expected_json["parameters"]["properties"]
+            .as_object()
+            .unwrap();
+
+        assert_eq!(result_props.len(), expected_props.len());
+        for (key, val) in expected_props {
+            assert_eq!(
+                result_props.get(key).unwrap(),
+                val,
+                "Mismatch in property: {}",
+                key
+            );
+        }
+
+        // Check other fields
+        assert_eq!(result_json["name"], expected_json["name"]);
+        assert_eq!(result_json["description"], expected_json["description"]);
+        assert_eq!(
+            result_json["parameters"]["type"],
+            expected_json["parameters"]["type"]
+        );
+        assert_eq!(
+            result_json["parameters"]["required"],
+            expected_json["parameters"]["required"]
+        );
+    }
+}

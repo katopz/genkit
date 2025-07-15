@@ -35,7 +35,7 @@ use std::sync::Arc;
 use thiserror::Error;
 
 /// A definition of a tool that can be provided to a model.
-#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, PartialEq)]
+#[derive(Default, Debug, Clone, Serialize, Deserialize, JsonSchema, PartialEq)]
 #[serde(rename_all = "camelCase")]
 pub struct ToolDefinition {
     pub name: String,
