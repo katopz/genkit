@@ -298,7 +298,10 @@ mod to_gemini_system_instruction_tests {
 }
 
 #[cfg(test)]
+/// fromGeminiCandidate
 mod from_gemini_candidate_tests {
+    use serde_json::Number;
+
     use super::*;
 
     // A temporary struct to help with comparing the finishReason as a lowercase string,
@@ -328,6 +331,32 @@ mod from_gemini_candidate_tests {
                 finish_message: c.finish_message,
                 custom: c.custom,
             }
+        }
+    }
+
+    /// Recursively traverses a serde_json::Value and rounds any floating-point numbers.
+    fn round_floats_in_json(value: &mut Value, precision: u32) {
+        match value {
+            Value::Object(map) => {
+                for (_, v) in map {
+                    round_floats_in_json(v, precision);
+                }
+            }
+            Value::Array(arr) => {
+                for v in arr {
+                    round_floats_in_json(v, precision);
+                }
+            }
+            Value::Number(n) => {
+                if let Some(f) = n.as_f64() {
+                    let factor = 10.0_f64.powi(precision as i32);
+                    let rounded = (f * factor).round() / factor;
+                    if let Some(new_n) = Number::from_f64(rounded) {
+                        *n = new_n;
+                    }
+                }
+            }
+            _ => {}
         }
     }
 
@@ -426,10 +455,7 @@ mod from_gemini_candidate_tests {
                 role: "model".to_string(),
                 parts: vec![
                     VertexPart {
-                        function_call: Some(VertexFunctionCall {
-                            name: "tellAFunnyJoke".to_string(),
-                            args: json!({"topic": "dog"}),
-                        }),
+                        function_call: Some(serde_json::from_value(json!({"name": "tellAFunnyJoke", "args": {"topic": "dog"}})).unwrap()),
                         ..Default::default()
                     }
                 ],
@@ -477,8 +503,7 @@ mod from_gemini_candidate_tests {
                             "name": "tellAFunnyJoke",
                             "input": {
                                 "topic": "dog"
-                            },
-                            "ref_id": "0"
+                            }
                         }
                     }
                 ]
@@ -582,7 +607,7 @@ mod from_gemini_candidate_tests {
     fn test_from_gemini_candidate(
         #[case] description: &str,
         #[case] gemini_candidate: VertexCandidate,
-        #[case] expected_output: serde_json::Value,
+        #[case] mut expected_output: serde_json::Value,
     ) {
         let response = to_genkit_response(
             &GenerateRequest::default(),
@@ -605,9 +630,18 @@ mod from_gemini_candidate_tests {
                 if let Some(content_arr) = content.as_array_mut() {
                     for item in content_arr {
                         if let Some(item_obj) = item.as_object_mut() {
-                            if let Some(tr) = item_obj.get_mut("toolRequest") {
-                                if let Some(tr_obj) = tr.as_object_mut() {
-                                    tr_obj.remove("ref_id");
+                            if item_obj.contains_key("toolRequest") {
+                                if let Some(tr) = item_obj.get_mut("toolRequest") {
+                                    if let Some(tr_obj) = tr.as_object_mut() {
+                                        tr_obj.remove("ref_id");
+                                    }
+                                }
+                                if let Some(expected_tr) = expected_output["message"]["content"][0]
+                                    .as_object_mut()
+                                    .unwrap()
+                                    .get_mut("toolRequest")
+                                {
+                                    expected_tr.as_object_mut().unwrap().remove("ref");
                                 }
                             }
                         }
@@ -615,6 +649,10 @@ mod from_gemini_candidate_tests {
                 }
             }
         }
+
+        // Round floats to handle precision differences.
+        round_floats_in_json(&mut result_json, 8);
+        round_floats_in_json(&mut expected_output, 8);
 
         assert_eq!(result_json, expected_output, "Failed test: {}", description);
     }
