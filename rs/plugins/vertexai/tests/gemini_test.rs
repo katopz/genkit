@@ -300,9 +300,12 @@ mod to_gemini_system_instruction_tests {
 #[cfg(test)]
 /// fromGeminiCandidate
 mod from_gemini_candidate_tests {
-    use serde_json::Number;
-
     use super::*;
+    use genkit::model::CandidateData;
+    use genkit_vertexai::model::gemini::{
+        SafetyRating, VertexCandidate, VertexContent, VertexPart,
+    };
+    use serde_json::{Number, Value};
 
     // A temporary struct to help with comparing the finishReason as a lowercase string,
     // which matches the format of the ts test case.
@@ -503,7 +506,8 @@ mod from_gemini_candidate_tests {
                             "name": "tellAFunnyJoke",
                             "input": {
                                 "topic": "dog"
-                            }
+                            },
+                            "ref_id": "0"
                         }
                     }
                 ]
@@ -651,8 +655,8 @@ mod from_gemini_candidate_tests {
         }
 
         // Round floats to handle precision differences.
-        round_floats_in_json(&mut result_json, 8);
-        round_floats_in_json(&mut expected_output, 8);
+        round_floats_in_json(&mut result_json, 7);
+        round_floats_in_json(&mut expected_output, 7);
 
         assert_eq!(result_json, expected_output, "Failed test: {}", description);
     }

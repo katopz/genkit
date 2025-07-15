@@ -277,7 +277,7 @@ pub fn to_genkit_response(
                             map
                         });
                         Ok(genkit::document::Part {
-                            reasoning: part.text,
+                            reasoning: part.text.or_else(|| Some("".to_string())),
                             metadata,
                             ..Default::default()
                         })
