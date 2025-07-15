@@ -245,3 +245,75 @@ mod lookup_context_cache_tests {
         assert!(result.is_none());
     }
 }
+
+#[cfg(test)]
+/// extractCacheConfig
+mod extract_cache_config_tests {
+    use std::collections::HashMap;
+
+    use super::*;
+    use genkit::model::{GenerateRequest, Role};
+    use genkit::MessageData;
+    use genkit_vertexai::context_caching::types::{CacheConfig, CacheConfigDetails};
+    use genkit_vertexai::context_caching::utils::extract_cache_config;
+
+    #[rstest]
+    #[tokio::test]
+    /// 'should correctly extract cache config when metadata.cache is present'
+    async fn test_extract_cache_config_first_message() {
+        let mut metadata_map = HashMap::new();
+        metadata_map.insert("cache".to_string(), json!({ "ttlSeconds": 300 }));
+
+        let request = GenerateRequest {
+            messages: vec![
+                MessageData {
+                    role: Role::User,
+                    content: vec![],
+                    metadata: Some(metadata_map),
+                },
+                MessageData {
+                    role: Role::Model,
+                    content: vec![],
+                    metadata: Some(HashMap::new()), // empty metadata
+                },
+            ],
+            ..Default::default()
+        };
+
+        let result = extract_cache_config(&request).unwrap().unwrap();
+        let expected = CacheConfigDetails {
+            end_of_cached_contents: 0,
+            cache_config: CacheConfig::Object {
+                ttl_seconds: Some(300),
+            },
+        };
+
+        assert_eq!(result, expected);
+    }
+
+    #[rstest]
+    #[tokio::test]
+    /// 'should handle invalid metadata.cache structures gracefully'
+    async fn test_extract_invalid_cache_config() {
+        let mut metadata_map = HashMap::new();
+        metadata_map.insert("cache".to_string(), json!("invalid"));
+
+        let request = GenerateRequest {
+            messages: vec![MessageData {
+                role: Role::User,
+                content: vec![],
+                metadata: Some(metadata_map),
+            }],
+            ..Default::default()
+        };
+
+        let result = extract_cache_config(&request);
+        assert!(result.is_err());
+        let err_string = result.unwrap_err().to_string();
+        assert!(
+            err_string.contains("Failed to parse cache config"),
+            "Error message did not indicate a parsing failure: {}",
+            err_string
+        );
+    }
+}
