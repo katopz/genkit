@@ -136,14 +136,12 @@ pub fn to_vertex_request(req: &GenerateRequest) -> Result<VertexGeminiRequest> {
             let declarations = tool_defs
                 .iter()
                 .map(|def| {
-                    let mut params = def.input_schema.clone();
-                    if let Some(Value::Object(map)) = params.as_mut() {
-                        map.remove("$schema");
-                    }
+                    let cleaned_params =
+                        clean_schema(def.input_schema.clone().unwrap_or(Value::Null));
                     VertexFunctionDeclaration {
                         name: def.name.clone(),
                         description: def.description.clone(),
-                        parameters: params,
+                        parameters: Some(cleaned_params),
                     }
                 })
                 .collect();
@@ -346,4 +344,33 @@ pub fn to_genkit_response(
         usage,
         ..Default::default()
     })
+}
+
+/// Cleans a JSON schema by removing unwanted properties and stripping "null" from type arrays.
+pub fn clean_schema(mut schema: Value) -> Value {
+    if let Value::Object(map) = &mut schema {
+        // Remove unwanted top-level properties.
+        map.remove("$schema");
+        map.remove("additionalProperties");
+
+        // Process the 'type' field.
+        if let Some(type_val) = map.get_mut("type") {
+            if let Value::Array(arr) = type_val {
+                // Remove 'null' from the type array.
+                arr.retain(|v| v != "null");
+                // If only one type remains, simplify it to a string.
+                if arr.len() == 1 {
+                    *type_val = arr.pop().unwrap();
+                }
+            }
+        }
+
+        // Recursively clean nested schemas in 'properties'.
+        if let Some(Value::Object(properties)) = map.get_mut("properties") {
+            for (_, prop_schema) in properties {
+                *prop_schema = clean_schema(prop_schema.clone());
+            }
+        }
+    }
+    schema
 }

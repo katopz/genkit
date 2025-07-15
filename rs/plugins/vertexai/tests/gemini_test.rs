@@ -633,3 +633,46 @@ mod from_gemini_candidate_tests {
         assert_eq!(result_json, expected_output, "Failed test: {}", description);
     }
 }
+
+#[cfg(test)]
+/// cleanSchema
+mod clean_schema_tests {
+    use genkit_vertexai::model::helpers::clean_schema;
+
+    use super::*;
+
+    #[test]
+    fn test_strips_nulls_from_type() {
+        let schema = json!({
+            "type": "object",
+            "properties": {
+                "title": {
+                    "type": "string"
+                },
+                "subtitle": {
+                    "type": ["string", "null"]
+                }
+            },
+            "required": ["title"],
+            "additionalProperties": true,
+            "$schema": "http://json-schema.org/draft-07/schema#"
+        });
+
+        let cleaned = clean_schema(schema);
+
+        let expected = json!({
+            "type": "object",
+            "properties": {
+                "title": {
+                    "type": "string"
+                },
+                "subtitle": {
+                    "type": "string"
+                }
+            },
+            "required": ["title"]
+        });
+
+        assert_eq!(cleaned, expected);
+    }
+}
