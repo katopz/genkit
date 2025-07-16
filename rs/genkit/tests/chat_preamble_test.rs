@@ -461,7 +461,6 @@ mod preamble_test {
     }
 
     #[tokio::test]
-    #[ignore = "Ignoring until history can be provided as part of the preamble during chat creation."]
     // 'initializes chat with history in preamble'
     async fn test_initializes_chat_with_history_in_preamble() -> Result<()> {
         let (genkit, _last_request) = helpers::genkit_instance_for_test().await;
