@@ -298,7 +298,7 @@ where
     }
 
     Ok(ResolvedToolRequests {
-        revised_model_message: Some(revised_model_message),
+        revised_model_message: None,
         tool_message: Some(MessageData {
             role: Role::Tool,
             content: response_parts,

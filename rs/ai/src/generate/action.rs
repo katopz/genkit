@@ -573,15 +573,7 @@ where
         .await?;
 
         // 9. Check for interrupts and return early if found.
-        if let Some(revised_with_interrupt) =
-            tool_results.revised_model_message.as_ref().filter(|m| {
-                m.content.iter().any(|p| {
-                    p.metadata
-                        .as_ref()
-                        .is_some_and(|meta| meta.contains_key("interrupt"))
-                })
-            })
-        {
+        if let Some(revised_with_interrupt) = tool_results.revised_model_message {
             let mut final_response = response_data;
             if let Some(candidate) = final_response.candidates.get_mut(0) {
                 candidate.message = revised_with_interrupt.clone();
@@ -595,11 +587,7 @@ where
         // 10. If no interrupts, update the message history for the next turn.
         let mut messages = request.messages.take().unwrap_or_default();
 
-        if let Some(revised_msg) = tool_results.revised_model_message {
-            messages.push(revised_msg);
-        } else {
-            messages.push(generated_message);
-        }
+        messages.push(generated_message);
 
         let mut next_message_index = message_index + 1;
         if let Some(tool_msg) = &tool_results.tool_message {
