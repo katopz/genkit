@@ -43,6 +43,7 @@ macro_rules! impl_register {
 }
 
 use crate::action::{Action, ActionMetadata, ActionRunOptions, StreamingResponse};
+use crate::context::ActionContext;
 use crate::error::{Error, Result};
 use crate::runtime;
 use crate::schema::{self, parse_schema, ProvidedSchema};
@@ -92,17 +93,13 @@ pub enum ActionType {
 #[async_trait]
 pub trait ErasedAction: Send + Sync {
     /// Executes the action with a raw JSON value and optional context.
-    async fn run_http_json(
-        &self,
-        input: Value,
-        context: Option<crate::context::ActionContext>,
-    ) -> Result<Value>;
+    async fn run_http_json(&self, input: Value, context: Option<ActionContext>) -> Result<Value>;
 
     /// Executes a streaming action with a raw JSON value.
     fn stream_http_json(
         &self,
         input: Value,
-        context: Option<crate::context::ActionContext>,
+        context: Option<ActionContext>,
     ) -> Result<StreamingResponse<Value, Value>>;
     /// Returns the name of the action.
     fn name(&self) -> &str;
@@ -121,11 +118,7 @@ where
     O: Serialize + JsonSchema + Send + Sync + 'static,
     S: Serialize + JsonSchema + Send + Sync + Clone + 'static,
 {
-    async fn run_http_json(
-        &self,
-        input: Value,
-        context: Option<crate::context::ActionContext>,
-    ) -> Result<Value> {
+    async fn run_http_json(&self, input: Value, context: Option<ActionContext>) -> Result<Value> {
         let parsed_input: I = match self.meta.input_schema.clone() {
             Some(schema_def) => parse_schema(input, ProvidedSchema::FromType(schema_def))?,
             None => serde_json::from_value(input).map_err(|e| {
@@ -152,7 +145,7 @@ where
     fn stream_http_json(
         &self,
         input: Value,
-        context: Option<crate::context::ActionContext>,
+        context: Option<ActionContext>,
     ) -> Result<StreamingResponse<Value, Value>> {
         let parsed_input: I = match self.meta.input_schema.clone() {
             Some(schema_def) => parse_schema(input, ProvidedSchema::FromType(schema_def))?,
@@ -221,6 +214,8 @@ struct RegistryState {
     schemas: HashMap<String, schema::ProvidedSchema>,
     values: HashMap<String, Arc<dyn Any + Send + Sync>>,
     parent: Option<Registry>,
+    /** Additional runtime context data for flows and tools. */
+    context: Option<ActionContext>,
     default_model: Option<String>,
     plugins_initialized: bool,
 }
@@ -261,6 +256,17 @@ impl Registry {
             ..Default::default()
         }));
         Self { state }
+    }
+
+    /// Sets a global context on the registry. This context will be available to all
+    /// actions unless overridden by a more specific context passed to a call.
+    pub fn set_context(&self, context: ActionContext) {
+        self.state.lock().unwrap().context = Some(context);
+    }
+
+    /// Gets the global context from the registry, if it has been set.
+    pub fn get_context(&self) -> Option<ActionContext> {
+        self.state.lock().unwrap().context.clone()
     }
 
     /// Initializes all registered plugins if they haven't been already.

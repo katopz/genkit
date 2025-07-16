@@ -25,6 +25,7 @@ mod test {
         },
         context::ActionContext,
         registry::{ActionType, Registry},
+        Action,
     };
     use rstest::*;
     use schemars::JsonSchema;
@@ -177,6 +178,91 @@ mod test {
             })
         );
         assert_eq!(*chunks.lock().unwrap(), vec![1, 2, 3]);
+    }
+
+    #[rstest]
+    #[tokio::test]
+    #[ignore = "TODO"]
+    /// 'runs the action with context plus registry global context'
+    async fn test_run_with_global_and_local_context(registry: Registry) {
+        let passed_context_store = Arc::new(Mutex::new(None));
+        let called_with_streaming_requested_store = Arc::new(Mutex::new(false));
+
+        let passed_context_store_cloned = passed_context_store.clone();
+        let called_with_streaming_requested_store_cloned =
+            called_with_streaming_requested_store.clone();
+        let action: Action<String, i32, i32> = define_action(
+            &registry,
+            ActionType::Util,
+            "foo",
+            move |input: String, args: ActionFnArg<i32>| {
+                let passed_context_store = passed_context_store_cloned.clone();
+                let called_with_streaming_requested_store =
+                    called_with_streaming_requested_store_cloned.clone();
+                async move {
+                    *passed_context_store.lock().unwrap() = args.context;
+                    *called_with_streaming_requested_store.lock().unwrap() =
+                        args.streaming_requested;
+                    let _ = args.chunk_sender.send(1);
+                    let _ = args.chunk_sender.send(2);
+                    let _ = args.chunk_sender.send(3);
+                    Ok(input.len() as i32)
+                }
+            },
+        );
+
+        // Test non-streaming case
+        let mut global_context = ActionContext::default();
+        global_context
+            .additional_context
+            .insert("bar".to_string(), json!("baz"));
+        registry.set_context(global_context);
+
+        let mut local_context = ActionContext::default();
+        local_context
+            .additional_context
+            .insert("foo".to_string(), json!("bar"));
+        // local should overwrite global
+        local_context
+            .additional_context
+            .insert("bar".to_string(), json!("overwritten"));
+
+        let options = ActionRunOptions {
+            context: Some(local_context),
+            ..Default::default()
+        };
+        action.run("1234".to_string(), Some(options)).await.unwrap();
+
+        assert!(!*called_with_streaming_requested_store.lock().unwrap());
+
+        let final_context = passed_context_store.lock().unwrap().clone().unwrap();
+        assert_eq!(final_context.get("foo"), Some(&json!("bar")));
+        assert_eq!(final_context.get("bar"), Some(&json!("overwritten")));
+
+        // Test streaming case
+        let mut global_context_stream = ActionContext::default();
+        global_context_stream
+            .additional_context
+            .insert("bar2".to_string(), json!("baz2"));
+        registry.set_context(global_context_stream);
+
+        let mut local_context_stream = ActionContext::default();
+        local_context_stream
+            .additional_context
+            .insert("foo2".to_string(), json!("bar2"));
+
+        let options_stream = ActionRunOptions {
+            context: Some(local_context_stream),
+            ..Default::default()
+        };
+        let stream_response = action.stream("1234".to_string(), Some(options_stream));
+        stream_response.output.await.unwrap();
+
+        assert!(*called_with_streaming_requested_store.lock().unwrap());
+
+        let final_context_stream = passed_context_store.lock().unwrap().clone().unwrap();
+        assert_eq!(final_context_stream.get("foo2"), Some(&json!("bar2")));
+        assert_eq!(final_context_stream.get("bar2"), Some(&json!("baz2")));
     }
 
     #[rstest]
