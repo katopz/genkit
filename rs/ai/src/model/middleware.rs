@@ -185,11 +185,20 @@ pub fn simulate_system_prompt(options: Option<SystemPromptSimulateOptions>) -> M
             let preface = preface.clone();
             let acknowledgement = acknowledgement.clone();
             Box::pin(async move {
-                if let Some(pos) = req
-                    .messages
-                    .iter()
-                    .position(|m| m.role == crate::model::Role::System)
-                {
+                if let Some(pos) = req.messages.iter().position(|m| {
+                    if m.role != crate::model::Role::System {
+                        return false;
+                    }
+                    // Don't simulate if it's a preamble message from the Chat API.
+                    // The Chat API handles its own preamble logic.
+                    if m.metadata
+                        .as_ref()
+                        .is_some_and(|meta| meta.contains_key("preamble"))
+                    {
+                        return false;
+                    }
+                    true
+                }) {
                     let system_message = req.messages.remove(pos);
                     // Create a new Vec<Part> for the user message content.
                     // Start with the preface as its own Part.

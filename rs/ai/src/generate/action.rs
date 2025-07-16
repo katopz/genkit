@@ -27,7 +27,7 @@ use crate::model::{
     middleware::{ModelMiddleware, ModelMiddlewareNext},
     GenerateRequest, GenerateResponseChunkData, GenerateResponseData,
 };
-use crate::{formats, to_generate_request, Document, Model};
+use crate::{formats, to_generate_request, Document, Model, Role};
 use genkit_core::action::{Action, ActionBuilder, ActionFnArg, StreamingCallback};
 use genkit_core::error::{Error, Result};
 use genkit_core::registry::{ActionType, ErasedAction, Registry};
@@ -317,6 +317,57 @@ async fn run_model_via_middleware(
     chain(request).await
 }
 
+fn apply_transfer_preamble<O>(
+    mut request: GenerateOptions<O>,
+    transfer_preamble: Option<GenerateOptions<O>>,
+) -> GenerateOptions<O>
+where
+    O: Default,
+{
+    let Some(preamble) = transfer_preamble else {
+        return request;
+    };
+
+    let mut new_messages = Vec::new();
+    // Add new preamble messages, marking them as such.
+    if let Some(preamble_messages) = preamble.messages {
+        new_messages.extend(preamble_messages.into_iter().map(|mut msg| {
+            msg.metadata
+                .get_or_insert_with(Default::default)
+                .insert("preamble".to_string(), Value::Bool(true));
+            msg
+        }));
+    }
+
+    // Add existing messages, filtering out any that were previously a preamble.
+    // Also, if the new preamble has a system prompt, filter out old system prompts.
+    let has_new_system_prompt = new_messages.iter().any(|m| m.role == Role::System);
+    if let Some(existing_messages) = request.messages {
+        new_messages.extend(existing_messages.into_iter().filter(|m| {
+            let is_preamble = m
+                .metadata
+                .as_ref()
+                .is_some_and(|meta| meta.get("preamble").is_some());
+            let is_old_system = has_new_system_prompt && m.role == Role::System;
+            !is_preamble && !is_old_system
+        }));
+    }
+    request.messages = Some(new_messages);
+
+    // Override other options from the new preamble.
+    if preamble.tool_choice.is_some() {
+        request.tool_choice = preamble.tool_choice;
+    }
+    if preamble.tools.is_some() {
+        request.tools = preamble.tools;
+    }
+    if preamble.config.is_some() {
+        request.config = preamble.config;
+    }
+
+    request
+}
+
 /// The core, private implementation of the generation logic.
 #[allow(clippy::type_complexity)]
 pub(super) fn generate_internal<O>(
@@ -570,12 +621,15 @@ where
 
         request.messages = Some(messages);
 
+        // Apply the preamble from a potential prompt tool to the next request.
+        let next_request = apply_transfer_preamble(request, tool_results.transfer_preamble);
+
         if tool_results.tool_message.is_some() {
             // 11. Recursive call for the next turn.
             generate_internal(
                 registry,
                 GenerateHelperOptions {
-                    raw_request: request,
+                    raw_request: next_request,
                     middleware,
                     current_turn: current_turn + 1,
                     message_index: next_message_index,

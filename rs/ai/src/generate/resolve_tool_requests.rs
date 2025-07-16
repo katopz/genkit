@@ -25,24 +25,25 @@ use crate::model::GenerateResponseData;
 use crate::tool::{self, is_tool_request};
 use genkit_core::context::ActionContext;
 use genkit_core::error::{Error, Result};
-use genkit_core::registry::{ErasedAction, Registry};
-use serde_json::Value;
+use genkit_core::registry::{ActionType, ErasedAction, Registry};
+use serde::de::DeserializeOwned;
+use serde_json::{json, Value};
 use std::collections::HashMap;
 use std::sync::Arc;
 
 /// The result of resolving a single tool request.
-/// In TS, this could also contain a `preamble`, which is GenerateOptions for a prompt tool.
-/// This is not supported in the Rust implementation yet.
 #[derive(Default)]
-pub struct ResolvedToolRequest {
+pub struct ResolvedToolRequest<O: 'static> {
     pub response: Option<ToolResponsePart>,
     pub interrupt: Option<ToolRequestPart>,
+    pub preamble: Option<GenerateOptions<O>>,
 }
 
 /// The result of resolving all tool requests in a message.
-pub struct ResolvedToolRequests {
+pub struct ResolvedToolRequests<O: 'static> {
     pub revised_model_message: Option<MessageData>,
     pub tool_message: Option<MessageData>,
+    pub transfer_preamble: Option<GenerateOptions<O>>,
 }
 
 /// The result of applying `ResumeOptions` to a generation request.
@@ -97,11 +98,14 @@ pub fn to_pending_output(part: &ToolRequestPart, response: &ToolResponsePart) ->
 }
 
 /// Resolves a single tool request by executing it.
-pub async fn resolve_tool_request<O: Default + Send + Sync + 'static>(
+pub async fn resolve_tool_request<O>(
     raw_request: &GenerateOptions<O>,
     part: &ToolRequestPart,
     tool_map: &HashMap<String, Arc<dyn ErasedAction>>,
-) -> Result<ResolvedToolRequest> {
+) -> Result<ResolvedToolRequest<O>>
+where
+    O: Default + Send + Sync + 'static + DeserializeOwned,
+{
     let tool_request = part
         .tool_request
         .as_ref()
@@ -111,9 +115,46 @@ pub async fn resolve_tool_request<O: Default + Send + Sync + 'static>(
         .get(&tool_request.name)
         .ok_or_else(|| Error::new_internal(format!("Tool '{}' not found", &tool_request.name)))?;
 
-    // TODO: In TS, this checks `isPromptAction` and can return a `preamble`.
-    // The Rust architecture doesn't support this dynamic check and return type easily.
-    // This is a known deviation.
+    if tool.metadata().action_type == ActionType::Prompt {
+        let mut input_value = tool_request.input.clone().unwrap_or(Value::Null);
+
+        // HACK: If the action expects `null` (unit type `()`), but receives an
+        // empty object `{}`, just treat it as `null`. This mirrors the loose
+        // typing of the original JS implementation where this can happen implicitly.
+        if let Some(schema) = &tool.metadata().input_schema {
+            if let Some(t) = schema
+                .as_object()
+                .and_then(|o| o.get("type"))
+                .and_then(|v| v.as_str())
+            {
+                if t == "null" && input_value == json!({}) {
+                    input_value = Value::Null;
+                }
+            }
+        }
+
+        let preamble_value = tool
+            .run_http_json(input_value, raw_request.context.clone())
+            .await?;
+        let preamble_result = preamble_value
+            .get("result")
+            .ok_or_else(|| Error::new_internal("Prompt action did not return a result"))?;
+
+        let preamble: GenerateOptions<O> = serde_json::from_value(preamble_result.clone())
+            .map_err(|e| Error::new_internal(format!("Failed to deserialize preamble: {}", e)))?;
+
+        let response = Part::tool_response(
+            tool_request.name.clone(),
+            Some(json!(format!("transferred to {}", tool_request.name))),
+            tool_request.r#ref.clone(),
+        );
+
+        return Ok(ResolvedToolRequest {
+            response: Some(response),
+            preamble: Some(preamble),
+            ..Default::default()
+        });
+    }
 
     let request_value = serde_json::to_value(tool_request.input.clone().unwrap_or(Value::Null))
         .map_err(|e| Error::new_internal(format!("Failed to serialize request: {}", e)))?;
@@ -175,16 +216,20 @@ pub async fn resolve_tool_request<O: Default + Send + Sync + 'static>(
 }
 
 /// Resolves all tool requests within a model-generated message.
-pub async fn resolve_tool_requests<O: Default + Send + Sync + 'static>(
+pub async fn resolve_tool_requests<O>(
     registry: &Registry,
     raw_request: &GenerateOptions<O>,
     generated_message: &MessageData,
-) -> Result<ResolvedToolRequests> {
+) -> Result<ResolvedToolRequests<O>>
+where
+    O: Default + Send + Sync + 'static + DeserializeOwned,
+{
     let resolved_tools = tool::resolve_tools(registry, raw_request.tools.as_deref()).await?;
     let tool_map = to_tool_map(&resolved_tools)?;
 
     let mut response_parts: Vec<ToolResponsePart> = Vec::new();
     let mut has_interrupts = false;
+    let mut transfer_preamble: Option<GenerateOptions<O>> = None;
     let mut revised_model_message = generated_message.clone();
 
     let tool_request_indices: Vec<(usize, ToolRequestPart)> = revised_model_message
@@ -216,6 +261,14 @@ pub async fn resolve_tool_requests<O: Default + Send + Sync + 'static>(
     for (index, result) in results {
         match result {
             Ok(resolved) => {
+                if let Some(preamble) = resolved.preamble {
+                    if transfer_preamble.is_some() {
+                        return Err(Error::new_internal(
+                            "Model attempted to transfer to multiple prompt tools.",
+                        ));
+                    }
+                    transfer_preamble = Some(preamble);
+                }
                 if let Some(response) = resolved.response {
                     response_parts.push(response.clone());
                     revised_model_message.content[index] = to_pending_output(
@@ -240,6 +293,7 @@ pub async fn resolve_tool_requests<O: Default + Send + Sync + 'static>(
         return Ok(ResolvedToolRequests {
             revised_model_message: Some(revised_model_message),
             tool_message: None,
+            transfer_preamble,
         });
     }
 
@@ -250,6 +304,7 @@ pub async fn resolve_tool_requests<O: Default + Send + Sync + 'static>(
             content: response_parts,
             ..Default::default()
         }),
+        transfer_preamble,
     })
 }
 
@@ -284,7 +339,7 @@ struct ResumedToolRequestResult {
     tool_response: ToolResponsePart,
 }
 
-async fn resolve_resumed_tool_request<O: Default + Send + Sync + 'static>(
+async fn resolve_resumed_tool_request<O: Default + Send + Sync + 'static + DeserializeOwned>(
     raw_request: &GenerateOptions<O>,
     part: &ToolRequestPart,
     tool_map: &HashMap<String, Arc<dyn ErasedAction>>,
@@ -376,7 +431,9 @@ async fn resolve_resumed_tool_request<O: Default + Send + Sync + 'static>(
 }
 
 /// Amends message history to handle `resume` arguments.
-pub async fn resolve_resume_option<O: Default + Clone + Send + Sync + 'static>(
+pub async fn resolve_resume_option<
+    O: Default + Clone + Send + Sync + 'static + DeserializeOwned,
+>(
     registry: &Registry,
     mut raw_request: GenerateOptions<O>,
 ) -> Result<ResolveResumeOptionResult<O>> {
@@ -521,7 +578,9 @@ pub async fn resolve_resume_option<O: Default + Clone + Send + Sync + 'static>(
     })
 }
 
-pub async fn resolve_restarted_tools<O: Default + Clone + Send + Sync + 'static>(
+pub async fn resolve_restarted_tools<
+    O: Default + Clone + Send + Sync + 'static + DeserializeOwned,
+>(
     registry: &Registry,
     raw_request: &GenerateOptions<O>,
 ) -> Result<Vec<ToolRequestPart>> {
