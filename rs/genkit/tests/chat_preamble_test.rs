@@ -47,11 +47,9 @@ mod preamble_test {
     use genkit_ai::{CandidateData, GenerateResponseData};
 
     #[tokio::test]
-    #[ignore = "Ignoring until prompt-as-a-tool and preamble swapping features are fully implemented"]
     /// 'swaps out preamble on prompt tool invocation'
     async fn test_swaps_preamble_on_prompt_tool_invocation() -> Result<()> {
         let (genkit, pm) = helpers::genkit_with_programmable_model().await;
-
         let _agent_b_prompt = genkit.define_prompt(PromptConfig::<(), (), Value> {
             name: "agentB".to_string(),
             tools: Some(vec![ToolArgument::Name("agentA".to_string())]),
@@ -61,7 +59,6 @@ mod preamble_test {
             description: Some("Agent B description".to_string()),
             ..Default::default()
         });
-
         let agent_a_prompt = genkit.define_prompt(PromptConfig::<(), Value, Value> {
             name: "agentA".to_string(),
             tools: Some(vec![ToolArgument::Name("agentB".to_string())]),
@@ -79,7 +76,6 @@ mod preamble_test {
             description: Some("Agent A description".to_string()),
             ..Default::default()
         });
-
         // === Step 1: Simple "hi" to agent A ===
         *pm.handler.lock().unwrap() = Arc::new(Box::new(|req, _| {
             let tool_choice = req
@@ -102,7 +98,6 @@ mod preamble_test {
                 })
             })
         }));
-
         let session = genkit
             .create_session(CreateSessionOptions::<Value>::default())
             .await?;
@@ -112,24 +107,24 @@ mod preamble_test {
                 ..Default::default()
             }))
             .await?;
-
         let response = chat.send("hi").await?;
         assert_eq!(response.text()?, "hi from agent a (toolChoice: required)");
-
         let last_req = pm.last_request.lock().unwrap().clone().unwrap();
         assert_eq!(last_req.config, Some(json!({"temperature": 2})));
         assert_eq!(
-            last_req.messages,
-            vec![
-                MessageData {
-                    role: Role::System,
-                    content: vec![Part::text(" agent a")],
-                    metadata: Some([("preamble".to_string(), json!(true))].into())
+            json!(last_req.messages),
+            json!([
+                {
+                    "role": "system",
+                    "content": [{ "text": " agent a" }],
+                    "metadata": { "preamble": true }
                 },
-                MessageData::user(vec![Part::text("hi")]),
-            ]
+                {
+                    "role": "user",
+                    "content": [{ "text": "hi" }]
+                }
+            ])
         );
-
         // === Step 2: Transfer to agent B ===
         let req_counter_b = Arc::new(Mutex::new(0));
         *pm.handler.lock().unwrap() = Arc::new(Box::new(move |req, _| {
@@ -168,51 +163,40 @@ mod preamble_test {
                 })
             })
         }));
-
         let response = chat.send("pls transfer to b").await?;
         assert_eq!(response.text()?, "hi from agent b (toolChoice: required)");
-
         let last_req_b = pm.last_request.lock().unwrap().clone().unwrap();
         assert_eq!(last_req_b.config, Some(json!({"temperature": 1})));
         assert_eq!(
-            last_req_b.messages,
-            vec![
-                MessageData {
-                    // Note: Preamble is now agent b's
-                    role: Role::System,
-                    content: vec![Part::text("agent b")],
-                    metadata: Some([("preamble".to_string(), json!(true))].into())
+            json!(last_req_b.messages),
+            json!([
+                {
+                    "role": "system",
+                    "content": [{ "text": "agent b" }],
+                    "metadata": { "preamble": true }
                 },
-                MessageData::user(vec![Part::text("hi")]),
-                MessageData {
-                    role: Role::Model,
-                    content: vec![Part::text("hi from agent a (toolChoice: required)")],
-                    ..Default::default()
+                {
+                    "role": "user",
+                    "content": [{ "text": "hi" }]
                 },
-                MessageData::user(vec![Part::text("pls transfer to b")]),
-                MessageData {
-                    // Model requests tool call
-                    role: Role::Model,
-                    content: vec![Part::tool_request(
-                        "agentB",
-                        Some(json!({})),
-                        Some("ref123".to_string())
-                    )],
-                    ..Default::default()
+                {
+                    "role": "model",
+                    "content": [{ "text": "hi from agent a (toolChoice: required)" }]
                 },
-                MessageData {
-                    // Framework provides tool response
-                    role: Role::Tool,
-                    content: vec![Part::tool_response(
-                        "agentB",
-                        Some(json!("transferred to agentB")),
-                        Some("ref123".to_string())
-                    )],
-                    ..Default::default()
+                {
+                    "role": "user",
+                    "content": [{ "text": "pls transfer to b" }]
+                },
+                {
+                    "role": "model",
+                    "content": [{ "toolRequest": { "name": "agentB", "input": {}, "ref": "ref123" } }]
+                },
+                {
+                    "role": "tool",
+                    "content": [{ "toolResponse": { "name": "agentB", "output": "transferred to agentB", "ref": "ref123" } }]
                 }
-            ]
+            ])
         );
-
         // === Step 3: Transfer back to agent A ===
         let req_counter_a = Arc::new(Mutex::new(0));
         *pm.handler.lock().unwrap() = Arc::new(Box::new(move |_, _| {
@@ -242,25 +226,30 @@ mod preamble_test {
                 })
             })
         }));
-
         let response = chat.send("pls transfer to a").await?;
         assert_eq!(response.text()?, "hi from agent a");
-
         let last_req_a = pm.last_request.lock().unwrap().clone().unwrap();
         assert_eq!(last_req_a.config, Some(json!({"temperature": 2})));
         assert_eq!(
-            last_req_a
-                .messages
-                .first()
-                .unwrap()
-                .content
-                .first()
-                .unwrap()
-                .text,
-            Some(" agent a".to_string()),
+            json!(last_req_a.messages),
+            json!([
+                {
+                    "role": "system",
+                    "content": [{ "text": " agent a" }],
+                    "metadata": { "preamble": true }
+                },
+                { "role": "user", "content": [{ "text": "hi" }] },
+                { "role": "model", "content": [{ "text": "hi from agent a (toolChoice: required)" }] },
+                { "role": "user", "content": [{ "text": "pls transfer to b" }] },
+                { "role": "model", "content": [{ "toolRequest": { "name": "agentB", "input": {}, "ref": "ref123" } }] },
+                { "role": "tool", "content": [{ "toolResponse": { "name": "agentB", "output": "transferred to agentB", "ref": "ref123" } }] },
+                { "role": "model", "content": [{ "text": "hi from agent b (toolChoice: required)" }] },
+                { "role": "user", "content": [{ "text": "pls transfer to a" }] },
+                { "role": "model", "content": [{ "toolRequest": { "name": "agentA", "input": {}, "ref": "ref123" } }] },
+                { "role": "tool", "content": [{ "toolResponse": { "name": "agentA", "output": "transferred to agentA", "ref": "ref123" } }] }
+            ]),
             "Preamble should have been restored to agent a's"
         );
-
         Ok(())
     }
 
