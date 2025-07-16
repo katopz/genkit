@@ -443,6 +443,7 @@ where
             model: self.config.model.clone(),
             messages: Some(messages),
             tools: self.config.tools.clone(),
+            tool_choice: self.config.tool_choice.clone(),
             docs: if docs.is_empty() { None } else { Some(docs) },
             config: final_config,
             output: self.config.output.clone(),
