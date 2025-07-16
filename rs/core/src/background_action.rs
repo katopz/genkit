@@ -22,14 +22,14 @@
 //! - `check`: To poll for the status of the operation.
 //! - `cancel`: (Optional) To request cancellation of the operation.
 
-use crate::action::{Action, ActionBuilder, ActionFnArg};
+use crate::action::{define_action, Action, ActionFnArg};
 use crate::error::Result;
-use crate::registry::ActionType;
+use crate::registry::{ActionType, Registry};
 use schemars::JsonSchema;
 use serde::{de::DeserializeOwned, Deserialize, Serialize};
 use serde_json::Value;
 use std::future::Future;
-use std::marker::PhantomData;
+use std::sync::Arc;
 
 /// Represents the state of a long-running background operation.
 ///
@@ -68,20 +68,18 @@ pub struct BackgroundAction<I, O> {
     pub cancel_action: Option<Action<Operation<O>, Operation<O>, ()>>,
 }
 
-/// A builder for defining a `BackgroundAction`.
-pub struct BackgroundActionBuilder<I, O, FStart, FCheck, FCancel> {
-    name: String,
+/// Defines a background action and registers its component actions with the given registry.
+pub fn define_background_action<I, O, FStart, FCheck, FCancel, FutStart, FutCheck, FutCancel>(
+    registry: &Registry,
+    name: impl Into<String>,
+    action_type: ActionType,
     start_fn: FStart,
     check_fn: FCheck,
     cancel_fn: Option<FCancel>,
-    _marker: PhantomData<(I, O)>,
-}
-
-impl<I, O, FStart, FCheck, FCancel, FutStart, FutCheck, FutCancel>
-    BackgroundActionBuilder<I, O, FStart, FCheck, FCancel>
+) -> BackgroundAction<I, O>
 where
-    I: DeserializeOwned + JsonSchema + Send + Sync + 'static,
-    O: Serialize + DeserializeOwned + JsonSchema + Send + Sync + 'static,
+    I: DeserializeOwned + JsonSchema + Serialize + Send + Sync + Clone + 'static,
+    O: Serialize + DeserializeOwned + JsonSchema + Send + Sync + Clone + 'static,
     FStart: Fn(I, ActionFnArg<()>) -> FutStart + Send + Sync + 'static,
     FutStart: Future<Output = Result<Operation<O>>> + Send,
     FCheck: Fn(Operation<O>, ActionFnArg<()>) -> FutCheck + Send + Sync + 'static,
@@ -89,49 +87,80 @@ where
     FCancel: Fn(Operation<O>, ActionFnArg<()>) -> FutCancel + Send + Sync + 'static,
     FutCancel: Future<Output = Result<Operation<O>>> + Send,
 {
-    /// Creates a new `BackgroundActionBuilder`.
-    pub fn new(name: impl Into<String>, start_fn: FStart, check_fn: FCheck) -> Self {
-        Self {
-            name: name.into(),
-            start_fn,
-            check_fn,
-            cancel_fn: None,
-            _marker: PhantomData,
-        }
-    }
+    let name = name.into();
+    let action_key = Arc::new(format!(
+        "/{}/{}",
+        serde_json::to_value(action_type).unwrap().as_str().unwrap(),
+        &name
+    ));
 
-    /// Adds a cancellation function to the background action.
-    pub fn with_cancel(mut self, cancel_fn: FCancel) -> Self {
-        self.cancel_fn = Some(cancel_fn);
-        self
-    }
+    // Arc the functions to allow them to be captured by `Fn` closures.
+    let start_fn = Arc::new(start_fn);
+    let check_fn = Arc::new(check_fn);
+    let cancel_fn = cancel_fn.map(Arc::new);
 
-    /// Builds the `BackgroundAction` and registers its component actions.
-    pub fn build(self) -> BackgroundAction<I, O> {
-        let name = self.name;
+    // Define the start action, wrapping the original function to inject the operation key.
+    let start_action = {
+        let action_key = action_key.clone();
+        let start_fn = start_fn;
+        let wrapped_start_fn = move |input: I, args: ActionFnArg<()>| {
+            let start_fn = start_fn.clone();
+            let action_key = action_key.clone();
+            async move {
+                let mut operation = (*start_fn)(input, args).await?;
+                operation.action = Some(action_key.to_string());
+                Ok(operation)
+            }
+        };
+        define_action(registry, action_type, name.clone(), wrapped_start_fn)
+    };
 
-        // Define the start action
-        let start_action =
-            ActionBuilder::new(ActionType::Custom, name.clone(), self.start_fn).build();
+    // Define the check action.
+    let check_action = {
+        let action_key = action_key.clone();
+        let check_fn = check_fn;
+        let wrapped_check_fn = move |input: Operation<O>, args: ActionFnArg<()>| {
+            let check_fn = check_fn.clone();
+            let action_key = action_key.clone();
+            async move {
+                let mut operation = (*check_fn)(input, args).await?;
+                operation.action = Some(action_key.to_string());
+                Ok(operation)
+            }
+        };
+        let check_action_name = format!("{}/check", &name);
+        define_action(
+            registry,
+            ActionType::CheckOperation,
+            check_action_name,
+            wrapped_check_fn,
+        )
+    };
 
-        // Define the check action
-        let check_action_name = format!("{}/check", name);
-        let check_action =
-            ActionBuilder::new(ActionType::CheckOperation, check_action_name, self.check_fn)
-                .build();
+    // Define the cancel action, if a function was provided.
+    let cancel_action = cancel_fn.map(|cancel_fn| {
+        let action_key = action_key.clone();
+        let wrapped_cancel_fn = move |input: Operation<O>, args: ActionFnArg<()>| {
+            let cancel_fn = cancel_fn.clone();
+            let action_key = action_key.clone();
+            async move {
+                let mut operation = (*cancel_fn)(input, args).await?;
+                operation.action = Some(action_key.to_string());
+                Ok(operation)
+            }
+        };
+        let cancel_action_name = format!("{}/cancel", &name);
+        define_action(
+            registry,
+            ActionType::CancelOperation,
+            cancel_action_name,
+            wrapped_cancel_fn,
+        )
+    });
 
-        // Define the cancel action, if provided
-        let cancel_action = self.cancel_fn.map(|f| {
-            let cancel_action_name = format!("{}/cancel", name);
-            ActionBuilder::new(ActionType::CancelOperation, cancel_action_name, f).build()
-        });
-
-        // TODO: Register the actions with the registry.
-
-        BackgroundAction {
-            start_action,
-            check_action,
-            cancel_action,
-        }
+    BackgroundAction {
+        start_action,
+        check_action,
+        cancel_action,
     }
 }

@@ -49,6 +49,7 @@ rstest.workspace           = true
 rstest_macros.workspace    = true
 strum                      = { workspace = true, features = ["derive"] }
 strum_macros.workspace     = true
+uuid.workspace             = true
 
 
 [dev-dependencies]
