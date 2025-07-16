@@ -483,11 +483,22 @@ pub async fn resolve_tools(
     for tool_arg in tools {
         match tool_arg {
             ToolArgument::Name(name) => {
-                let action = registry
-                    .lookup_action(&format!("/tool/{}", name))
-                    .await
-                    .ok_or_else(|| Error::new_internal(format!("Tool '{}' not found", name)))?;
-                resolved_tools.push(action);
+                let tool_path = format!("/tool/{}", name);
+                if let Some(action) = registry.lookup_action(&tool_path).await {
+                    resolved_tools.push(action);
+                    continue;
+                }
+
+                let prompt_path = format!("/prompt/{}", name);
+                if let Some(action) = registry.lookup_action(&prompt_path).await {
+                    resolved_tools.push(action);
+                    continue;
+                }
+
+                return Err(Error::new_internal(format!(
+                    "Tool or prompt '{}' not found. Looked for '{}' and '{}'",
+                    name, tool_path, prompt_path
+                )));
             }
             ToolArgument::Action(action) => {
                 resolved_tools.push(action.clone());
