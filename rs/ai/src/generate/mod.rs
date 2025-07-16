@@ -621,3 +621,36 @@ pub async fn to_generate_request<O>(
         // The `resume` field is handled before this stage and is not part of the final model request.
     })
 }
+
+impl<O: Default> From<GenerateRequest> for GenerateOptions<O> {
+    fn from(req: GenerateRequest) -> Self {
+        let tools = req.tools.map(|defs| {
+            defs.iter()
+                .map(|def| {
+                    // Use the original tool name if available, otherwise the short name.
+                    let name = def
+                        .metadata
+                        .as_ref()
+                        .and_then(|m| m.get("originalName"))
+                        .and_then(|v| v.as_str())
+                        .unwrap_or(&def.name);
+                    ToolArgument::Name(name.to_string())
+                })
+                .collect()
+        });
+
+        let output = req.output.and_then(|v| serde_json::from_value(v).ok());
+
+        GenerateOptions {
+            messages: Some(req.messages),
+            config: req.config,
+            tools,
+            docs: req.docs,
+            tool_choice: req.tool_choice.and_then(|v| serde_json::from_value(v).ok()),
+            output,
+            max_turns: req.max_turns,
+            return_tool_requests: req.return_tool_requests,
+            ..Default::default()
+        }
+    }
+}

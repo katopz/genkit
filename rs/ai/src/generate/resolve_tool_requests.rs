@@ -23,6 +23,7 @@ use crate::generate::GenerateOptions;
 use crate::message::{MessageData, Role};
 use crate::model::GenerateResponseData;
 use crate::tool::{self, is_tool_request};
+use crate::GenerateRequest;
 use genkit_core::context::ActionContext;
 use genkit_core::error::{Error, Result};
 use genkit_core::registry::{ActionType, ErasedAction, Registry};
@@ -118,9 +119,6 @@ where
     if tool.metadata().action_type == ActionType::Prompt {
         let mut input_value = tool_request.input.clone().unwrap_or(Value::Null);
 
-        // HACK: If the action expects `null` (unit type `()`), but receives an
-        // empty object `{}`, just treat it as `null`. This mirrors the loose
-        // typing of the original JS implementation where this can happen implicitly.
         if let Some(schema) = &tool.metadata().input_schema {
             if let Some(t) = schema
                 .as_object()
@@ -140,8 +138,14 @@ where
             .get("result")
             .ok_or_else(|| Error::new_internal("Prompt action did not return a result"))?;
 
-        let preamble: GenerateOptions<O> = serde_json::from_value(preamble_result.clone())
-            .map_err(|e| Error::new_internal(format!("Failed to deserialize preamble: {}", e)))?;
+        // Correctly deserialize into GenerateRequest first.
+        let preamble_req: GenerateRequest = serde_json::from_value(preamble_result.clone())
+            .map_err(|e| {
+                Error::new_internal(format!("Failed to deserialize preamble request: {}", e))
+            })?;
+
+        // Then convert to GenerateOptions for the preamble.
+        let preamble_opts: GenerateOptions<O> = preamble_req.into();
 
         let response = Part::tool_response(
             tool_request.name.clone(),
@@ -151,7 +155,7 @@ where
 
         return Ok(ResolvedToolRequest {
             response: Some(response),
-            preamble: Some(preamble),
+            preamble: Some(preamble_opts),
             ..Default::default()
         });
     }
@@ -271,6 +275,8 @@ where
                 }
                 if let Some(response) = resolved.response {
                     response_parts.push(response.clone());
+                    // We modify the content of the cloned message to include pending output.
+                    // This is only returned on an interrupt.
                     revised_model_message.content[index] = to_pending_output(
                         &tool_request_indices
                             .iter()
@@ -297,6 +303,8 @@ where
         });
     }
 
+    // If there are no interrupts, we don't return the revised message.
+    // The original, unmodified message will be used in the history.
     Ok(ResolvedToolRequests {
         revised_model_message: None,
         tool_message: Some(MessageData {

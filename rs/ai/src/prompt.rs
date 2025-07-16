@@ -26,7 +26,7 @@ use crate::message::MessageData;
 use crate::model::{middleware::ModelMiddleware, Model};
 
 use crate::tool::ToolArgument;
-use crate::{Document, Part, ToolChoice};
+use crate::{to_generate_request, Document, GenerateRequest, Part, ToolChoice};
 use genkit_core::action::{Action, ActionBuilder};
 use genkit_core::context::{get_context, ActionContext};
 use genkit_core::error::{Error, Result};
@@ -43,7 +43,7 @@ use std::pin::Pin;
 use std::sync::Arc;
 
 /// A type alias for an action that renders a prompt.
-pub type PromptAction<I = Value, O = Value> = Action<I, GenerateOptions<O>, ()>;
+pub type PromptAction<I = Value> = Action<I, GenerateRequest, ()>;
 
 /// A type alias for a function that resolves documents dynamically for a prompt.
 pub type DocsResolver<I> = Arc<
@@ -582,7 +582,7 @@ where
     let final_metadata_map: HashMap<String, Value> =
         serde_json::from_value(action_metadata).unwrap_or_default();
 
-    let prompt_action: PromptAction<I, O> = {
+    let prompt_action: PromptAction<I> = {
         let config_clone = config_arc.clone();
         let registry_clone = registry_clone.clone();
 
@@ -593,12 +593,13 @@ where
                 let config = config_clone.clone();
                 let registry = registry_clone.clone();
                 async move {
-                    let prompt = ExecutablePrompt {
+                    let prompt: ExecutablePrompt<I, O, C> = ExecutablePrompt {
                         config,
                         registry,
                         r#ref: None,
                     };
-                    prompt.render(input, None).await
+                    let gen_opts = prompt.render(input, None).await?;
+                    to_generate_request(&prompt.registry, &gen_opts).await
                 }
             },
         )

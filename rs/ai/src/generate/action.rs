@@ -441,9 +441,6 @@ where
             if !model_supports_format {
                 // If middleware is provided, let it handle instruction injection.
                 if middleware.is_empty() {
-                    println!(
-                        "[generate_internal] No middleware; injecting default format instructions."
-                    );
                     let schema_value = request
                         .output
                         .as_ref()
@@ -462,16 +459,8 @@ where
 
                     if instructions.is_some() {
                         let messages = request.messages.get_or_insert_with(Vec::new);
-                        println!(
-                            "[generate_internal] 🔥 Messages before injection: {:?}",
-                            messages
-                        );
                         let updated_messages = formats::inject_instructions(messages, instructions);
                         request.messages = Some(updated_messages);
-                        println!(
-                            "[generate_internal] ✨ Messages after injection: {:?}",
-                            request.messages
-                        );
                     }
 
                     // When simulating, modify the output options for the model request.
@@ -486,8 +475,6 @@ where
                         }
                         output_opts.content_type = None;
                     }
-                } else {
-                    println!("[generate_internal] Middleware found; skipping default format instruction injection.");
                 }
             } else {
                 // Model supports format, so just pass through the options.
@@ -576,7 +563,7 @@ where
         if let Some(revised_with_interrupt) = tool_results.revised_model_message {
             let mut final_response = response_data;
             if let Some(candidate) = final_response.candidates.get_mut(0) {
-                candidate.message = revised_with_interrupt.clone();
+                candidate.message = revised_with_interrupt;
                 candidate.finish_reason = Some(model::FinishReason::Interrupted);
                 candidate.finish_message =
                     Some("One or more tool calls resulted in interrupts.".to_string());
@@ -587,6 +574,7 @@ where
         // 10. If no interrupts, update the message history for the next turn.
         let mut messages = request.messages.take().unwrap_or_default();
 
+        // Add the original, unmodified message from the model to the history.
         messages.push(generated_message);
 
         let mut next_message_index = message_index + 1;
