@@ -645,8 +645,6 @@ where
 {
     let name = name.into();
     let registry_for_registration = registry.clone();
-    // This is the fix: create a second clone with a 'static lifetime to be
-    // moved into the returned future.
     let registry_for_lookup = registry.clone();
 
     let action_future = async move {
