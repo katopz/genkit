@@ -40,10 +40,3 @@ As a direct result of the incomplete dotprompt implementation, prompts cannot be
 *   **Missing In**: `genkit/rs/genkit/src/prompt.rs`
 *   **Description**: The JS version allows a prompt to be converted into a tool and used in `generate` calls.
 *   **Impact**: Medium. This limits the composability of prompts. The test file `rs/genkit/tests/prompts_as_tool_test.rs` is empty and marked as blocked pending the dotprompt implementation.
-
-#### 3. Long-Running Background Models
-The functionality for handling asynchronous, long-running models (e.g., for video generation) is not fully implemented.
-
-*   **Missing In**: `genkit/rs/genkit/src/lib.rs` (on the `Genkit` struct)
-*   **Description**: While `define_background_model`, `generate_operation`, and `check_operation` exist in the Rust codebase, the tests indicate this feature is incomplete. The JS version provides a complete workflow for starting a long-running job and polling for its result.
-*   **Impact**: Medium. This is a more advanced feature, but its absence blocks use cases involving slow-to-generate media. The tests in `rs/genkit/tests/generate_long_running_test.rs` are placeholders.

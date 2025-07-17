@@ -483,8 +483,13 @@ where
     let request_value =
         serde_json::to_value(request).map_err(|e| Error::new_internal(e.to_string()))?;
     let op_value = action.run_http_json(request_value, None).await?;
+    let result_value = op_value
+        .get("result")
+        .ok_or_else(|| Error::new_internal("Action response missing 'result' field"))?
+        .clone();
+
     let operation: genkit_core::background_action::Operation<GenerateResponseData> =
-        serde_json::from_value(op_value).map_err(|e| Error::new_internal(e.to_string()))?;
+        serde_json::from_value(result_value).map_err(|e| Error::new_internal(e.to_string()))?;
 
     Ok(operation)
 }

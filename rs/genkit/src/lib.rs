@@ -219,33 +219,20 @@ impl Genkit {
         define_model(&self.registry, options, f)
     }
 
-    /// Defines a new background model and adds it to the registry.
+    /// Defines a long-running generative model.
     pub fn define_background_model<FStart, FCheck, FCancel, FutStart, FutCheck, FutCancel>(
         &self,
-        options: DefineBackgroundModelOptions<
-            FStart,
-            FCheck,
-            FCancel,
-            FutStart,
-            FutCheck,
-            FutCancel,
-        >,
+        options: DefineBackgroundModelOptions<FStart, FCheck, FCancel>,
     ) -> BackgroundModelAction
     where
         FStart: Fn(GenerateRequest, ActionFnArg<()>) -> FutStart + Send + Sync + 'static,
         FutStart: Future<Output = Result<Operation<GenerateResponseData>>> + Send,
-        FCheck: Fn(Operation<GenerateResponseData>, ActionFnArg<()>) -> FutCheck
-            + Send
-            + Sync
-            + 'static,
+        FCheck: Fn(Operation<GenerateResponseData>) -> FutCheck + Send + Sync + 'static,
         FutCheck: Future<Output = Result<Operation<GenerateResponseData>>> + Send,
-        FCancel: Fn(Operation<GenerateResponseData>, ActionFnArg<()>) -> FutCancel
-            + Send
-            + Sync
-            + 'static,
+        FCancel: Fn(Operation<GenerateResponseData>) -> FutCancel + Send + Sync + 'static,
         FutCancel: Future<Output = Result<Operation<GenerateResponseData>>> + Send,
     {
-        define_background_model(&self.registry, options)
+        define_background_model(self.registry(), options)
     }
 
     /// Defines and registers a prompt based on a function.

@@ -19,6 +19,7 @@
 #[cfg(test)]
 mod background_action_test {
     use genkit_core::action::ActionFnArg;
+    use genkit_core::background_action::BackgroundActionParams;
     use genkit_core::registry::{ActionType, Registry};
     use genkit_core::{define_background_action, lookup_background_action, Operation};
     use rstest::{fixture, rstest};
@@ -44,24 +45,24 @@ mod background_action_test {
         // 1. Define a background action with start, check, and cancel handlers.
         define_background_action(
             &registry,
-            "lookupTest",
-            ActionType::Flow,
-            // Start function
-            move |_: TestInput, _args: ActionFnArg<()>| async move {
-                Ok(Operation {
-                    id: Uuid::new_v4().to_string(),
-                    done: false,
-                    ..Default::default()
-                })
-            },
-            // Check function
-            |op: Operation<TestOutput>, _args: ActionFnArg<()>| async move { Ok(op) },
-            // Cancel function
-            Some(
-                |op: Operation<TestOutput>, _args: ActionFnArg<()>| async move {
-                    Ok(Operation { done: true, ..op })
+            BackgroundActionParams {
+                name: "lookupTest".to_string(),
+                action_type: ActionType::Flow,
+                description: None,
+                metadata: None,
+                start: |_: TestInput, _args: ActionFnArg<()>| async move {
+                    Ok(Operation {
+                        id: Uuid::new_v4().to_string(),
+                        done: false,
+                        ..Default::default()
+                    })
                 },
-            ),
+                check: |op: Operation<TestOutput>| async move { Ok(op) },
+                cancel: Some(|op: Operation<TestOutput>| async move {
+                    Ok(Operation { done: true, ..op })
+                }),
+                _marker: std::marker::PhantomData,
+            },
         );
 
         // 2. Look up the action using its primary key.

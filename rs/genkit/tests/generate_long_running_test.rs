@@ -16,7 +16,7 @@ mod helpers;
 
 use genkit::{
     model::{Candidate, FinishReason, Part, Role},
-    Genkit, Model,
+    CandidateData, Genkit, Model,
 };
 use genkit_ai::{
     self as genkit_ai,
@@ -27,7 +27,7 @@ use genkit_ai::{
 use genkit_core::background_action::Operation;
 use rstest::{fixture, rstest};
 use serde_json::json;
-use std::sync::Arc;
+use std::{future::Future, pin::Pin, sync::Arc};
 
 use genkit_ai::message::MessageData;
 use helpers::ProgrammableModel;
@@ -108,10 +108,6 @@ async fn test_starts_the_operation(
     assert!(!op.done);
 }
 
-use genkit_core::action::ActionFnArg;
-use std::future::Future;
-use std::pin::Pin;
-
 #[rstest]
 #[tokio::test]
 /// 'checks operation status'
@@ -122,7 +118,7 @@ async fn test_checks_operation_status(
 
     // 1. Define the expected final result from the background model.
     let result_data = GenerateResponseData {
-        candidates: vec![Candidate {
+        candidates: vec![CandidateData {
             index: 0,
             finish_reason: Some(FinishReason::Stop),
             message: MessageData {
@@ -146,7 +142,7 @@ async fn test_checks_operation_status(
     // 3. Define the type for the cancel function pointer to resolve the ambiguity.
     type CancelFut =
         Pin<Box<dyn Future<Output = genkit::Result<Operation<GenerateResponseData>>> + Send>>;
-    type CancelFn = fn(Operation<GenerateResponseData>, ActionFnArg<()>) -> CancelFut;
+    type CancelFn = fn(Operation<GenerateResponseData>) -> CancelFut;
 
     // 4. Define the background model with its start and check logic.
     genkit.define_background_model(DefineBackgroundModelOptions {
@@ -164,7 +160,7 @@ async fn test_checks_operation_status(
             })
         },
         // The `check` handler returns the final, completed operation.
-        check: move |_op, _args| {
+        check: move |_op| {
             let final_op = final_op.clone();
             async move { Ok(final_op) }
         },

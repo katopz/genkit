@@ -29,12 +29,17 @@
 use ::core::future::Future;
 use ::core::marker::Send;
 use ::serde::{Deserialize, Serialize};
-use genkit_core::action::{define_action, ActionMetadata};
+use genkit_core::action::ActionMetadata;
 use genkit_core::context::ActionContext;
 use genkit_core::error::Result;
 use genkit_core::registry::ActionType;
-use genkit_core::{action::StreamingResponse, registry::ErasedAction, Action};
-use genkit_core::{define_background_action, ActionFnArg, Operation, Registry};
+use genkit_core::{
+    action::StreamingResponse,
+    background_action::BackgroundActionParams,
+    define_background_action,
+    registry::{ErasedAction, Registry},
+    Action, ActionFnArg, Operation,
+};
 use schemars::JsonSchema;
 use serde_json::{json, Value};
 use std::collections::HashMap;
@@ -332,9 +337,9 @@ impl ErasedAction for ModelAction {
 }
 
 #[derive(Clone)]
-pub struct BackgroundModelAction(Action<GenerateRequest, GenerateResponseData, ()>);
+pub struct BackgroundModelAction(Action<GenerateRequest, Operation<GenerateResponseData>, ()>);
 impl Deref for BackgroundModelAction {
-    type Target = Action<GenerateRequest, GenerateResponseData, ()>;
+    type Target = Action<GenerateRequest, Operation<GenerateResponseData>, ()>;
 
     fn deref(&self) -> &Self::Target {
         &self.0
@@ -501,17 +506,7 @@ where
     model_action
 }
 
-pub struct DefineBackgroundModelOptions<FStart, FCheck, FCancel, FutStart, FutCheck, FutCancel>
-where
-    FStart: Fn(GenerateRequest, ActionFnArg<()>) -> FutStart + Send + Sync + 'static,
-    FutStart: Future<Output = Result<Operation<GenerateResponseData>>> + Send,
-    FCheck:
-        Fn(Operation<GenerateResponseData>, ActionFnArg<()>) -> FutCheck + Send + Sync + 'static,
-    FutCheck: Future<Output = Result<Operation<GenerateResponseData>>> + Send,
-    FCancel:
-        Fn(Operation<GenerateResponseData>, ActionFnArg<()>) -> FutCancel + Send + Sync + 'static,
-    FutCancel: Future<Output = Result<Operation<GenerateResponseData>>> + Send,
-{
+pub struct DefineBackgroundModelOptions<FStart, FCheck, FCancel> {
     pub name: String,
     pub label: Option<String>,
     pub versions: Option<Vec<String>>,
@@ -524,78 +519,54 @@ where
 
 pub fn define_background_model<FStart, FCheck, FCancel, FutStart, FutCheck, FutCancel>(
     registry: &Registry,
-    options: DefineBackgroundModelOptions<FStart, FCheck, FCancel, FutStart, FutCheck, FutCancel>,
+    options: DefineBackgroundModelOptions<FStart, FCheck, FCancel>,
 ) -> BackgroundModelAction
 where
     FStart: Fn(GenerateRequest, ActionFnArg<()>) -> FutStart + Send + Sync + 'static,
     FutStart: Future<Output = Result<Operation<GenerateResponseData>>> + Send,
-    FCheck:
-        Fn(Operation<GenerateResponseData>, ActionFnArg<()>) -> FutCheck + Send + Sync + 'static,
+    FCheck: Fn(Operation<GenerateResponseData>) -> FutCheck + Send + Sync + 'static,
     FutCheck: Future<Output = Result<Operation<GenerateResponseData>>> + Send,
-    FCancel:
-        Fn(Operation<GenerateResponseData>, ActionFnArg<()>) -> FutCancel + Send + Sync + 'static,
+    FCancel: Fn(Operation<GenerateResponseData>) -> FutCancel + Send + Sync + 'static,
     FutCancel: Future<Output = Result<Operation<GenerateResponseData>>> + Send,
 {
+    let name = options.name.clone();
+    let label = options.label.clone().unwrap_or_else(|| name.clone());
+
+    // 1. Prepare model-specific metadata
     let mut supports = options.supports.clone().unwrap_or_default();
     supports.long_running = Some(true);
     let model_info = ModelInfo {
-        name: options.name.clone(),
-        label: options.label.clone().unwrap_or_default(),
+        name: name.clone(),
+        label: label.clone(),
         versions: options.versions.clone(),
         supports: Some(supports),
     };
 
     let mut metadata = HashMap::new();
-    metadata.insert("name".to_string(), json!(options.name));
+    metadata.insert("name".to_string(), json!(name));
     metadata.insert("type".to_string(), json!("backgroundModel"));
     metadata.insert("metadata".to_string(), json!(model_info));
     if let Some(config_schema) = &options.config_schema {
         metadata.insert("configSchema".to_string(), config_schema.clone());
     }
 
+    // 2. Call the generic define_background_action with the prepared metadata
     let bg_action = define_background_action(
         registry,
-        options.name.clone(),
-        ActionType::BackgroundModel,
-        options.start,
-        options.check,
-        options.cancel,
+        BackgroundActionParams {
+            name: options.name,
+            action_type: ActionType::BackgroundModel,
+            description: Some(label),
+            metadata: Some(metadata),
+            start: options.start,
+            check: options.check,
+            cancel: options.cancel,
+            _marker: PhantomData,
+        },
     );
 
-    let start_func = bg_action.start_action.func;
-    let check_func = bg_action.check_action.func;
-
-    let poll_fn = move |req: GenerateRequest, args: ActionFnArg<()>| {
-        let start_func = start_func.clone();
-        let check_func = check_func.clone();
-        async move {
-            let mut op = start_func.run(req, args.clone()).await?;
-            while !op.done {
-                op = check_func.run(op, args.clone()).await?;
-            }
-            if let Some(err_val) = op.error {
-                return Err(genkit_core::error::Error::new_internal(
-                    serde_json::to_string(&err_val)
-                        .unwrap_or_else(|_| "Operation failed with non-serializable error".into()),
-                ));
-            }
-            op.output.ok_or_else(|| {
-                genkit_core::error::Error::new_internal(
-                    "Operation finished without output or error.",
-                )
-            })
-        }
-    };
-
-    let mut action = define_action(registry, ActionType::BackgroundModel, options.name, poll_fn);
-    action.metadata_mut().metadata.extend(metadata);
-
-    let bg_model_action = BackgroundModelAction(action);
-    registry
-        .register_action(bg_model_action.meta.action_type, bg_model_action.clone())
-        .unwrap();
-
-    bg_model_action
+    // 3. The "background model action" is the "start" action.
+    BackgroundModelAction(bg_action.start_action)
 }
 
 /// Validates that a model supports a given feature.
@@ -605,9 +576,7 @@ pub fn validate_support(name: String, supports: ModelInfoSupports) -> ModelMiddl
 
 pub use middleware::SystemPromptSimulateOptions;
 
-pub fn simulate_system_prompt<SimulateSystemPromptOptions>(
-    options: Option<SystemPromptSimulateOptions>,
-) -> ModelMiddleware {
+pub fn simulate_system_prompt(options: Option<SystemPromptSimulateOptions>) -> ModelMiddleware {
     middleware::simulate_system_prompt(options)
 }
 

@@ -22,14 +22,27 @@
 //! - `check`: To poll for the status of the operation.
 //! - `cancel`: (Optional) To request cancellation of the operation.
 
-use crate::action::{define_action, Action, ActionFnArg};
+use crate::action::{define_action, Action, ActionBuilder, ActionFnArg};
 use crate::error::{Error, Result};
 use crate::registry::{ActionType, Registry};
 use schemars::JsonSchema;
 use serde::{de::DeserializeOwned, Deserialize, Serialize};
 use serde_json::Value;
+use std::collections::HashMap;
 use std::future::Future;
 use std::sync::Arc;
+
+/// The parameters for `define_background_action`.
+pub struct BackgroundActionParams<I, O, FStart, FCheck, FCancel> {
+    pub name: String,
+    pub action_type: ActionType,
+    pub description: Option<String>,
+    pub metadata: Option<HashMap<String, Value>>,
+    pub start: FStart,
+    pub check: FCheck,
+    pub cancel: Option<FCancel>,
+    pub _marker: std::marker::PhantomData<(I, O)>,
+}
 
 /// Represents the state of a long-running background operation.
 ///
@@ -71,33 +84,32 @@ pub struct BackgroundAction<I, O> {
 /// Defines a background action and registers its component actions with the given registry.
 pub fn define_background_action<I, O, FStart, FCheck, FCancel, FutStart, FutCheck, FutCancel>(
     registry: &Registry,
-    name: impl Into<String>,
-    action_type: ActionType,
-    start_fn: FStart,
-    check_fn: FCheck,
-    cancel_fn: Option<FCancel>,
+    options: BackgroundActionParams<I, O, FStart, FCheck, FCancel>,
 ) -> BackgroundAction<I, O>
 where
     I: DeserializeOwned + JsonSchema + Serialize + Send + Sync + Clone + 'static,
     O: Serialize + DeserializeOwned + JsonSchema + Send + Sync + Clone + 'static,
     FStart: Fn(I, ActionFnArg<()>) -> FutStart + Send + Sync + 'static,
     FutStart: Future<Output = Result<Operation<O>>> + Send,
-    FCheck: Fn(Operation<O>, ActionFnArg<()>) -> FutCheck + Send + Sync + 'static,
+    FCheck: Fn(Operation<O>) -> FutCheck + Send + Sync + 'static,
     FutCheck: Future<Output = Result<Operation<O>>> + Send,
-    FCancel: Fn(Operation<O>, ActionFnArg<()>) -> FutCancel + Send + Sync + 'static,
+    FCancel: Fn(Operation<O>) -> FutCancel + Send + Sync + 'static,
     FutCancel: Future<Output = Result<Operation<O>>> + Send,
 {
-    let name = name.into();
+    let name = options.name;
     let action_key = Arc::new(format!(
         "/{}/{}",
-        serde_json::to_value(action_type).unwrap().as_str().unwrap(),
+        serde_json::to_value(options.action_type)
+            .unwrap()
+            .as_str()
+            .unwrap(),
         &name
     ));
 
     // Arc the functions to allow them to be captured by `Fn` closures.
-    let start_fn = Arc::new(start_fn);
-    let check_fn = Arc::new(check_fn);
-    let cancel_fn = cancel_fn.map(Arc::new);
+    let start_fn = Arc::new(options.start);
+    let check_fn = Arc::new(options.check);
+    let cancel_fn = options.cancel.map(Arc::new);
 
     // Define the start action, wrapping the original function to inject the operation key.
     let start_action = {
@@ -112,18 +124,31 @@ where
                 Ok(operation)
             }
         };
-        define_action(registry, action_type, name.clone(), wrapped_start_fn)
+
+        let mut builder = ActionBuilder::new(options.action_type, name.clone(), wrapped_start_fn);
+        if let Some(desc) = options.description {
+            builder = builder.with_description(desc);
+        }
+        if let Some(meta) = options.metadata {
+            builder = builder.with_metadata(meta);
+        }
+
+        let action = builder.build();
+        registry
+            .register_action(options.action_type, action.clone())
+            .expect("Failed to register start action for background action");
+        action
     };
 
     // Define the check action.
     let check_action = {
         let action_key = action_key.clone();
         let check_fn = check_fn;
-        let wrapped_check_fn = move |input: Operation<O>, args: ActionFnArg<()>| {
+        let wrapped_check_fn = move |input: Operation<O>, _args: ActionFnArg<()>| {
             let check_fn = check_fn.clone();
             let action_key = action_key.clone();
             async move {
-                let mut operation = (*check_fn)(input, args).await?;
+                let mut operation = (*check_fn)(input).await?;
                 operation.action = Some(action_key.to_string());
                 Ok(operation)
             }
@@ -140,11 +165,11 @@ where
     // Define the cancel action, if a function was provided.
     let cancel_action = cancel_fn.map(|cancel_fn| {
         let action_key = action_key.clone();
-        let wrapped_cancel_fn = move |input: Operation<O>, args: ActionFnArg<()>| {
+        let wrapped_cancel_fn = move |input: Operation<O>, _args: ActionFnArg<()>| {
             let cancel_fn = cancel_fn.clone();
             let action_key = action_key.clone();
             async move {
-                let mut operation = (*cancel_fn)(input, args).await?;
+                let mut operation = (*cancel_fn)(input).await?;
                 operation.action = Some(action_key.to_string());
                 Ok(operation)
             }
