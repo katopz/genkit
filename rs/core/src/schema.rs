@@ -19,6 +19,7 @@
 //! JSON schemas from Rust types and `jsonschema` for validation.
 
 use crate::error::{Error, Result};
+use crate::registry::Registry;
 use jsonschema::Draft;
 use schemars::{JsonSchema, Schema};
 use serde::de::DeserializeOwned;
@@ -153,17 +154,12 @@ pub fn parse_schema<T: DeserializeOwned>(data: Value, schema: ProvidedSchema) ->
 }
 
 /// Registers a Rust type as a named schema object in the Genkit registry.
-///
-/// This is a placeholder for functionality that will be implemented within the `Registry`.
-#[doc(hidden)]
-pub fn define_schema<T: JsonSchema + 'static>(_name: &str) {
-    unimplemented!("define_schema is not yet implemented");
+pub fn define_schema<T: JsonSchema + 'static>(registry: &Registry, name: &str) -> Result<()> {
+    let schema = schema_for::<T>();
+    registry.register_schema(name, ProvidedSchema::FromType(schema))
 }
 
 /// Registers a raw JSON schema as a named schema object in the Genkit registry.
-///
-/// This is a placeholder for functionality that will be implemented within the `Registry`.
-#[doc(hidden)]
-pub fn define_json_schema(_name: &str, _json_schema: Schema) {
-    unimplemented!("define_json_schema is not yet implemented");
+pub fn define_json_schema(registry: &Registry, name: &str, json_schema: Schema) -> Result<()> {
+    registry.register_schema(name, ProvidedSchema::FromType(json_schema))
 }

@@ -589,6 +589,37 @@ impl Registry {
         Ok(resolvable_actions)
     }
 
+    /// Registers a schema with the registry.
+    pub fn register_schema(&self, name: &str, schema: schema::ProvidedSchema) -> Result<()> {
+        let mut state = self.state.lock().unwrap();
+        if state.schemas.contains_key(name) {
+            return Err(Error::new_internal(format!(
+                "Schema '{}' is already registered.",
+                name
+            )));
+        }
+        state.schemas.insert(name.to_string(), schema);
+        Ok(())
+    }
+
+    /// Looks up a schema by name.
+    pub fn lookup_schema(&self, name: &str) -> Option<schema::ProvidedSchema> {
+        let (schema, parent) = {
+            let state = self.state.lock().unwrap();
+            (state.schemas.get(name).cloned(), state.parent.clone())
+        };
+
+        if schema.is_some() {
+            return schema;
+        }
+
+        if let Some(parent) = parent {
+            return parent.lookup_schema(name);
+        }
+
+        None
+    }
+
     pub fn register_action_async<F>(&self, action_type: ActionType, name: String, fut: F)
     where
         F: Future<Output = Result<Arc<dyn ErasedAction>>> + Send + 'static,
