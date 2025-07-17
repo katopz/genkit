@@ -211,6 +211,9 @@ async fn handle_request(
 
 // Specific handler implementations
 
+// The version of the reflection API spec implemented by this runtime.
+const GENKIT_REFLECTION_API_SPEC_VERSION: i32 = 1;
+
 async fn handle_notify(req: Request<Incoming>) -> Response<BoxBody> {
     let body = match req.into_body().collect().await {
         Ok(b) => b.to_bytes(),
@@ -234,6 +237,23 @@ async fn handle_notify(req: Request<Incoming>) -> Response<BoxBody> {
     if let Some(url) = notify_req.telemetry_server_url {
         crate::tracing::exporter::set_telemetry_server_url(url);
     }
+
+    if let Some(cli_version) = notify_req.reflection_api_spec_version {
+        if cli_version != GENKIT_REFLECTION_API_SPEC_VERSION {
+            if cli_version < GENKIT_REFLECTION_API_SPEC_VERSION {
+                log::warn!(
+                    "WARNING: Genkit CLI version may be outdated. Please update `genkit-cli` to the latest version."
+                );
+            } else {
+                log::warn!(
+                    "Genkit CLI is newer than runtime library. Some features may not be supported. Consider upgrading your runtime library version (debug info: expected {}, got {}).",
+                    GENKIT_REFLECTION_API_SPEC_VERSION,
+                    cli_version
+                );
+            }
+        }
+    }
+
     ok_response("OK")
 }
 
