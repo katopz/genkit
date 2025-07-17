@@ -54,10 +54,3 @@ A convenience function for creating simple retrievers from existing data is not 
 *   **Missing In**: `genkit/rs/genkit/src/lib.rs`
 *   **Description**: The JS version has `defineSimpleRetriever` to easily wrap an array of data or a function into a Genkit retriever. The Rust equivalent, `define_simple_retriever`, is commented out in `genkit/rs/genkit/src/lib.rs#L318-L328`.
 *   **Impact**: Low. This is a helper function; the core `define_retriever` is available, but implementation is more verbose.
-
-#### 5. Named Flow Steps
-The high-level `ai.run()` method for creating named, traceable steps within a flow does not have a direct equivalent.
-
-*   **Missing In**: `genkit/rs/genkit/src/lib.rs` (on the `Genkit` struct)
-*   **Description**: In JS, you can wrap parts of a flow in `ai.run('step-name', async () => { ... })` for improved observability in traces. While the underlying tracing mechanism (`run_in_new_span`) exists in Rust, it is not exposed as a simple, ergonomic method on the main `Genkit` struct.
-*   **Impact**: Low. This is a quality-of-life feature for debugging and tracing, but it doesn't block core functionality.

@@ -495,4 +495,22 @@ impl Genkit {
         .await?;
         Ok(Some(Arc::new(session)))
     }
+    pub async fn run<F, Fut, T>(&self, name: &str, func: F) -> Result<T>
+    where
+        F: FnOnce() -> Fut + Send,
+        Fut: std::future::Future<Output = Result<T>> + Send,
+        T: serde::Serialize + Send + 'static,
+    {
+        genkit_core::flow::run(name, func).await
+    }
+
+    pub async fn run_with_input<F, Fut, I, O>(&self, name: &str, input: I, func: F) -> Result<O>
+    where
+        F: FnOnce(I) -> Fut + Send,
+        Fut: std::future::Future<Output = Result<O>> + Send,
+        I: serde::Serialize + Send + 'static,
+        O: serde::Serialize + Send + 'static,
+    {
+        genkit_core::flow::run_with_input(name, input, func).await
+    }
 }
