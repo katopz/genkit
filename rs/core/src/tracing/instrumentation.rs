@@ -181,3 +181,20 @@ where
         })
         .await
 }
+
+/// Sets custom attributes on the currently active OpenTelemetry span.
+///
+/// This is useful for adding contextual information to a span after it has
+/// already been created.
+pub fn set_span_attributes(attrs: HashMap<String, Value>) {
+    let binding = Context::current();
+    let span = binding.span();
+    if !span.is_recording() {
+        return;
+    }
+    let span_attributes: Vec<KeyValue> = attrs
+        .into_iter()
+        .map(|(k, v)| KeyValue::new(k, convert_otel_value(v)))
+        .collect();
+    span.set_attributes(span_attributes);
+}

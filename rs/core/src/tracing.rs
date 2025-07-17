@@ -23,7 +23,7 @@ pub mod instrumentation;
 pub mod types;
 
 // Re-export key types and functions for the public API.
-pub use self::instrumentation::in_new_span;
+pub use self::instrumentation::{in_new_span, set_span_attributes};
 
 tokio::task_local! {
     /// Task-local storage for the current trace path.
