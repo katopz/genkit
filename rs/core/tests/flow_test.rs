@@ -585,9 +585,9 @@ mod context_test {
 /// 'telemetry'
 mod telemetry_test {
     use super::*;
-    use genkit_core::action::define_action;
     use genkit_core::registry::ActionType;
     use genkit_core::telemetry::TelemetryConfig;
+    use genkit_core::{action::define_action, flow::run_with_input};
     use once_cell::sync::{Lazy, OnceCell};
     use opentelemetry::Value as OTelValue;
     use opentelemetry_sdk::{
@@ -861,6 +861,103 @@ mod telemetry_test {
 
         // Assertions for custom span
         let expected_custom_attrs = json!({
+            "genkit:name": "custom",
+            "genkit:output": "\"foo bar\"",
+            "genkit:path": "/{testFlow,t:flow}/{custom,t:flowStep}",
+            "genkit:state": "success",
+            "genkit:type": "flowStep"
+        });
+        assert_eq!(
+            attributes_to_json_value(&custom_span.attributes),
+            expected_custom_attrs
+        );
+
+        // Assertions for testFlow span
+        let expected_flow_attrs = json!({
+            "genkit:input": "\"foo\"",
+            "genkit:isRoot": true,
+            "genkit:metadata:subtype": "flow",
+            "genkit:metadata:context": "{\"user\":\"pavel\"}",
+            "genkit:name": "testFlow",
+            "genkit:output": "\"foo bar\"",
+            "genkit:path": "/{testFlow,t:flow}",
+            "genkit:state": "success",
+            "genkit:type": "action"
+        });
+        assert_eq!(
+            attributes_to_json_value(&flow_span.attributes),
+            expected_flow_attrs
+        );
+    }
+
+    #[rstest]
+    #[tokio::test]
+    /// 'records traces of nested actions'
+    async fn test_records_traces_of_nested_actions_with_input(
+        registry: Registry,
+        harness: TestHarness,
+    ) {
+        let test_action = define_action(
+            &registry,
+            ActionType::Tool,
+            "testAction",
+            |_: Option<String>, _: ActionFnArg<()>| async { Ok("bar".to_string()) },
+        );
+        let test_flow = define_flow(
+            &registry,
+            "testFlow",
+            move |input: String, _: ActionFnArg<()>| {
+                let test_action = test_action.clone();
+                async move {
+                    run_with_input("custom", input, move |_input| async move {
+                        let res = test_action.run(None, None).await?.result;
+                        Ok(format!("foo {}", res))
+                    })
+                    .await
+                }
+            },
+        );
+
+        let mut context = ActionContext::default();
+        context
+            .additional_context
+            .insert("user".to_string(), json!("pavel"));
+        let options = ActionRunOptions {
+            context: Some(context),
+            ..Default::default()
+        };
+        let result = test_flow
+            .run("foo".to_string(), Some(options))
+            .await
+            .unwrap();
+        assert_eq!(result.result, "foo bar");
+
+        let spans = harness.get_spans();
+        assert_eq!(spans.len(), 3);
+
+        // Find spans by name to avoid depending on export order.
+        let action_span = spans.iter().find(|s| s.name == "testAction").unwrap();
+        let custom_span = spans.iter().find(|s| s.name == "custom").unwrap();
+        let flow_span = spans.iter().find(|s| s.name == "testFlow").unwrap();
+
+        // Assertions for testAction span
+        let expected_action_attrs = json!({
+            "genkit:input": "null",
+            "genkit:metadata:subtype": "tool",
+            "genkit:name": "testAction",
+            "genkit:output": "\"bar\"",
+            "genkit:path": "/{testFlow,t:flow}/{custom,t:flowStep}/{testAction,t:action,s:tool}",
+            "genkit:state": "success",
+            "genkit:type": "action"
+        });
+        assert_eq!(
+            attributes_to_json_value(&action_span.attributes),
+            expected_action_attrs
+        );
+
+        // Assertions for custom span
+        let expected_custom_attrs = json!({
+            "genkit:input": "\"foo\"",
             "genkit:name": "custom",
             "genkit:output": "\"foo bar\"",
             "genkit:path": "/{testFlow,t:flow}/{custom,t:flowStep}",

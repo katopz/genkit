@@ -82,6 +82,40 @@ where
     action
 }
 
+/// Executes a given function with an explicit input as a distinct step within a flow.
+///
+/// Each `run` call creates a new child span in the current trace, making it
+/// easier to visualize and debug the flow's execution path. The provided `input`
+/// is automatically recorded in the trace data.
+pub async fn run_with_input<F, Fut, I, O>(name: &str, input: I, func: F) -> Result<O>
+where
+    F: FnOnce(I) -> Fut + Send,
+    Fut: Future<Output = Result<O>> + Send,
+    I: Serialize + Send + 'static,
+    O: Serialize + Send + 'static,
+{
+    let mut attrs = HashMap::new();
+    attrs.insert(
+        "genkit:type".to_string(),
+        Value::String("flowStep".to_string()),
+    );
+    // Add input to telemetry attributes, but only if it's not null.
+    // The `run` function passes `()` which serializes to null.
+    if let Ok(input_val) = serde_json::to_value(&input) {
+        if !input_val.is_null() {
+            if let Ok(input_str) = serde_json::to_string(&input_val) {
+                attrs.insert("genkit:input".to_string(), Value::String(input_str));
+            }
+        }
+    }
+
+    genkit_tracing::in_new_span(name.to_string(), Some(attrs), |_trace_context| async {
+        func(input).await
+    })
+    .await
+    .map(|(result, _telemetry)| result)
+}
+
 /// Executes a given function as a distinct step within a flow.
 ///
 /// Each `run` call creates a new child span in the current trace, making it
@@ -98,18 +132,8 @@ where
     Fut: Future<Output = Result<T>> + Send,
     T: Serialize + Send + 'static,
 {
-    let mut attrs = HashMap::new();
-    attrs.insert(
-        "genkit:type".to_string(),
-        Value::String("flowStep".to_string()),
-    );
     // This function wraps the core tracing logic to provide a simple API for
-    // defining instrumented steps. The `map` at the end unwraps the
-    // (T, TelemetryInfo) tuple from `in_new_span`, as `run`'s public API
-    // only exposes the business logic result `T`.
-    genkit_tracing::in_new_span(name.to_string(), Some(attrs), |_trace_context| async {
-        func().await
-    })
-    .await
-    .map(|(result, _telemetry)| result)
+    // defining instrumented steps. It calls `run_with_input` with a unit type `()`
+    // as the input, which is ignored by the closure but allows for code reuse.
+    run_with_input(name, (), |_| func()).await
 }
