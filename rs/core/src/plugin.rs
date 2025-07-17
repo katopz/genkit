@@ -23,7 +23,7 @@
 //! provided `Registry`.
 
 use crate::action::ActionMetadata;
-use crate::error::{Error, Result};
+use crate::error::Result;
 use crate::registry::{ActionType, Registry};
 use async_trait::async_trait;
 use std::future::Future;
@@ -54,21 +54,17 @@ pub trait Plugin: Send + Sync {
         Box::pin(async { Ok(Vec::new()) })
     }
 
-    /// Resolves and registers a single action dynamically.
+    /// (Optional) Dynamically resolves and registers an action on-demand.
     ///
-    /// When the framework tries to look up an action that isn't already registered,
-    /// it may call this method on relevant plugins to see if they can provide it.
-    /// If the plugin can provide the action, it should define and register it
-    /// with the provided `registry`.
+    /// This is called by the registry during a `lookup_action` call if an
+    /// action is not found after the plugin has been initialized.
     async fn resolve_action(
         &self,
         _action_type: ActionType,
         _target: &str,
         _registry: &Registry,
     ) -> Result<()> {
-        Err(Error::new_internal(format!(
-            "resolve_action is not implemented for plugin '{}'",
-            self.name()
-        )))
+        // Default implementation does nothing.
+        Ok(())
     }
 }

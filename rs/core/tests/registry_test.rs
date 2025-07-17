@@ -39,7 +39,7 @@ mod list_actions_test {
     #[rstest]
     #[tokio::test]
     /// 'returns all registered actions by plugins'
-    async fn returns_all_registered_actions_by_plugins(mut registry: Registry) {
+    async fn returns_all_registered_actions_by_plugins(registry: Registry) {
         // Define mock plugin 'foo'
         struct FooPlugin;
         #[async_trait]
@@ -108,7 +108,7 @@ mod list_actions_test {
     #[rstest]
     #[tokio::test]
     /// 'should allow plugin initialization from runtime context'
-    async fn should_allow_plugin_initialization_from_runtime_context(mut registry: Registry) {
+    async fn should_allow_plugin_initialization_from_runtime_context(registry: Registry) {
         // A mock plugin to test runtime initialization behavior
         #[derive(Default, Clone)]
         struct RuntimePlugin {
@@ -244,7 +244,6 @@ mod list_resolvable_actions_test {
     #[tokio::test]
     /// 'returns all registered actions by plugins'
     async fn returns_all_registered_by_plugins(registry: Registry) {
-        let mut registry = registry;
         // Mock Plugin 'foo'
         struct FooPlugin;
         #[async_trait]
@@ -322,7 +321,7 @@ mod list_resolvable_actions_test {
     #[rstest]
     #[tokio::test]
     /// 'should allow plugin initialization from runtime context'
-    async fn should_allow_plugin_initialization_from_runtime_context(mut registry: Registry) {
+    async fn should_allow_plugin_initialization_from_runtime_context(registry: Registry) {
         let initialized = Arc::new(AtomicBool::new(false));
 
         struct FooPlugin {
@@ -421,7 +420,7 @@ mod lookup_action_test {
     #[rstest]
     #[tokio::test]
     /// 'initializes plugins on first lookup'
-    async fn initializes_plugins_on_first_lookup(mut registry: Registry) {
+    async fn initializes_plugins_on_first_lookup(registry: Registry) {
         let foo_initialized = Arc::new(AtomicBool::new(false));
         let bar_initialized = Arc::new(AtomicBool::new(false));
 
@@ -575,7 +574,7 @@ mod lookup_action_test {
     #[rstest]
     #[tokio::test]
     /// 'returns action registered by plugin'
-    async fn returns_action_registered_by_plugin(mut registry: Registry) {
+    async fn returns_action_registered_by_plugin(registry: Registry) {
         // Define a mock plugin that registers actions.
         struct FooPlugin;
         #[async_trait]
@@ -640,7 +639,7 @@ mod lookup_action_test {
     #[rstest]
     #[tokio::test]
     /// 'returns action dynamically resolved by plugin'
-    async fn returns_action_dynamically_resolved_by_plugin(mut registry: Registry) {
+    async fn returns_action_dynamically_resolved_by_plugin(registry: Registry) {
         // Define a plugin that resolves actions dynamically.
         struct DynamicPlugin;
         #[async_trait]

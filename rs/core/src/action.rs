@@ -22,11 +22,12 @@
 use crate::async_utils::{channel, Channel};
 use crate::context::{self, ActionContext};
 use crate::error::{Error, Result};
-use crate::registry::{ActionType, Registry};
+use crate::registry::{ActionType, ErasedAction, Registry};
 use crate::schema::{parse_schema, schema_for, ProvidedSchema};
 use crate::status::StatusCode;
 use crate::tracing::{self, TraceContext};
 use async_trait::async_trait;
+use futures::future::BoxFuture;
 use futures::{Future, Stream, StreamExt};
 use schemars::{JsonSchema, Schema};
 use serde::Deserialize;
@@ -37,6 +38,26 @@ use std::fmt::{self, Debug, Display};
 use std::pin::Pin;
 use std::sync::Arc;
 use tokio_util::sync::CancellationToken;
+
+/// A simple, cloneable error representation for use in shared futures.
+#[derive(Clone, Debug)]
+pub struct CloneableError {
+    message: String,
+}
+
+impl fmt::Display for CloneableError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{}", self.message)
+    }
+}
+
+impl From<Error> for CloneableError {
+    fn from(err: Error) -> Self {
+        Self {
+            message: err.to_string(),
+        }
+    }
+}
 
 // --- ActionName Enum ---
 
@@ -603,4 +624,49 @@ where
         .register_action(action_type, action.clone())
         .expect("Failed to register action"); // Or handle error more gracefully
     action
+}
+
+/// Defines an action from a future-resolved configuration and registers it asynchronously.
+pub fn define_action_async<I, O, S, C, F, Fut, FutConfig>(
+    registry: &Registry,
+    action_type: ActionType,
+    name: impl Into<String>,
+    config_future: FutConfig,
+) -> BoxFuture<'static, Result<Action<I, O, S>>>
+where
+    I: Serialize + DeserializeOwned + JsonSchema + Send + Sync + Clone + 'static,
+    O: Serialize + JsonSchema + Send + Sync + 'static,
+    S: Serialize + JsonSchema + Send + Sync + Clone + 'static,
+    C: Into<ActionBuilder<I, O, S, F>>,
+    F: Fn(I, ActionFnArg<S>) -> Fut + Send + Sync + Clone + 'static,
+    Fut: Future<Output = Result<O>> + Send + 'static,
+    FutConfig: Future<Output = Result<C>> + Send + 'static,
+    Action<I, O, S>: ErasedAction + 'static,
+{
+    let name = name.into();
+    let registry_for_registration = registry.clone();
+    // This is the fix: create a second clone with a 'static lifetime to be
+    // moved into the returned future.
+    let registry_for_lookup = registry.clone();
+
+    let action_future = async move {
+        let config = config_future.await?;
+        let builder: ActionBuilder<I, O, S, F> = config.into();
+        let result: Result<Action<I, O, S>> = Ok(builder.build());
+        result
+    };
+
+    registry_for_registration.register_action_async(action_type, name.clone(), async move {
+        let action = action_future.await?;
+        let erased_action: Arc<dyn ErasedAction> = Arc::new(action);
+        Ok(erased_action)
+    });
+
+    Box::pin(async move {
+        registry_for_lookup // Use the 'static clone here.
+            .lookup_action(&format!("/{}/{}", action_type, name))
+            .await
+            .and_then(|action| action.as_any().downcast_ref::<Action<I, O, S>>().cloned())
+            .ok_or_else(|| Error::new_internal("Failed to resolve or downcast async action"))
+    })
 }
