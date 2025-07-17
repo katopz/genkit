@@ -38,6 +38,7 @@ pub mod utils;
 
 // Re-export key components for easier access.
 pub use action::{Action, ActionBuilder, ActionFn, ActionFnArg, ActionResult};
+pub use background_action::*;
 pub use context::ActionContext as Context;
 pub use error::{Error, Result};
 pub use flow::{define_flow, Flow};
