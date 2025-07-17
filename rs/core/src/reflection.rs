@@ -238,18 +238,28 @@ async fn handle_notify(req: Request<Incoming>) -> Response<BoxBody> {
 }
 
 async fn handle_list_actions(registry: Arc<Registry>) -> Response<BoxBody> {
-    let actions = registry.list_actions().await;
-    let api_actions: std::collections::HashMap<_, _> = actions
-        .iter()
-        .map(|(key, action)| {
-            let meta = action.metadata();
-            (
-                key,
-                json!({ "key": key, "name": action.name(), "description": meta.description, "inputSchema": meta.input_schema, "outputSchema": meta.output_schema, "metadata": meta }),
-            )
-        })
-        .collect();
-    json_response(&api_actions)
+    match registry.list_resolvable_actions().await {
+        Ok(actions) => {
+            let api_actions = actions
+                .iter()
+                .map(|(key, meta)| {
+                    (
+                        key,
+                        json!({
+                            "key": key,
+                            "name": &meta.name,
+                            "description": &meta.description,
+                            "inputSchema": &meta.input_schema,
+                            "outputSchema": &meta.output_schema,
+                            "metadata": meta
+                        }),
+                    )
+                })
+                .collect::<HashMap<_, _>>();
+            json_response(&api_actions)
+        }
+        Err(e) => error_response(e.as_status().code, e.to_string()),
+    }
 }
 
 async fn handle_run_action(req: Request<Incoming>, registry: Arc<Registry>) -> Response<BoxBody> {
