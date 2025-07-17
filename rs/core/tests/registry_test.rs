@@ -17,7 +17,7 @@
 //! Integration tests for the registry, refined from the TypeScript version.
 
 use async_trait::async_trait;
-use genkit_core::action::{define_action, ActionBuilder, ActionFnArg, ActionName};
+use genkit_core::action::{define_action, ActionFnArg, ActionName};
 use genkit_core::error::Result;
 use genkit_core::registry::{ActionType, Plugin, Registry};
 use genkit_core::runtime;
@@ -214,6 +214,7 @@ mod list_actions_test {
 #[cfg(test)]
 /// 'listResolvableActions'
 mod list_resolvable_actions_test {
+
     use super::*;
 
     #[rstest]
@@ -233,7 +234,7 @@ mod list_resolvable_actions_test {
             |_: (), _: ActionFnArg<()>| async { Ok(()) },
         );
 
-        let actions = registry.list_actions().await;
+        let actions = registry.list_resolvable_actions().await.unwrap();
         assert_eq!(actions.len(), 2);
         assert!(actions.contains_key("/model/foo_something"));
         assert!(actions.contains_key("/model/bar_something"));
@@ -243,6 +244,7 @@ mod list_resolvable_actions_test {
     #[tokio::test]
     /// 'returns all registered actions by plugins'
     async fn returns_all_registered_by_plugins(registry: Registry) {
+        let mut registry = registry;
         // Mock Plugin 'foo'
         struct FooPlugin;
         #[async_trait]
@@ -252,16 +254,15 @@ mod list_resolvable_actions_test {
                 "foo"
             }
             async fn initialize(&self, registry: &Registry) -> Result<()> {
-                let action = ActionBuilder::<(), (), (), _>::new(
+                define_action(
+                    registry,
                     ActionType::Model,
                     ActionName::Namespaced {
                         plugin_id: "foo".to_string(),
                         action_id: "something".to_string(),
                     },
-                    |_, _| async { Ok(()) },
-                )
-                .build();
-                registry.register_action(action.meta.action_type, action)?;
+                    |_: (), _: ActionFnArg<()>| async { Ok(()) },
+                );
                 Ok(())
             }
         }
@@ -275,35 +276,38 @@ mod list_resolvable_actions_test {
                 "bar"
             }
             async fn initialize(&self, registry: &Registry) -> Result<()> {
-                let action1 = ActionBuilder::<(), (), (), _>::new(
+                define_action(
+                    registry,
                     ActionType::Model,
                     ActionName::Namespaced {
                         plugin_id: "bar".to_string(),
                         action_id: "something".to_string(),
                     },
-                    |_, _| async { Ok(()) },
-                )
-                .build();
-                registry.register_action(action1.meta.action_type, action1)?;
-
-                let action2 = ActionBuilder::<(), (), (), _>::new(
+                    |_: (), _: ActionFnArg<()>| async { Ok(()) },
+                );
+                define_action(
+                    registry,
                     ActionType::Model,
                     ActionName::Namespaced {
                         plugin_id: "bar".to_string(),
                         action_id: "sub/something".to_string(),
                     },
-                    |_, _| async { Ok(()) },
-                )
-                .build();
-                registry.register_action(action2.meta.action_type, action2)?;
+                    |_: (), _: ActionFnArg<()>| async { Ok(()) },
+                );
                 Ok(())
             }
         }
 
         // Initialize plugins and check actions
-        FooPlugin.initialize(&registry).await.unwrap();
-        BarPlugin.initialize(&registry).await.unwrap();
-        let actions = registry.list_actions().await;
+        registry.register_plugin(Arc::new(FooPlugin)).await.unwrap();
+        registry.register_plugin(Arc::new(BarPlugin)).await.unwrap();
+
+        // Must run inside a context to trigger plugin initialization.
+        let actions = runtime::run_in_action_runtime_context(async {
+            registry.list_resolvable_actions().await
+        })
+        .await
+        .unwrap();
 
         assert_eq!(
             actions.len(),
@@ -397,13 +401,13 @@ mod list_resolvable_actions_test {
         );
 
         // The child should see both actions
-        let child_actions = child.list_actions().await;
+        let child_actions = child.list_resolvable_actions().await.unwrap();
         assert_eq!(child_actions.len(), 2);
         assert!(child_actions.contains_key("/model/parent_action"));
         assert!(child_actions.contains_key("/model/child_action"));
 
         // The parent should only see its own action
-        let parent_actions = registry.list_actions().await;
+        let parent_actions = registry.list_resolvable_actions().await.unwrap();
         assert_eq!(parent_actions.len(), 1);
         assert!(parent_actions.contains_key("/model/parent_action"));
     }

@@ -21,8 +21,8 @@ The reflection server, which is critical for local development and UI tools, has
 
 The registry is missing key features required for dynamic action loading and schema management.
 
-*   **`listResolvableActions` Method**: This entire method, which is used to list all possible actions a plugin can provide (even if not yet loaded), is missing. This is a key part of the developer experience provided by the reflection API.
-*   **Schema Registration**: The registry lacks the functionality to register and look up schemas. The corresponding helper functions `define_schema` and `define_json_schema` in `schema.rs` are stubbed out with `unimplemented!()`.
+- [x]   **`listResolvableActions` Method**: This entire method, which is used to list all possible actions a plugin can provide (even if not yet loaded), is missing. This is a key part of the developer experience provided by the reflection API.
+- [ ]   **Schema Registration**: The registry lacks the functionality to register and look up schemas. The corresponding helper functions `define_schema` and `define_json_schema` in `schema.rs` are stubbed out with `unimplemented!()`.
 
 ### 4. `action.rs`
 

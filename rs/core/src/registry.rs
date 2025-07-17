@@ -49,6 +49,7 @@ use crate::runtime;
 use crate::schema::{self, parse_schema, ProvidedSchema};
 use crate::status::StatusCode;
 use async_trait::async_trait;
+use futures::future::try_join_all;
 use futures::{FutureExt, StreamExt};
 use schemars::JsonSchema;
 use serde::{de::DeserializeOwned, Deserialize, Serialize};
@@ -522,5 +523,49 @@ impl Registry {
         }
 
         all_values
+    }
+
+    /// Returns metadata for all actions that are resolvable by plugins,
+    /// in addition to those already registered.
+    ///
+    /// NOTE: This method should not be used in latency-sensitive code paths.
+    /// It may rely on "admin" API calls (e.g., listing models from a cloud provider),
+    /// which can increase latency.
+    pub async fn list_resolvable_actions(&self) -> Result<HashMap<String, ActionMetadata>> {
+        // This is the critical fix: ensure all plugins are initialized before proceeding.
+        self.initialize_all_plugins().await?;
+
+        let mut resolvable_actions = if let Some(parent) = self.parent() {
+            // Box the recursive call to break the cycle.
+            Box::pin(parent.list_resolvable_actions()).await?
+        } else {
+            HashMap::new()
+        };
+
+        // 1. Concurrently list actions from all plugins.
+        // We clone the list of plugins to release the lock quickly.
+        let plugins = {
+            let state = self.state.lock().unwrap();
+            state.plugins.values().cloned().collect::<Vec<_>>()
+        };
+
+        let plugin_futures = plugins.iter().map(|plugin| plugin.list_actions());
+        let plugin_action_lists = try_join_all(plugin_futures).await?;
+
+        for action_list in plugin_action_lists {
+            for meta in action_list {
+                // The plugin is responsible for providing the full action name.
+                let key = format!("/{}/{}", meta.action_type, meta.name);
+                resolvable_actions.insert(key, meta);
+            }
+        }
+
+        // 2. Add actions that are already registered, overwriting plugin discoveries.
+        let registered_actions = self.list_actions().await;
+        for (key, action) in registered_actions {
+            resolvable_actions.insert(key, (*action.metadata()).clone());
+        }
+
+        Ok(resolvable_actions)
     }
 }

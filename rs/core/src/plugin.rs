@@ -26,6 +26,8 @@ use crate::action::ActionMetadata;
 use crate::error::{Error, Result};
 use crate::registry::{ActionType, Registry};
 use async_trait::async_trait;
+use std::future::Future;
+use std::pin::Pin;
 
 /// A trait for Genkit plugins.
 ///
@@ -44,13 +46,12 @@ pub trait Plugin: Send + Sync {
     /// provided `registry`.
     async fn initialize(&self, registry: &Registry) -> Result<()>;
 
-    /// Provides a list of actions that can be dynamically resolved by this plugin.
+    /// (Optional) Lists all actions that can be resolved by this plugin.
     ///
-    /// This is an optional method, useful for plugins that can provide a large or
-    /// variable number of actions without registering all of them upfront during
-    /// initialization.
-    async fn list_actions(&self) -> Result<Vec<ActionMetadata>> {
-        Ok(Vec::new())
+    /// This method allows for dynamic discovery of actions, such as models available
+    /// via an external API, without registering them all at startup.
+    fn list_actions(&self) -> Pin<Box<dyn Future<Output = Result<Vec<ActionMetadata>>> + Send>> {
+        Box::pin(async { Ok(Vec::new()) })
     }
 
     /// Resolves and registers a single action dynamically.
