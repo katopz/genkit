@@ -19,7 +19,7 @@
 
 use genkit_core::background_action::Operation;
 use genkit_core::error::{Error, Result};
-use genkit_core::registry::Registry;
+use genkit_core::registry::{ActionType, Registry};
 use serde_json::Value;
 
 /// Checks the status of a long-running operation.
@@ -35,8 +35,10 @@ pub async fn check_operation(
         .as_ref()
         .ok_or_else(|| Error::new_internal("Operation is missing original action key"))?;
 
-    let check_action_key =
-        start_action_key.replace("/background-model/", "/checkOperation/") + "/check";
+    let check_action_key = start_action_key.replace(
+        "/background-model/",
+        format!("/{}/", ActionType::CheckOperation).as_str(),
+    ) + "/check";
 
     println!(
         "[check_operation] Looking for check action key: {}",

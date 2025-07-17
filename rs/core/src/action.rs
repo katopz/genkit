@@ -197,7 +197,7 @@ impl<S: Send + 'static> Default for ActionRunOptions<S> {
 }
 
 /// Arguments passed to the function that implements an action's logic.
-#[derive(Default)]
+#[derive(Default, Clone)]
 pub struct ActionFnArg<S: Send + 'static> {
     /// Indicates whether the caller requested a streaming response.
     pub streaming_requested: bool,

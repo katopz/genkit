@@ -5,8 +5,8 @@ Here is a list of the incomplete items for `rs/core`:
 
 The implementation for background actions is a skeleton. The core logic of registering the component actions with the registry is missing.
 
-*   **`defineBackgroundAction`**: The builder for a background action (`BackgroundActionBuilder`) creates the `start`, `check`, and `cancel` actions, but it does not register them with the Genkit registry. The code contains a comment `// TODO: Register the actions with the registry`, confirming this is unfinished.
-*   **`lookupBackgroundAction`**: This function is missing entirely. Without it, there is no way to retrieve and interact with a defined background action from the registry.
+- [x]   **`defineBackgroundAction`**: The builder for a background action (`BackgroundActionBuilder`) creates the `start`, `check`, and `cancel` actions, but it does not register them with the Genkit registry. The code contains a comment `// TODO: Register the actions with the registry`, confirming this is unfinished.
+- [x]   **`lookupBackgroundAction`**: This function is missing entirely. Without it, there is no way to retrieve and interact with a defined background action from the registry.
 
 ### 2. `reflection.rs` (The Reflection API Server)
 

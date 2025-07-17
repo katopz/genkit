@@ -16,15 +16,15 @@ mod helpers;
 
 use genkit::{
     model::{Candidate, FinishReason, Part, Role},
-    registry::ActionType,
     Genkit, Model,
 };
-use genkit_ai::{self as genkit_ai, model::GenerateResponseData, GenerateOptions};
-
-use genkit_core::{
-    action::{define_action, ActionFnArg},
-    background_action::Operation,
+use genkit_ai::{
+    self as genkit_ai,
+    model::{DefineBackgroundModelOptions, GenerateResponseData},
+    GenerateOptions,
 };
+
+use genkit_core::background_action::Operation;
 use rstest::{fixture, rstest};
 use serde_json::json;
 use std::sync::Arc;
@@ -108,17 +108,19 @@ async fn test_starts_the_operation(
     assert!(!op.done);
 }
 
+use genkit_core::action::ActionFnArg;
+use std::future::Future;
+use std::pin::Pin;
+
 #[rstest]
 #[tokio::test]
+/// 'checks operation status'
 async fn test_checks_operation_status(
     #[future] genkit_with_programmable_model: (Arc<Genkit>, ProgrammableModel),
 ) {
     let (genkit, _pm) = genkit_with_programmable_model.await;
-    let registry = genkit.registry().clone();
-    // This test requires a `genkit.check_operation()` function and a background
-    // model implementation that can be polled.
 
-    // 1. Define a background model's check action that returns a completed operation.
+    // 1. Define the expected final result from the background model.
     let result_data = GenerateResponseData {
         candidates: vec![Candidate {
             index: 0,
@@ -133,39 +135,59 @@ async fn test_checks_operation_status(
         ..Default::default()
     };
 
-    let completed_op_result = result_data;
-    define_action(
-        &registry,
-        ActionType::CheckOperation,
-        "bkg-model/check",
-        move |op_in: genkit_core::background_action::Operation<serde_json::Value>,
-              _ctx: ActionFnArg<()>| {
-            let completed_op_result = completed_op_result.clone();
-            async move {
-                let mut op = Operation {
-                    action: op_in.action,
-                    id: op_in.id,
-                    done: true,
-                    output: Some(serde_json::to_value(completed_op_result.clone()).unwrap()),
-                    ..Default::default()
-                };
-                op.output = Some(serde_json::to_value(completed_op_result).unwrap());
-                Ok(op)
-            }
-        },
-    );
+    // 2. This is the completed operation that the `check` function will return.
+    let final_op = Operation {
+        id: "123".to_string(),
+        done: true,
+        output: Some(result_data.clone()),
+        ..Default::default()
+    };
 
-    // 3. Call `check_operation`.
+    // 3. Define the type for the cancel function pointer to resolve the ambiguity.
+    type CancelFut =
+        Pin<Box<dyn Future<Output = genkit::Result<Operation<GenerateResponseData>>> + Send>>;
+    type CancelFn = fn(Operation<GenerateResponseData>, ActionFnArg<()>) -> CancelFut;
+
+    // 4. Define the background model with its start and check logic.
+    genkit.define_background_model(DefineBackgroundModelOptions {
+        name: "bkg-model".to_string(),
+        versions: None,
+        label: None,
+        supports: None,
+        config_schema: None,
+        // The `start` handler returns a pending operation.
+        start: |_req, _args| async {
+            Ok(Operation {
+                id: "123".to_string(),
+                done: false,
+                ..Default::default()
+            })
+        },
+        // The `check` handler returns the final, completed operation.
+        check: move |_op, _args| {
+            let final_op = final_op.clone();
+            async move { Ok(final_op) }
+        },
+        // Explicitly type `None` to resolve the ambiguity.
+        cancel: None::<CancelFn>,
+    });
+
+    // 5. Create an operation object representing the one we want to check.
+    //    The `action` key is crucial for looking up the correct check handler.
     let op_to_check = Operation::<serde_json::Value> {
         action: Some("/background-model/bkg-model".to_string()),
         id: "123".to_string(),
         ..Default::default()
     };
+
+    // 6. Call `check_operation`. This will invoke the `check` handler defined above.
     let checked_op = genkit.check_operation(&op_to_check).await.unwrap();
 
-    // 4. Assert the result.
+    // 7. Assert that the operation is now done and contains the correct output.
     assert!(checked_op.done);
-    let result: GenerateResponseData = serde_json::from_value(checked_op.output.unwrap()).unwrap();
-    let text = result.candidates.first().unwrap().message.text();
+    let output_data: GenerateResponseData =
+        serde_json::from_value(checked_op.output.unwrap()).unwrap();
+    assert_eq!(output_data, result_data);
+    let text = output_data.candidates.first().unwrap().message.text();
     assert_eq!(text, "done");
 }

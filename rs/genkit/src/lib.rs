@@ -220,11 +220,31 @@ impl Genkit {
     }
 
     /// Defines a new background model and adds it to the registry.
-    pub fn define_background_model(
+    pub fn define_background_model<FStart, FCheck, FCancel, FutStart, FutCheck, FutCancel>(
         &self,
-        registry: &Registry,
-        options: DefineBackgroundModelOptions,
-    ) -> BackgroundModelAction {
+        options: DefineBackgroundModelOptions<
+            FStart,
+            FCheck,
+            FCancel,
+            FutStart,
+            FutCheck,
+            FutCancel,
+        >,
+    ) -> BackgroundModelAction
+    where
+        FStart: Fn(GenerateRequest, ActionFnArg<()>) -> FutStart + Send + Sync + 'static,
+        FutStart: Future<Output = Result<Operation<GenerateResponseData>>> + Send,
+        FCheck: Fn(Operation<GenerateResponseData>, ActionFnArg<()>) -> FutCheck
+            + Send
+            + Sync
+            + 'static,
+        FutCheck: Future<Output = Result<Operation<GenerateResponseData>>> + Send,
+        FCancel: Fn(Operation<GenerateResponseData>, ActionFnArg<()>) -> FutCancel
+            + Send
+            + Sync
+            + 'static,
+        FutCancel: Future<Output = Result<Operation<GenerateResponseData>>> + Send,
+    {
         define_background_model(&self.registry, options)
     }
 

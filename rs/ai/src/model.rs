@@ -29,11 +29,12 @@
 use ::core::future::Future;
 use ::core::marker::Send;
 use ::serde::{Deserialize, Serialize};
-use genkit_core::action::ActionMetadata;
+use genkit_core::action::{define_action, ActionMetadata};
 use genkit_core::context::ActionContext;
 use genkit_core::error::Result;
-use genkit_core::Registry;
+use genkit_core::registry::ActionType;
 use genkit_core::{action::StreamingResponse, registry::ErasedAction, Action};
+use genkit_core::{define_background_action, ActionFnArg, Operation, Registry};
 use schemars::JsonSchema;
 use serde_json::{json, Value};
 use std::collections::HashMap;
@@ -212,7 +213,7 @@ pub struct GenerationUsage {
 }
 
 /// A candidate response from a generative model.
-#[derive(Default, Debug, Clone, Serialize, Deserialize, JsonSchema)]
+#[derive(Default, Debug, Clone, Serialize, Deserialize, JsonSchema, PartialEq)]
 #[serde(rename_all = "camelCase")]
 pub struct CandidateData {
     pub index: u32,
@@ -226,7 +227,7 @@ pub struct CandidateData {
 }
 
 /// A response from a generative model.
-#[derive(Default, Debug, Clone, Serialize, Deserialize, JsonSchema)]
+#[derive(Default, Debug, Clone, Serialize, Deserialize, JsonSchema, PartialEq)]
 #[serde(rename_all = "camelCase")]
 pub struct GenerateResponseData {
     pub candidates: Vec<CandidateData>,
@@ -500,21 +501,41 @@ where
     model_action
 }
 
-pub struct DefineBackgroundModelOptions {
+pub struct DefineBackgroundModelOptions<FStart, FCheck, FCancel, FutStart, FutCheck, FutCancel>
+where
+    FStart: Fn(GenerateRequest, ActionFnArg<()>) -> FutStart + Send + Sync + 'static,
+    FutStart: Future<Output = Result<Operation<GenerateResponseData>>> + Send,
+    FCheck:
+        Fn(Operation<GenerateResponseData>, ActionFnArg<()>) -> FutCheck + Send + Sync + 'static,
+    FutCheck: Future<Output = Result<Operation<GenerateResponseData>>> + Send,
+    FCancel:
+        Fn(Operation<GenerateResponseData>, ActionFnArg<()>) -> FutCancel + Send + Sync + 'static,
+    FutCancel: Future<Output = Result<Operation<GenerateResponseData>>> + Send,
+{
     pub name: String,
     pub label: Option<String>,
     pub versions: Option<Vec<String>>,
     pub supports: Option<ModelInfoSupports>,
     pub config_schema: Option<Value>,
-    pub start: Arc<dyn Fn(GenerateRequest) -> Result<String, String> + Send + Sync>,
-    pub check: Arc<dyn Fn(String) -> Result<GenerateResponseData, String> + Send + Sync>,
-    pub cancel: Arc<dyn Fn(String) -> Result<(), String> + Send + Sync>,
+    pub start: FStart,
+    pub check: FCheck,
+    pub cancel: Option<FCancel>,
 }
 
-pub fn define_background_model(
+pub fn define_background_model<FStart, FCheck, FCancel, FutStart, FutCheck, FutCancel>(
     registry: &Registry,
-    options: DefineBackgroundModelOptions,
-) -> BackgroundModelAction {
+    options: DefineBackgroundModelOptions<FStart, FCheck, FCancel, FutStart, FutCheck, FutCancel>,
+) -> BackgroundModelAction
+where
+    FStart: Fn(GenerateRequest, ActionFnArg<()>) -> FutStart + Send + Sync + 'static,
+    FutStart: Future<Output = Result<Operation<GenerateResponseData>>> + Send,
+    FCheck:
+        Fn(Operation<GenerateResponseData>, ActionFnArg<()>) -> FutCheck + Send + Sync + 'static,
+    FutCheck: Future<Output = Result<Operation<GenerateResponseData>>> + Send,
+    FCancel:
+        Fn(Operation<GenerateResponseData>, ActionFnArg<()>) -> FutCancel + Send + Sync + 'static,
+    FutCancel: Future<Output = Result<Operation<GenerateResponseData>>> + Send,
+{
     let mut supports = options.supports.clone().unwrap_or_default();
     supports.long_running = Some(true);
     let model_info = ModelInfo {
@@ -531,66 +552,49 @@ pub fn define_background_model(
     if let Some(config_schema) = &options.config_schema {
         metadata.insert("configSchema".to_string(), config_schema.clone());
     }
-    let metadata_value = json!(metadata);
 
-    let start_fn = options.start.clone();
-    let check_fn = options.check.clone();
+    let bg_action = define_background_action(
+        registry,
+        options.name.clone(),
+        ActionType::BackgroundModel,
+        options.start,
+        options.check,
+        options.cancel,
+    );
 
-    let action_f = move |req: GenerateRequest, _args: genkit_core::action::ActionFnArg<()>| {
-        // This pattern separates the `Fn` closure from the `async` block.
-        // The outer closure borrows the `Arc`s and clones them.
-        // The `async move` block then takes ownership of the clones,
-        // satisfying the `Send` bound for the returned `Future`.
-        let start_fn = start_fn.clone();
-        let check_fn = check_fn.clone();
+    let start_func = bg_action.start_action.func;
+    let check_func = bg_action.check_action.func;
 
+    let poll_fn = move |req: GenerateRequest, args: ActionFnArg<()>| {
+        let start_func = start_func.clone();
+        let check_func = check_func.clone();
         async move {
-            let op_id = start_fn(req);
-            match op_id {
-                Ok(id) => {
-                    let mut response = GenerateResponseData {
-                        candidates: vec![],
-                        usage: None,
-                        custom: None,
-                        operation: Some(id),
-                        aggregated: None,
-                    };
-                    loop {
-                        match check_fn(response.operation.clone().unwrap()) {
-                            Ok(check_response) => {
-                                response = check_response;
-                                if response.candidates.iter().any(|c| {
-                                    c.finish_reason != Some(FinishReason::Other)
-                                        && c.finish_reason.is_some()
-                                }) {
-                                    break;
-                                }
-                            }
-                            Err(e) => return Err(genkit_core::error::Error::new_internal(e)),
-                        }
-                        tokio::time::sleep(tokio::time::Duration::from_secs(2)).await;
-                    }
-                    Ok(response)
-                }
-                Err(e) => Err(genkit_core::error::Error::new_internal(e)),
+            let mut op = start_func.run(req, args.clone()).await?;
+            while !op.done {
+                op = check_func.run(op, args.clone()).await?;
             }
+            if let Some(err_val) = op.error {
+                return Err(genkit_core::error::Error::new_internal(
+                    serde_json::to_string(&err_val)
+                        .unwrap_or_else(|_| "Operation failed with non-serializable error".into()),
+                ));
+            }
+            op.output.ok_or_else(|| {
+                genkit_core::error::Error::new_internal(
+                    "Operation finished without output or error.",
+                )
+            })
         }
     };
 
-    let metadata_map: std::collections::HashMap<String, serde_json::Value> =
-        serde_json::from_value(metadata_value).unwrap();
+    let mut action = define_action(registry, ActionType::BackgroundModel, options.name, poll_fn);
+    action.metadata_mut().metadata.extend(metadata);
 
-    let action = genkit_core::action::ActionBuilder::new(
-        genkit_core::registry::ActionType::BackgroundModel,
-        options.name.clone(),
-        action_f,
-    )
-    .with_metadata(metadata_map)
-    .build();
     let bg_model_action = BackgroundModelAction(action);
     registry
         .register_action(bg_model_action.meta.action_type, bg_model_action.clone())
         .unwrap();
+
     bg_model_action
 }
 

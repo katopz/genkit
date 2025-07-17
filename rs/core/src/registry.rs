@@ -65,8 +65,8 @@ pub use crate::plugin::Plugin;
 
 /// The type of a runnable action.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, Display, EnumString)]
-#[serde(rename_all = "camelCase")]
-#[strum(serialize_all = "lowercase")]
+#[serde(rename_all = "kebab-case")]
+#[strum(serialize_all = "kebab-case")]
 pub enum ActionType {
     Custom,
     Embedder,

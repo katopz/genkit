@@ -23,7 +23,7 @@
 //! - `cancel`: (Optional) To request cancellation of the operation.
 
 use crate::action::{define_action, Action, ActionFnArg};
-use crate::error::Result;
+use crate::error::{Error, Result};
 use crate::registry::{ActionType, Registry};
 use schemars::JsonSchema;
 use serde::{de::DeserializeOwned, Deserialize, Serialize};
@@ -163,4 +163,69 @@ where
         check_action,
         cancel_action,
     }
+}
+
+/// Looks up a background action from the registry by its key.
+pub async fn lookup_background_action<I, O>(
+    registry: &Registry,
+    key: &str,
+) -> Result<Option<BackgroundAction<I, O>>>
+where
+    I: DeserializeOwned + JsonSchema + Serialize + Send + Sync + Clone + 'static,
+    O: Serialize + DeserializeOwned + JsonSchema + Send + Sync + Clone + 'static,
+{
+    // 1. Lookup the root (start) action.
+    let root_action_erased = match registry.lookup_action(key).await {
+        Some(action) => action,
+        None => return Ok(None),
+    };
+
+    // 2. Downcast the start action to its concrete type and clone it.
+    let start_action = root_action_erased
+        .as_any()
+        .downcast_ref::<Action<I, Operation<O>, ()>>()
+        .ok_or_else(|| Error::new_internal("Mismatched type for background start action"))?
+        .clone();
+
+    // 3. Derive the action name from the key (e.g., "/flow/foo/bar" -> "foo/bar").
+    let action_name = key
+        .splitn(3, '/')
+        .last()
+        .ok_or_else(|| Error::new_internal("Invalid action key format"))?;
+
+    // 4. Lookup the check action (it must exist).
+    let check_key = format!("/check-operation/{}/check", action_name);
+    let check_action_erased = registry.lookup_action(&check_key).await.ok_or_else(|| {
+        Error::new_internal(format!(
+            "Check action '{}' not found for main action '{}'",
+            check_key, key
+        ))
+    })?;
+
+    // 5. Downcast the check action.
+    let check_action = check_action_erased
+        .as_any()
+        .downcast_ref::<Action<Operation<O>, Operation<O>, ()>>()
+        .ok_or_else(|| Error::new_internal("Mismatched type for background check action"))?
+        .clone();
+
+    // 6. Lookup the cancel action (it's optional).
+    let cancel_key = format!("/cancel-operation/{}/cancel", action_name);
+    let cancel_action = match registry.lookup_action(&cancel_key).await {
+        Some(erased) => Some(
+            erased
+                .as_any()
+                .downcast_ref::<Action<Operation<O>, Operation<O>, ()>>()
+                .ok_or_else(|| Error::new_internal("Mismatched type for background cancel action"))?
+                .clone(),
+        ),
+        None => None,
+    };
+
+    // 7. Construct and return the BackgroundAction.
+    Ok(Some(BackgroundAction {
+        start_action,
+        check_action,
+        cancel_action,
+    }))
 }
