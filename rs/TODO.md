@@ -47,10 +47,3 @@ The functionality for handling asynchronous, long-running models (e.g., for vide
 *   **Missing In**: `genkit/rs/genkit/src/lib.rs` (on the `Genkit` struct)
 *   **Description**: While `define_background_model`, `generate_operation`, and `check_operation` exist in the Rust codebase, the tests indicate this feature is incomplete. The JS version provides a complete workflow for starting a long-running job and polling for its result.
 *   **Impact**: Medium. This is a more advanced feature, but its absence blocks use cases involving slow-to-generate media. The tests in `rs/genkit/tests/generate_long_running_test.rs` are placeholders.
-
-#### 4. Simple Retriever Helper
-A convenience function for creating simple retrievers from existing data is not implemented.
-
-*   **Missing In**: `genkit/rs/genkit/src/lib.rs`
-*   **Description**: The JS version has `defineSimpleRetriever` to easily wrap an array of data or a function into a Genkit retriever. The Rust equivalent, `define_simple_retriever`, is commented out in `genkit/rs/genkit/src/lib.rs#L318-L328`.
-*   **Impact**: Low. This is a helper function; the core `define_retriever` is available, but implementation is more verbose.

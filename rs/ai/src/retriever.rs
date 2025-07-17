@@ -211,6 +211,124 @@ where
     indexer_action
 }
 
+/// A trait for types that can be converted into a Genkit `Document`.
+///
+/// This allows `define_simple_retriever` to work with custom data types.
+pub trait IntoDocument {
+    /// Converts the object into the main content of a `Document`.
+    ///
+    /// The default implementation serializes the entire object to a JSON string.
+    /// You can override this to extract a specific field as text.
+    fn to_document_content(&self) -> Part
+    where
+        Self: Serialize,
+    {
+        Part::text(serde_json::to_string(self).unwrap_or_default())
+    }
+
+    /// Extracts metadata from the object to be stored in the `Document`.
+    ///
+    /// The default implementation returns `None`. You should override this to
+    /// store relevant metadata, which can be the object itself serialized
+    /// to a `serde_json::Value`.
+    fn to_document_metadata(&self) -> Option<Value> {
+        None
+    }
+}
+
+/// Blanket implementation for `String` to treat it as document content directly.
+impl IntoDocument for String {
+    fn to_document_content(&self) -> Part {
+        Part::text(self.clone())
+    }
+
+    fn to_document_metadata(&self) -> Option<Value> {
+        None
+    }
+}
+
+/// Converts an item that implements `IntoDocument` into a `Document`.
+fn item_to_document<T: IntoDocument + Serialize>(item: &T) -> Document {
+    let mut doc = Document::new(vec![item.to_document_content()], None);
+    if let Some(Value::Object(map)) = item.to_document_metadata() {
+        doc.metadata = Some(map.into_iter().collect());
+    }
+    doc
+}
+
+/// Options for `define_simple_retriever`.
+pub struct SimpleRetrieverOptions {
+    pub name: String,
+}
+
+/// Defines a simple retriever from a handler that returns a vector of custom objects.
+///
+/// This function simplifies the process of creating a retriever by automatically
+/// handling the conversion of your data into `Document` objects. Your data type `R`
+/// needs to implement the `IntoDocument` trait.
+///
+/// # Example
+///
+/// ```rust,ignore
+/// use genkit_ai::retriever::{define_simple_retriever, IntoDocument, SimpleRetrieverOptions};
+/// use genkit_core::registry::Registry;
+/// use serde::Serialize;
+///
+/// #[derive(Serialize)]
+/// struct MyData {
+///     id: u32,
+///     text: String,
+///     category: String,
+/// }
+///
+/// impl IntoDocument for MyData {
+///     fn to_document_content(&self) -> genkit_ai::document::Part {
+///         genkit_ai::document::Part::Text(self.text.clone())
+///     }
+///
+///     fn to_document_metadata(&self) -> Option<serde_json::Value> {
+///         Some(serde_json::to_value(self).unwrap())
+///     }
+/// }
+///
+/// fn my_retriever(registry: &Registry) {
+///     define_simple_retriever(
+///         registry,
+///         SimpleRetrieverOptions { name: "myRetriever".to_string() },
+///         |request, _args| async move {
+///             // In a real implementation, you would query a database based on `request.query`.
+///             Ok(vec![
+///                 MyData { id: 1, text: "doc 1".into(), category: "a".into() },
+///                 MyData { id: 2, text: "doc 2".into(), category: "b".into() },
+///             ])
+///         },
+///     );
+/// }
+/// ```
+pub fn define_simple_retriever<I, R, F, Fut>(
+    registry: &Registry,
+    options: SimpleRetrieverOptions,
+    handler: F,
+) -> RetrieverAction<I>
+where
+    I: JsonSchema + DeserializeOwned + Send + Sync + Clone + Serialize + 'static,
+    R: IntoDocument + Serialize + Send + Sync + 'static,
+    F: Fn(RetrieverRequest<I>, genkit_core::action::ActionFnArg<()>) -> Fut + Send + Sync + 'static,
+    Fut: Future<Output = Result<Vec<R>>> + Send + 'static,
+{
+    let handler = Arc::new(handler);
+    let wrapped_handler =
+        move |req: RetrieverRequest<I>, args: genkit_core::action::ActionFnArg<()>| {
+            let handler = Arc::clone(&handler);
+            async move {
+                let result = handler(req, args).await?;
+                let documents = result.iter().map(item_to_document).collect();
+                Ok(RetrieverResponse { documents })
+            }
+        };
+    define_retriever(registry, &options.name, wrapped_handler)
+}
+
 //
 // High-level API
 //
